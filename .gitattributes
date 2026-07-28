@@ -1,0 +1,2 @@
+* text=auto eol=lf
+bin/*.js text eol=lf

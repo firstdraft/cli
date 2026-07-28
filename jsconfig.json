@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["ES2023"],
+    "maxNodeModuleJsDepth": 0,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": false,
+    "strict": true,
+    "target": "ES2023",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "include": [
+    "bin/**/*.js",
+    "eslint.config.js",
+    "scripts/**/*.js",
+    "src/**/*.js",
+    "test/**/*.js"
+  ]
+}

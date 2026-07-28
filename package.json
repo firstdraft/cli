@@ -1,0 +1,46 @@
+{
+  "name": "firstdraft",
+  "version": "0.0.0",
+  "description": "Command-line interface for First Draft",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "firstdraft": "./bin/firstdraft.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firstdraft/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/firstdraft/cli/issues"
+  },
+  "homepage": "https://github.com/firstdraft/cli#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run pack:check && npm run pack:smoke",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "pack:check": "node scripts/check-pack.js",
+    "pack:smoke": "node scripts/smoke-package.js",
+    "test": "node scripts/run-tests.js",
+    "typecheck": "tsc --project jsconfig.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.1",
+    "eslint": "10.8.0",
+    "globals": "17.8.0",
+    "prettier": "3.9.6",
+    "typescript": "7.0.2"
+  }
+}
