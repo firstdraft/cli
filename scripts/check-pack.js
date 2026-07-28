@@ -26,6 +26,8 @@ if (result.status !== 0) {
     "bin/firstdraft.js",
     "package.json",
     "src/cli.js",
+    "src/commands/plan-init.js",
+    "src/uuid-v7.js",
     "src/version.js",
   ]);
 }
