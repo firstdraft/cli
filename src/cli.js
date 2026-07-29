@@ -33,8 +33,9 @@ Usage:
   firstdraft plan <command> [options]
 
 Commands:
-  init  Create a local empty Foundation Plan
-  push  Send the local Foundation Plan to First Draft
+  init        Create a local empty Foundation Plan
+  subject-id  Generate a UUIDv7 for a new Plan subject
+  push        Send the local Foundation Plan to First Draft
 
 Options:
   -h, --help  Show help
@@ -53,6 +54,18 @@ Environment:
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
+`;
+
+const PLAN_SUBJECT_ID_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan subject-id
+
+Prints one UUIDv7 for a new independently mutable Plan subject.
+The command reads no files and makes no network request.
+
+Options:
+  -h, --help  Show help
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI
@@ -89,6 +102,8 @@ const PLAN_PUSH_NETWORK_ERROR =
   "Could not complete the First Draft request. The Plan may have been accepted; local state was not changed.\n";
 const PLAN_PUSH_PROTOCOL_ERROR =
   "First Draft returned an unexpected response. The Plan may have been accepted; local state was not changed.\n";
+const PLAN_SUBJECT_ID_USAGE_ERROR =
+  "Invalid arguments.\nRun 'firstdraft plan subject-id --help' for usage.\n";
 
 /**
  * @typedef {object} Writer
@@ -101,7 +116,9 @@ const PLAN_PUSH_PROTOCOL_ERROR =
  * @property {Writer} stdout
  * @property {Writer} stderr
  * @property {string} [cwd]
+ * @property {() => string} [getCwd]
  * @property {() => string} [createProjectId]
+ * @property {() => string} [createSubjectId]
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
@@ -117,6 +134,7 @@ const PLAN_PUSH_PROTOCOL_ERROR =
  * @property {Writer} stderr
  * @property {string} cwd
  * @property {() => string} createProjectId
+ * @property {() => string} createSubjectId
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
@@ -125,13 +143,19 @@ const PLAN_PUSH_PROTOCOL_ERROR =
  * @property {string} [apiUrl]
  */
 
+/**
+ * @typedef {Omit<CommandOptions, "cwd"> & {cwd?: string, getCwd: () => string}} PlanCommandOptions
+ */
+
 /** @param {RunOptions} options */
 export async function run({
   argv,
   stdout,
   stderr,
-  cwd = process.cwd(),
+  cwd,
+  getCwd = process.cwd,
   createProjectId = generateUuidV7,
+  createSubjectId = generateUuidV7,
   fileSystem,
   fetchFunction,
   planPushFileSystem,
@@ -145,7 +169,9 @@ export async function run({
       stdout,
       stderr,
       cwd,
+      getCwd,
       createProjectId,
+      createSubjectId,
       fileSystem,
       fetchFunction,
       planPushFileSystem,
@@ -201,13 +227,15 @@ function runRoot({ argv, stdout, stderr }) {
   return 0;
 }
 
-/** @param {CommandOptions} options */
+/** @param {PlanCommandOptions} options */
 async function runPlan({
   argv,
   stdout,
   stderr,
   cwd,
+  getCwd,
   createProjectId,
+  createSubjectId,
   fileSystem,
   fetchFunction,
   planPushFileSystem,
@@ -220,7 +248,7 @@ async function runPlan({
       argv: argv.slice(1),
       stdout,
       stderr,
-      cwd,
+      cwd: cwd ?? getCwd(),
       createProjectId,
       fileSystem,
     });
@@ -231,12 +259,21 @@ async function runPlan({
       argv: argv.slice(1),
       stdout,
       stderr,
-      cwd,
+      cwd: cwd ?? getCwd(),
       fetchFunction,
       planPushFileSystem,
       createTemporaryId,
       createRequestSignal,
       apiUrl,
+    });
+  }
+
+  if (argv[0] === "subject-id") {
+    return runPlanSubjectId({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      createSubjectId,
     });
   }
 
@@ -265,6 +302,33 @@ async function runPlan({
   }
 
   stdout.write(PLAN_HELP);
+  return 0;
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "createSubjectId">} options
+ */
+function runPlanSubjectId({ argv, stdout, stderr, createSubjectId }) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: { help: { type: "boolean", short: "h" } },
+      allowPositionals: false,
+      strict: true,
+    }),
+  );
+
+  if (!parsed) {
+    stderr.write(PLAN_SUBJECT_ID_USAGE_ERROR);
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(PLAN_SUBJECT_ID_HELP);
+    return 0;
+  }
+
+  stdout.write(`${createSubjectId()}\n`);
   return 0;
 }
 
@@ -365,7 +429,9 @@ async function runPlanPush({
   return 0;
 }
 
-/** @param {CommandOptions} options */
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "createProjectId" | "fileSystem">} options
+ */
 function runPlanInit({
   argv,
   stdout,
