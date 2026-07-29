@@ -1,6 +1,15 @@
 import { parseArgs } from "node:util";
 
-import { initializePlan, isFileSystemError } from "./commands/plan-init.js";
+import { initializePlan } from "./commands/plan-init.js";
+import {
+  PlanPushConfigurationError,
+  PlanPushLocalError,
+  PlanPushNetworkError,
+  PlanPushProtocolError,
+  PlanPushStateWriteError,
+  pushPlan,
+} from "./commands/plan-push.js";
+import { isFileSystemError } from "./file-system.js";
 import { generateUuidV7 } from "./uuid-v7.js";
 import { VERSION } from "./version.js";
 
@@ -25,9 +34,25 @@ Usage:
 
 Commands:
   init  Create a local empty Foundation Plan
+  push  Send the local Foundation Plan to First Draft
 
 Options:
   -h, --help  Show help
+`;
+
+const PLAN_PUSH_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan push
+
+Options:
+  -h, --help  Show help
+
+Environment:
+  FIRSTDRAFT_API_URL  Override the initial API origin
+
+The first successful push saves its API origin in .firstdraft/state.json.
+Later pushes reject a different origin.
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI
@@ -54,6 +79,16 @@ const PLAN_INIT_USAGE_ERROR =
 const PLAN_INIT_ERROR =
   "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.\n";
 const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
+const PLAN_PUSH_USAGE_ERROR =
+  "Invalid arguments.\nRun 'firstdraft plan push --help' for usage.\n";
+const PLAN_PUSH_CONFIGURATION_ERROR =
+  "Invalid First Draft API configuration.\nRun 'firstdraft plan push --help' for usage.\n";
+const PLAN_PUSH_LOCAL_ERROR =
+  "Could not read the local First Draft Plan or state. No network request was made.\n";
+const PLAN_PUSH_NETWORK_ERROR =
+  "Could not complete the First Draft request. The Plan may have been accepted; local state was not changed.\n";
+const PLAN_PUSH_PROTOCOL_ERROR =
+  "First Draft returned an unexpected response. The Plan may have been accepted; local state was not changed.\n";
 
 /**
  * @typedef {object} Writer
@@ -68,6 +103,11 @@ const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
  * @property {string} [cwd]
  * @property {() => string} [createProjectId]
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
+ * @property {() => string} [createTemporaryId]
+ * @property {() => AbortSignal} [createRequestSignal]
+ * @property {string} [apiUrl]
  */
 
 /**
@@ -78,16 +118,26 @@ const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
  * @property {string} cwd
  * @property {() => string} createProjectId
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
+ * @property {() => string} [createTemporaryId]
+ * @property {() => AbortSignal} [createRequestSignal]
+ * @property {string} [apiUrl]
  */
 
 /** @param {RunOptions} options */
-export function run({
+export async function run({
   argv,
   stdout,
   stderr,
   cwd = process.cwd(),
   createProjectId = generateUuidV7,
   fileSystem,
+  fetchFunction,
+  planPushFileSystem,
+  createTemporaryId,
+  createRequestSignal,
+  apiUrl = process.env.FIRSTDRAFT_API_URL,
 }) {
   if (argv[0] === "plan") {
     return runPlan({
@@ -97,6 +147,11 @@ export function run({
       cwd,
       createProjectId,
       fileSystem,
+      fetchFunction,
+      planPushFileSystem,
+      createTemporaryId,
+      createRequestSignal,
+      apiUrl,
     });
   }
 
@@ -147,7 +202,19 @@ function runRoot({ argv, stdout, stderr }) {
 }
 
 /** @param {CommandOptions} options */
-function runPlan({ argv, stdout, stderr, cwd, createProjectId, fileSystem }) {
+async function runPlan({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  createProjectId,
+  fileSystem,
+  fetchFunction,
+  planPushFileSystem,
+  createTemporaryId,
+  createRequestSignal,
+  apiUrl,
+}) {
   if (argv[0] === "init") {
     return runPlanInit({
       argv: argv.slice(1),
@@ -156,6 +223,20 @@ function runPlan({ argv, stdout, stderr, cwd, createProjectId, fileSystem }) {
       cwd,
       createProjectId,
       fileSystem,
+    });
+  }
+
+  if (argv[0] === "push") {
+    return runPlanPush({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd,
+      fetchFunction,
+      planPushFileSystem,
+      createTemporaryId,
+      createRequestSignal,
+      apiUrl,
     });
   }
 
@@ -184,6 +265,103 @@ function runPlan({ argv, stdout, stderr, cwd, createProjectId, fileSystem }) {
   }
 
   stdout.write(PLAN_HELP);
+  return 0;
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl">} options
+ */
+async function runPlanPush({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  fetchFunction,
+  planPushFileSystem,
+  createTemporaryId,
+  createRequestSignal,
+  apiUrl,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: { help: { type: "boolean", short: "h" } },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    stderr.write(PLAN_PUSH_USAGE_ERROR);
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(PLAN_PUSH_HELP);
+    return 0;
+  }
+
+  let result;
+  try {
+    result = await pushPlan({
+      cwd,
+      apiUrl,
+      fetchFunction,
+      fileSystem: planPushFileSystem,
+      createTemporaryId,
+      createRequestSignal,
+    });
+  } catch (error) {
+    if (error instanceof PlanPushConfigurationError) {
+      stderr.write(PLAN_PUSH_CONFIGURATION_ERROR);
+      return 2;
+    }
+
+    if (error instanceof PlanPushLocalError) {
+      stderr.write(PLAN_PUSH_LOCAL_ERROR);
+      return 1;
+    }
+
+    if (error instanceof PlanPushNetworkError) {
+      stderr.write(PLAN_PUSH_NETWORK_ERROR);
+      return 1;
+    }
+
+    if (error instanceof PlanPushProtocolError) {
+      stderr.write(PLAN_PUSH_PROTOCOL_ERROR);
+      return 1;
+    }
+
+    if (error instanceof PlanPushStateWriteError) {
+      writeJson(stderr, {
+        error: "local_state_not_saved",
+        detail:
+          "The Plan was accepted, but its ETag could not be saved. Do not push again until local state is repaired.",
+        recovery_state: error.recoveryState,
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+
+  if (!("etag" in result)) {
+    if (result.body === null) {
+      stderr.write(`First Draft rejected the Plan (HTTP ${result.status}).\n`);
+    } else {
+      writeJson(stderr, result.body);
+    }
+    return 1;
+  }
+
+  writeJson(stdout, {
+    outcome: result.outcome,
+    etag: result.etag,
+    project: result.body.project,
+    foundation_plan: result.body.foundation_plan,
+    diagnostics: result.body.diagnostics,
+  });
   return 0;
 }
 
@@ -328,4 +506,9 @@ function isParseArgsError(error) {
     typeof error.code === "string" &&
     error.code.startsWith("ERR_PARSE_ARGS_")
   );
+}
+
+/** @param {Writer} writer @param {unknown} value */
+function writeJson(writer, value) {
+  writer.write(`${JSON.stringify(value, null, 2)}\n`);
 }

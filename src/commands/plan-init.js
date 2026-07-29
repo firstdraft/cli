@@ -50,16 +50,6 @@ export function initializePlan({
   );
 }
 
-/** @param {unknown} error */
-export function isFileSystemError(error) {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    typeof error.code === "string" &&
-    !error.code.startsWith("ERR_")
-  );
-}
-
 /** @param {string} applicationKey @param {string} name */
 function emptyPlan(applicationKey, name) {
   return {
