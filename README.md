@@ -4,7 +4,8 @@
 built for agents that author and review Foundation Plans with their users.
 
 The package is not released yet. This repository contains the auditable command shell, local Foundation Plan
-initialization, and conditional whole-document push; release behavior will arrive in reviewed increments.
+initialization, subject identity generation, and conditional whole-document push; release behavior will arrive in
+reviewed increments.
 
 ## Requirements
 
@@ -30,6 +31,19 @@ firstdraft plan init --application-key oscar_party --name "Oscar Party"
 This creates an empty `sketch/0.19` Plan and client-generated Project ID under `.firstdraft/`. A nested ignore file
 keeps that local scratch area out of Git without changing the project's own `.gitignore`. Initialization makes no
 network request and refuses to replace an existing `.firstdraft` path.
+
+## Add Foundation Plan subjects
+
+Generate an identity before adding each new independently mutable authored subject:
+
+```sh
+firstdraft plan subject-id
+```
+
+The command prints one UUIDv7 for the subject's `subject_uuid`. It does not read or modify the Plan, reserve the
+value, or make a network request. Preserve that UUID when renaming the subject or moving it to a different semantic
+owner without changing its kind. Use a new UUID for a replacement concept. Readable keys and paths may change and
+remain the document's links; the UUID preserves continuity between complete-document pushes.
 
 ## Push a Foundation Plan
 

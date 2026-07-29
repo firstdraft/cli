@@ -26,8 +26,9 @@ Usage:
   firstdraft plan <command> [options]
 
 Commands:
-  init  Create a local empty Foundation Plan
-  push  Send the local Foundation Plan to First Draft
+  init        Create a local empty Foundation Plan
+  subject-id  Generate a UUIDv7 for a new Plan subject
+  push        Send the local Foundation Plan to First Draft
 
 Options:
   -h, --help  Show help
@@ -72,7 +73,7 @@ const EXPECTED_STATE = `{
 }
 `;
 
-test("plan help describes the available command", async () => {
+test("plan help describes the available commands", async () => {
   assert.deepEqual(await invoke(["plan"]), {
     status: 0,
     stdout: PLAN_HELP,

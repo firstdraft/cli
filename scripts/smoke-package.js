@@ -56,6 +56,17 @@ try {
 
   assert.equal(execution.stdout, `${packageMetadata.version}\n`);
   assert.equal(execution.stderr, "");
+
+  const subjectId = runNpm(
+    ["exec", "--offline", "--", "firstdraft", "plan", "subject-id"],
+    installationDirectory,
+  );
+
+  assert.match(
+    subjectId.stdout,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n$/,
+  );
+  assert.equal(subjectId.stderr, "");
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
