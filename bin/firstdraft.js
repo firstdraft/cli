@@ -5,7 +5,7 @@ import { run } from "../src/cli.js";
 process.stdout.on("error", handleStreamError);
 process.stderr.on("error", handleStreamError);
 
-process.exitCode = run({
+process.exitCode = await run({
   argv: process.argv.slice(2),
   stdout: process.stdout,
   stderr: process.stderr,

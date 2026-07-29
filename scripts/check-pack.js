@@ -27,6 +27,8 @@ if (result.status !== 0) {
     "package.json",
     "src/cli.js",
     "src/commands/plan-init.js",
+    "src/commands/plan-push.js",
+    "src/file-system.js",
     "src/uuid-v7.js",
     "src/version.js",
   ]);

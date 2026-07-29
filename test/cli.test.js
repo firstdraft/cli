@@ -28,30 +28,30 @@ const packageMetadata = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
 
-test("no arguments show help", () => {
-  const result = invoke([]);
+test("no arguments show help", async () => {
+  const result = await invoke([]);
 
   assert.deepEqual(result, { status: 0, stdout: HELP, stderr: "" });
 });
 
-test("help uses long and short options", () => {
-  const long = invoke(["--help"]);
-  const short = invoke(["-h"]);
+test("help uses long and short options", async () => {
+  const long = await invoke(["--help"]);
+  const short = await invoke(["-h"]);
 
   assert.deepEqual(long, { status: 0, stdout: HELP, stderr: "" });
   assert.deepEqual(short, long);
 });
 
-test("version matches the package through long and short options", () => {
-  const long = invoke(["--version"]);
-  const short = invoke(["-V"]);
+test("version matches the package through long and short options", async () => {
+  const long = await invoke(["--version"]);
+  const short = await invoke(["-V"]);
 
   assert.equal(VERSION, packageMetadata.version);
   assert.deepEqual(long, { status: 0, stdout: `${VERSION}\n`, stderr: "" });
   assert.deepEqual(short, long);
 });
 
-test("an unknown command returns a non-echoing usage error", () => {
+test("an unknown command returns a non-echoing usage error", async () => {
   const canary = "\u001b[31mcanary-secret-command\n";
 
   for (const argv of [
@@ -61,7 +61,7 @@ test("an unknown command returns a non-echoing usage error", () => {
     [canary, "--version"],
     ["--version", canary],
   ]) {
-    const result = invoke(argv);
+    const result = await invoke(argv);
 
     assert.deepEqual(result, {
       status: 2,
@@ -73,40 +73,44 @@ test("an unknown command returns a non-echoing usage error", () => {
   }
 });
 
-test("an unknown option returns a non-echoing usage error", () => {
+test("an unknown option returns a non-echoing usage error", async () => {
   for (const argv of [
     ["--canary-secret-option"],
     ["--canary-secret-option", "--help"],
     ["--help", "--canary-secret-option"],
   ]) {
-    const result = invoke(argv);
+    const result = await invoke(argv);
 
     assert.deepEqual(result, { status: 2, stdout: "", stderr: USAGE_ERROR });
     assert.doesNotMatch(result.stderr, /canary-secret/);
   }
 });
 
-test("recognized root options have deterministic precedence", () => {
+test("recognized root options have deterministic precedence", async () => {
   for (const argv of [
     ["--help", "--version"],
     ["-hV"],
     ["--help", "--help"],
     ["--"],
   ]) {
-    assert.deepEqual(invoke(argv), { status: 0, stdout: HELP, stderr: "" });
+    assert.deepEqual(await invoke(argv), {
+      status: 0,
+      stdout: HELP,
+      stderr: "",
+    });
   }
 
-  assert.deepEqual(invoke(["--version", "--version"]), {
+  assert.deepEqual(await invoke(["--version", "--version"]), {
     status: 0,
     stdout: `${VERSION}\n`,
     stderr: "",
   });
 });
 
-test("argument parsing does not mutate injected input", () => {
+test("argument parsing does not mutate injected input", async () => {
   const argv = Object.freeze(["--version"]);
 
-  assert.equal(invoke(argv).status, 0);
+  assert.equal((await invoke(argv)).status, 0);
   assert.deepEqual(argv, ["--version"]);
 });
 
@@ -159,11 +163,11 @@ test("the executable preserves its status when an output pipe closes", async () 
 });
 
 /** @param {readonly string[]} argv */
-function invoke(argv) {
+async function invoke(argv) {
   let stdout = "";
   let stderr = "";
 
-  const status = run({
+  const status = await run({
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },

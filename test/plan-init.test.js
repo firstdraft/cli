@@ -27,6 +27,7 @@ Usage:
 
 Commands:
   init  Create a local empty Foundation Plan
+  push  Send the local Foundation Plan to First Draft
 
 Options:
   -h, --help  Show help
@@ -71,32 +72,32 @@ const EXPECTED_STATE = `{
 }
 `;
 
-test("plan help describes the available command", () => {
-  assert.deepEqual(invoke(["plan"]), {
+test("plan help describes the available command", async () => {
+  assert.deepEqual(await invoke(["plan"]), {
     status: 0,
     stdout: PLAN_HELP,
     stderr: "",
   });
-  assert.deepEqual(invoke(["plan", "--help"]), {
+  assert.deepEqual(await invoke(["plan", "--help"]), {
     status: 0,
     stdout: PLAN_HELP,
     stderr: "",
   });
-  assert.deepEqual(invoke(["plan", "-h"]), {
+  assert.deepEqual(await invoke(["plan", "-h"]), {
     status: 0,
     stdout: PLAN_HELP,
     stderr: "",
   });
 });
 
-test("plan init help does not require creation options", () => {
+test("plan init help does not require creation options", async () => {
   for (const argv of [
     ["plan", "init", "--help"],
     ["plan", "init", "-h"],
     ["plan", "init", "--help", "--help"],
     ["plan", "init", "-h", "-h"],
   ]) {
-    assert.deepEqual(invoke(argv), {
+    assert.deepEqual(await invoke(argv), {
       status: 0,
       stdout: PLAN_INIT_HELP,
       stderr: "",
@@ -104,7 +105,7 @@ test("plan init help does not require creation options", () => {
   }
 });
 
-test("plan commands return non-echoing usage errors", () => {
+test("plan commands return non-echoing usage errors", async () => {
   const canary = "canary-secret-command";
 
   for (const argv of [
@@ -112,7 +113,7 @@ test("plan commands return non-echoing usage errors", () => {
     ["plan", canary, "--help"],
     ["plan", "--help", canary],
   ]) {
-    const result = invoke(argv);
+    const result = await invoke(argv);
 
     assert.deepEqual(result, {
       status: 2,
@@ -126,7 +127,7 @@ test("plan commands return non-echoing usage errors", () => {
     ["plan", "--canary-secret-option"],
     ["plan", "--canary-secret-option", "--help"],
   ]) {
-    const result = invoke(argv);
+    const result = await invoke(argv);
 
     assert.deepEqual(result, {
       status: 2,
@@ -137,9 +138,9 @@ test("plan commands return non-echoing usage errors", () => {
   }
 });
 
-test("plan init creates exact deterministic local files", (context) => {
+test("plan init creates exact deterministic local files", async (context) => {
   const cwd = temporaryDirectory(context, "firstdraft init ünicode ");
-  const result = invoke(
+  const result = await invoke(
     [
       "plan",
       "init",
@@ -212,11 +213,11 @@ test("the executable initializes with a production UUIDv7", (context) => {
   );
 });
 
-test("the nested ignore file hides the complete local directory from Git", (context) => {
+test("the nested ignore file hides the complete local directory from Git", async (context) => {
   const cwd = temporaryDirectory(context);
   runGit(cwd, ["init", "--quiet"]);
 
-  const result = invoke(
+  const result = await invoke(
     ["plan", "init", "--application-key=oscar_party", "--name=Oscar Party"],
     { cwd, createProjectId: () => PROJECT_ID },
   );
@@ -240,13 +241,13 @@ test("the nested ignore file hides the complete local directory from Git", (cont
   assert.match(ignored.stdout, /\.firstdraft\/\.gitignore:1:\*/);
 });
 
-test("an existing root gitignore remains byte-for-byte unchanged", (context) => {
+test("an existing root gitignore remains byte-for-byte unchanged", async (context) => {
   const cwd = temporaryDirectory(context);
   const gitignore = path.join(cwd, ".gitignore");
   const original = Buffer.from([0x61, 0x0d, 0x0a, 0x62, 0x0a, 0xff]);
   writeFileSync(gitignore, original);
 
-  const result = invoke(
+  const result = await invoke(
     [
       "plan",
       "init",
@@ -262,7 +263,7 @@ test("an existing root gitignore remains byte-for-byte unchanged", (context) => 
   assert.deepEqual(readFileSync(gitignore), original);
 });
 
-test("plan init validates every argument before randomness or filesystem access", () => {
+test("plan init validates every argument before randomness or filesystem access", async () => {
   const invalidArguments = [
     ["plan", "init"],
     ["plan", "init", "--application-key", "oscar_party"],
@@ -331,7 +332,7 @@ test("plan init validates every argument before randomness or filesystem access"
   ];
 
   for (const argv of invalidArguments) {
-    const result = invoke(argv, {
+    const result = await invoke(argv, {
       createProjectId: () => {
         throw new Error("randomness must not run");
       },
@@ -347,11 +348,11 @@ test("plan init validates every argument before randomness or filesystem access"
   }
 });
 
-test("plan init accepts ordinary astral Unicode in the application name", (context) => {
+test("plan init accepts ordinary astral Unicode in the application name", async (context) => {
   const cwd = temporaryDirectory(context);
   const name = "Oscar Party \ud83c\udf89";
 
-  const result = invoke(
+  const result = await invoke(
     ["plan", "init", "--application-key", "oscar_party", "--name", name],
     { cwd, createProjectId: () => PROJECT_ID },
   );
@@ -363,13 +364,13 @@ test("plan init accepts ordinary astral Unicode in the application name", (conte
   assert.equal(plan.application.name, name);
 });
 
-test("plan init never overwrites an existing local path", (context) => {
+test("plan init never overwrites an existing local path", async (context) => {
   const directoryCwd = temporaryDirectory(context);
   const directory = path.join(directoryCwd, ".firstdraft");
   mkdirSync(directory);
   writeFileSync(path.join(directory, "canary.txt"), "canary-secret-directory");
 
-  const directoryResult = invokeValidInit(directoryCwd);
+  const directoryResult = await invokeValidInit(directoryCwd);
   assertInitializationFailure(directoryResult);
   assert.equal(
     readFileSync(path.join(directory, "canary.txt"), "utf8"),
@@ -380,7 +381,7 @@ test("plan init never overwrites an existing local path", (context) => {
   const file = path.join(fileCwd, ".firstdraft");
   writeFileSync(file, "canary-secret-file");
 
-  const fileResult = invokeValidInit(fileCwd);
+  const fileResult = await invokeValidInit(fileCwd);
   assertInitializationFailure(fileResult);
   assert.equal(readFileSync(file, "utf8"), "canary-secret-file");
 });
@@ -388,12 +389,12 @@ test("plan init never overwrites an existing local path", (context) => {
 test(
   "plan init refuses an existing symlink without following it",
   { skip: process.platform === "win32" },
-  (context) => {
+  async (context) => {
     const cwd = temporaryDirectory(context);
     const target = temporaryDirectory(context);
     symlinkSync(target, path.join(cwd, ".firstdraft"), "dir");
 
-    const result = invokeValidInit(cwd);
+    const result = await invokeValidInit(cwd);
 
     assertInitializationFailure(result);
     assert.equal(
@@ -404,16 +405,16 @@ test(
   },
 );
 
-test("a second initialization preserves the first Project", (context) => {
+test("a second initialization preserves the first Project", async (context) => {
   const cwd = temporaryDirectory(context);
-  const first = invokeValidInit(cwd);
+  const first = await invokeValidInit(cwd);
   const directory = path.join(cwd, ".firstdraft");
   const originalPlan = readFileSync(
     path.join(directory, "foundation-plan.json"),
   );
   const originalState = readFileSync(path.join(directory, "state.json"));
 
-  const second = invoke(
+  const second = await invoke(
     [
       "plan",
       "init",
@@ -437,7 +438,7 @@ test("a second initialization preserves the first Project", (context) => {
   );
 });
 
-test("partial filesystem failures stop immediately without cleanup", () => {
+test("partial filesystem failures stop immediately without cleanup", async () => {
   const operations = [
     "mkdir",
     "write:.gitignore",
@@ -453,14 +454,14 @@ test("partial filesystem failures stop immediately without cleanup", () => {
     /** @type {string[]} */
     const calls = [];
     const fileSystem = recordingFileSystem(calls, failureIndex);
-    const result = invokeValidInit("/unused", { fileSystem });
+    const result = await invokeValidInit("/unused", { fileSystem });
 
     assertInitializationFailure(result);
     assert.deepEqual(calls, operations.slice(0, failureIndex + 1));
   }
 });
 
-test("unexpected programming errors remain loud", () => {
+test("unexpected programming errors remain loud", async () => {
   /** @type {import("../src/commands/plan-init.js").FileSystem} */
   const fileSystem = {
     mkdirSync() {
@@ -471,7 +472,7 @@ test("unexpected programming errors remain loud", () => {
     },
   };
 
-  assert.throws(
+  await assert.rejects(
     () => invokeValidInit("/unused", { fileSystem }),
     /programming error/,
   );
@@ -481,11 +482,11 @@ test("unexpected programming errors remain loud", () => {
  * @param {readonly string[]} argv
  * @param {Partial<import("../src/cli.js").RunOptions>} [overrides]
  */
-function invoke(argv, overrides = {}) {
+async function invoke(argv, overrides = {}) {
   let stdout = "";
   let stderr = "";
 
-  const status = run({
+  const status = await run({
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
@@ -499,7 +500,7 @@ function invoke(argv, overrides = {}) {
  * @param {string} cwd
  * @param {Partial<import("../src/cli.js").RunOptions>} [overrides]
  */
-function invokeValidInit(cwd, overrides = {}) {
+async function invokeValidInit(cwd, overrides = {}) {
   return invoke(
     [
       "plan",
