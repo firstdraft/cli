@@ -46,14 +46,21 @@ Environment:
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
 `;
-const PLAN_PUSH_CONFIGURATION_ERROR =
-  "Invalid First Draft API configuration.\nRun 'firstdraft plan push --help' for usage.\n";
-const PLAN_PUSH_LOCAL_ERROR =
-  "Could not read the local First Draft Plan or state. No network request was made.\n";
-const PLAN_PUSH_NETWORK_ERROR =
-  "Could not complete the First Draft request. The Plan may have been accepted; local state was not changed.\n";
-const PLAN_PUSH_PROTOCOL_ERROR =
-  "First Draft returned an unexpected response. The Plan may have been accepted; local state was not changed.\n";
+const PLAN_PUSH_INVALID_ARGUMENTS_ERROR = jsonOutput({
+  error: "invalid_arguments",
+  detail: "Invalid arguments. Run 'firstdraft plan push --help' for usage.",
+});
+const PLAN_PUSH_CONFIGURATION_ERROR = jsonOutput({
+  error: "invalid_configuration",
+  detail:
+    "Invalid First Draft API configuration. Run 'firstdraft plan push --help' for usage.",
+});
+const PLAN_PUSH_LOCAL_ERROR = jsonOutput({
+  error: "local_input_unreadable",
+  detail:
+    "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.",
+});
+const PLAN_PUSH_OUTCOME_UNKNOWN_ERROR = requestOutcomeUnknownOutput();
 
 test("plan push help has no local or network prerequisites", async () => {
   const inaccessible = () => {
@@ -275,6 +282,7 @@ test("usage errors happen before local or network access", async () => {
 
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
+    assert.equal(result.stderr, PLAN_PUSH_INVALID_ARGUMENTS_ERROR);
     assert.doesNotMatch(result.stderr, /canary-secret/);
   }
 });
@@ -335,10 +343,105 @@ test("HTTP diagnostics and problems leave local state byte-for-byte unchanged", 
     assert.deepEqual(result, {
       status: 1,
       stdout: "",
-      stderr: `${JSON.stringify(responseBody, null, 2)}\n`,
+      stderr: serverRejectedOutput(status, responseBody),
     });
     assert.deepEqual(stateSource(cwd), before);
   }
+});
+
+test("server rejection envelopes expose only validated response fields", async (context) => {
+  const cwd = await initializedDirectory(context);
+  const sourceSha256 = sha256(planSource(cwd));
+  const diagnostic = {
+    code: "foundation_plan.example",
+    severity: "error",
+    message: "The Plan needs a supported value.",
+    location: {
+      source_pointer: "/application/entities/0",
+      canary: "canary-secret-location",
+    },
+    subject: {
+      kind: "entity",
+      readable_path: "movie",
+      subject_uuid: PROJECT_ID,
+      canary: "canary-secret-subject",
+    },
+    related_locations: [
+      { line: 1, column: 2, canary: "canary-secret-related" },
+    ],
+    suggestions: ["Choose a supported value.", 7],
+    canary: "canary-secret-diagnostic",
+  };
+  const body = {
+    source_sha256: sourceSha256,
+    diagnostics: [diagnostic],
+    canary: "canary-secret-response",
+  };
+  const result = await invoke(["plan", "push"], {
+    cwd,
+    apiUrl: API_URL,
+    fetchFunction: recordingFetch(jsonResponse(body, 422), []),
+  });
+
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: "server_rejected",
+    detail: "First Draft rejected the Plan.",
+    status: 422,
+    response: {
+      source_sha256: sourceSha256,
+      diagnostics: [
+        {
+          code: diagnostic.code,
+          severity: diagnostic.severity,
+          message: diagnostic.message,
+          location: { source_pointer: "/application/entities/0" },
+          subject: {
+            kind: "entity",
+            readable_path: "movie",
+            subject_uuid: PROJECT_ID,
+          },
+          related_locations: [{ line: 1, column: 2 }],
+        },
+      ],
+    },
+  });
+  assert.doesNotMatch(result.stderr, /canary-secret/);
+
+  const problem = {
+    type: "about:blank",
+    title: "Precondition Failed",
+    status: 412,
+    code: "precondition_failed",
+    detail: "The Foundation Plan has changed.",
+    source_sha256: "canary-secret-unverified-digest",
+    diagnostics: [
+      {
+        code: "canary-secret-code",
+        severity: "error",
+        message: "canary-secret-message",
+      },
+    ],
+    canary: "canary-secret-problem",
+  };
+  const problemResult = await invoke(["plan", "push"], {
+    cwd,
+    apiUrl: API_URL,
+    fetchFunction: recordingFetch(problemResponse(problem, 412), []),
+  });
+
+  assert.deepEqual(JSON.parse(problemResult.stderr), {
+    error: "server_rejected",
+    detail: "First Draft rejected the Plan.",
+    status: 412,
+    response: {
+      type: "about:blank",
+      title: problem.title,
+      status: 412,
+      code: problem.code,
+      detail: problem.detail,
+    },
+  });
+  assert.doesNotMatch(problemResult.stderr, /canary-secret/);
 });
 
 test("a stale update preserves the prior ETag and exact local state", async (context) => {
@@ -369,7 +472,7 @@ test("a stale update preserves the prior ETag and exact local state", async (con
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: `${JSON.stringify(problem, null, 2)}\n`,
+    stderr: serverRejectedOutput(412, problem),
   });
   assert.deepEqual(stateSource(cwd), before);
   assert.equal(readState(cwd).foundation_plan_etag, FIRST_ETAG);
@@ -391,7 +494,7 @@ test("an update rejects a create status before changing local state", async (con
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: PLAN_PUSH_PROTOCOL_ERROR,
+    stderr: requestOutcomeUnknownOutput(201),
   });
   assert.deepEqual(stateSource(cwd), before);
   assert.equal(readState(cwd).foundation_plan_etag, FIRST_ETAG);
@@ -429,7 +532,7 @@ test("422 diagnostics must identify the exact submitted bytes", async (context) 
     assert.deepEqual(result, {
       status: 1,
       stdout: "",
-      stderr: PLAN_PUSH_PROTOCOL_ERROR,
+      stderr: requestOutcomeUnknownOutput(422),
     });
     assert.deepEqual(stateSource(cwd), before);
   }
@@ -456,12 +559,12 @@ test("422 diagnostics must identify the exact submitted bytes", async (context) 
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: PLAN_PUSH_PROTOCOL_ERROR,
+    stderr: requestOutcomeUnknownOutput(422),
   });
   assert.deepEqual(stateSource(cwd), before);
 });
 
-test("non-JSON HTTP failures are reported without echoing their body", async (context) => {
+test("unverified HTTP failures have an ambiguous outcome without echoing their body", async (context) => {
   const cwd = await initializedDirectory(context);
   const before = stateSource(cwd);
   const result = await invoke(["plan", "push"], {
@@ -476,7 +579,7 @@ test("non-JSON HTTP failures are reported without echoing their body", async (co
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: "First Draft rejected the Plan (HTTP 503).\n",
+    stderr: requestOutcomeUnknownOutput(503),
   });
   assert.doesNotMatch(result.stderr, /canary-secret/);
   assert.deepEqual(stateSource(cwd), before);
@@ -496,7 +599,33 @@ test("transport failures disclose the ambiguous outcome without leaking errors",
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: PLAN_PUSH_NETWORK_ERROR,
+    stderr: PLAN_PUSH_OUTCOME_UNKNOWN_ERROR,
+  });
+  assert.doesNotMatch(result.stderr, /canary-secret/);
+  assert.deepEqual(stateSource(cwd), before);
+});
+
+test("response stream failures retain the received status without leaking errors", async (context) => {
+  const cwd = await initializedDirectory(context);
+  const before = stateSource(cwd);
+  const response = new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new Error("canary-secret-stream-detail"));
+      },
+    }),
+    { status: 201 },
+  );
+  const result = await invoke(["plan", "push"], {
+    cwd,
+    apiUrl: API_URL,
+    fetchFunction: recordingFetch(response, []),
+  });
+
+  assert.deepEqual(result, {
+    status: 1,
+    stdout: "",
+    stderr: requestOutcomeUnknownOutput(201),
   });
   assert.doesNotMatch(result.stderr, /canary-secret/);
   assert.deepEqual(stateSource(cwd), before);
@@ -541,16 +670,17 @@ test("success responses are bound to the request before state changes", async (c
   for (const makeResponse of sourceMutators) {
     const cwd = await initializedDirectory(context);
     const before = stateSource(cwd);
+    const response = makeResponse(planSource(cwd));
     const result = await invoke(["plan", "push"], {
       cwd,
       apiUrl: API_URL,
-      fetchFunction: recordingFetch(makeResponse(planSource(cwd)), []),
+      fetchFunction: recordingFetch(response, []),
     });
 
     assert.deepEqual(result, {
       status: 1,
       stdout: "",
-      stderr: PLAN_PUSH_PROTOCOL_ERROR,
+      stderr: requestOutcomeUnknownOutput(response.status),
     });
     assert.doesNotMatch(result.stderr, /canary-secret/);
     assert.deepEqual(stateSource(cwd), before);
@@ -755,7 +885,12 @@ test("the Plan is never parsed or reserialized locally", async (context) => {
   assert(Buffer.isBuffer(call.init?.body));
   assert.deepEqual(call.init.body, invalidUtf8);
   assert.equal(result.status, 1);
-  assert.deepEqual(JSON.parse(result.stderr), diagnostic);
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: "server_rejected",
+    detail: "First Draft rejected the Plan.",
+    status: 422,
+    response: diagnostic,
+  });
 });
 
 test("failed atomic state replacements report the accepted ETag", async (context) => {
@@ -876,7 +1011,7 @@ test("oversized success responses stop before local state changes", async (conte
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: PLAN_PUSH_PROTOCOL_ERROR,
+    stderr: requestOutcomeUnknownOutput(201),
   });
   assert.deepEqual(stateSource(cwd), before);
   assert.equal(cancelled, true);
@@ -911,7 +1046,7 @@ test("streamed oversized responses are cancelled at the byte cap", async (contex
   assert.deepEqual(result, {
     status: 1,
     stdout: "",
-    stderr: PLAN_PUSH_PROTOCOL_ERROR,
+    stderr: requestOutcomeUnknownOutput(201),
   });
   assert.deepEqual(stateSource(cwd), before);
   assert.equal(cancelled, true);
@@ -1129,6 +1264,31 @@ function statePath(cwd) {
 /** @param {Record<string, unknown>} state */
 function stateJson(state) {
   return Buffer.from(`${JSON.stringify(state, null, 2)}\n`);
+}
+
+/** @param {unknown} value */
+function jsonOutput(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+/** @param {number} status @param {unknown} [response] */
+function serverRejectedOutput(status, response) {
+  return jsonOutput({
+    error: "server_rejected",
+    detail: "First Draft rejected the Plan.",
+    status,
+    ...(response === undefined ? {} : { response }),
+  });
+}
+
+/** @param {number} [status] */
+function requestOutcomeUnknownOutput(status) {
+  return jsonOutput({
+    error: "request_outcome_unknown",
+    detail:
+      "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.",
+    ...(status === undefined ? {} : { status }),
+  });
 }
 
 /** @param {import("node:test").TestContext} context */

@@ -92,16 +92,15 @@ const PLAN_INIT_USAGE_ERROR =
 const PLAN_INIT_ERROR =
   "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.\n";
 const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
-const PLAN_PUSH_USAGE_ERROR =
-  "Invalid arguments.\nRun 'firstdraft plan push --help' for usage.\n";
-const PLAN_PUSH_CONFIGURATION_ERROR =
-  "Invalid First Draft API configuration.\nRun 'firstdraft plan push --help' for usage.\n";
-const PLAN_PUSH_LOCAL_ERROR =
-  "Could not read the local First Draft Plan or state. No network request was made.\n";
-const PLAN_PUSH_NETWORK_ERROR =
-  "Could not complete the First Draft request. The Plan may have been accepted; local state was not changed.\n";
-const PLAN_PUSH_PROTOCOL_ERROR =
-  "First Draft returned an unexpected response. The Plan may have been accepted; local state was not changed.\n";
+const PLAN_PUSH_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan push --help' for usage.";
+const PLAN_PUSH_INVALID_CONFIGURATION_DETAIL =
+  "Invalid First Draft API configuration. Run 'firstdraft plan push --help' for usage.";
+const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
+  "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.";
+const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
+  "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
+const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
 const PLAN_SUBJECT_ID_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan subject-id --help' for usage.\n";
 
@@ -357,7 +356,10 @@ async function runPlanPush({
   );
 
   if (!parsed || repeatedValueOption(parsed.tokens)) {
-    stderr.write(PLAN_PUSH_USAGE_ERROR);
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_PUSH_INVALID_ARGUMENTS_DETAIL,
+    });
     return 2;
   }
 
@@ -378,22 +380,30 @@ async function runPlanPush({
     });
   } catch (error) {
     if (error instanceof PlanPushConfigurationError) {
-      stderr.write(PLAN_PUSH_CONFIGURATION_ERROR);
+      writeJson(stderr, {
+        error: "invalid_configuration",
+        detail: PLAN_PUSH_INVALID_CONFIGURATION_DETAIL,
+      });
       return 2;
     }
 
     if (error instanceof PlanPushLocalError) {
-      stderr.write(PLAN_PUSH_LOCAL_ERROR);
+      writeJson(stderr, {
+        error: "local_input_unreadable",
+        detail: PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL,
+      });
       return 1;
     }
 
-    if (error instanceof PlanPushNetworkError) {
-      stderr.write(PLAN_PUSH_NETWORK_ERROR);
-      return 1;
-    }
-
-    if (error instanceof PlanPushProtocolError) {
-      stderr.write(PLAN_PUSH_PROTOCOL_ERROR);
+    if (
+      error instanceof PlanPushNetworkError ||
+      error instanceof PlanPushProtocolError
+    ) {
+      writeJson(stderr, {
+        error: "request_outcome_unknown",
+        detail: PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+      });
       return 1;
     }
 
@@ -411,11 +421,22 @@ async function runPlanPush({
   }
 
   if (!("etag" in result)) {
-    if (result.body === null) {
-      stderr.write(`First Draft rejected the Plan (HTTP ${result.status}).\n`);
-    } else {
-      writeJson(stderr, result.body);
+    if (result.responseKind === null) {
+      writeJson(stderr, {
+        error: "request_outcome_unknown",
+        detail: PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL,
+        status: result.status,
+      });
+      return 1;
     }
+
+    const response = safeRejectedResponse(result.responseKind, result.body);
+    writeJson(stderr, {
+      error: "server_rejected",
+      detail: PLAN_PUSH_SERVER_REJECTED_DETAIL,
+      status: result.status,
+      ...(response ? { response } : {}),
+    });
     return 1;
   }
 
@@ -577,4 +598,121 @@ function isParseArgsError(error) {
 /** @param {Writer} writer @param {unknown} value */
 function writeJson(writer, value) {
   writer.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * @param {"diagnostics" | "problem" | null} responseKind
+ * @param {Record<string, unknown> | null} body
+ */
+function safeRejectedResponse(responseKind, body) {
+  if (
+    responseKind === "diagnostics" &&
+    body &&
+    Array.isArray(body.diagnostics)
+  ) {
+    return {
+      source_sha256: body.source_sha256,
+      diagnostics: body.diagnostics.map(safeDiagnostic),
+    };
+  }
+
+  if (responseKind === "problem" && body) {
+    return {
+      ...(body.type === "about:blank" ? { type: body.type } : {}),
+      title: body.title,
+      status: body.status,
+      code: body.code,
+      detail: body.detail,
+    };
+  }
+
+  return null;
+}
+
+/** @param {unknown} value */
+function safeDiagnostic(value) {
+  if (!isRecord(value)) return {};
+
+  const location = safeSourceLocation(value.location);
+  const subject = safeDiagnosticSubject(value.subject);
+  const relatedLocations = safeSourceLocations(value.related_locations);
+  const suggestions = safeSuggestions(value.suggestions);
+
+  return {
+    ...(typeof value.code === "string" ? { code: value.code } : {}),
+    ...(value.severity === "error" || value.severity === "warning"
+      ? { severity: value.severity }
+      : {}),
+    ...(typeof value.message === "string" ? { message: value.message } : {}),
+    ...(location ? { location } : {}),
+    ...(value.subject === null ? { subject: null } : {}),
+    ...(subject ? { subject } : {}),
+    ...(relatedLocations ? { related_locations: relatedLocations } : {}),
+    ...(suggestions ? { suggestions } : {}),
+  };
+}
+
+/** @param {unknown} value */
+function safeSourceLocations(value) {
+  if (!Array.isArray(value)) return null;
+
+  const locations = value.map(safeSourceLocation);
+  return locations.every(Boolean) ? locations : null;
+}
+
+/** @param {unknown} value */
+function safeSuggestions(value) {
+  if (
+    !Array.isArray(value) ||
+    !value.every((suggestion) => typeof suggestion === "string")
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+/** @param {unknown} value */
+function safeSourceLocation(value) {
+  if (!isRecord(value)) return null;
+
+  if (typeof value.source_pointer === "string") {
+    return { source_pointer: value.source_pointer };
+  }
+
+  if (
+    Number.isSafeInteger(value.line) &&
+    Number(value.line) > 0 &&
+    Number.isSafeInteger(value.column) &&
+    Number(value.column) > 0
+  ) {
+    return { line: value.line, column: value.column };
+  }
+
+  return null;
+}
+
+/** @param {unknown} value */
+function safeDiagnosticSubject(value) {
+  if (
+    !isRecord(value) ||
+    typeof value.kind !== "string" ||
+    typeof value.readable_path !== "string" ||
+    (value.subject_uuid !== undefined && typeof value.subject_uuid !== "string")
+  ) {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    readable_path: value.readable_path,
+    ...(typeof value.subject_uuid === "string"
+      ? { subject_uuid: value.subject_uuid }
+      : {}),
+  };
+}
+
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

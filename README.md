@@ -67,6 +67,23 @@ fully verify. Until First Draft has a read or reconciliation endpoint, an accept
 verified may require manual recovery. If a verified response cannot replace local state, preserve the printed
 recovery state; an adjacent `.tmp` file may contain the same private recovery copy.
 
+Every handled `plan push` failure writes exactly one JSON object to standard error. Agents should branch on its
+stable `error` value, not on the human-readable `detail`:
+
+| `error`                   | Exit | Meaning                                                                                                                                                    |
+| ------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_arguments`       |    2 | The command syntax is invalid; no request was made.                                                                                                        |
+| `invalid_configuration`   |    2 | The configured API origin is invalid or conflicts with pinned local state; no request was made.                                                            |
+| `local_input_unreadable`  |    1 | The local Plan or state could not be read; no request was made.                                                                                            |
+| `request_outcome_unknown` |    1 | A sent request or its response could not be verified. Stop and reconcile before pushing again. The object includes `status` when one was received.         |
+| `server_rejected`         |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
+| `local_state_not_saved`   |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
+
+Failure output never includes command arguments, local Plan bytes, raw network errors, or unvalidated response
+bodies. Optional fields inside a validated diagnostic are omitted when absent or when the CLI cannot validate their
+complete shape. Exit status remains a broad shell-level class; the `error` value is the machine-readable recovery
+contract.
+
 ## Trust model
 
 - The published CLI will run the reviewed JavaScript source directly, without generated or bundled code.

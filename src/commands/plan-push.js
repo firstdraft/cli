@@ -36,8 +36,25 @@ const DEFAULT_FILE_SYSTEM = {
 
 export class PlanPushConfigurationError extends Error {}
 export class PlanPushLocalError extends Error {}
-export class PlanPushNetworkError extends Error {}
-export class PlanPushProtocolError extends Error {}
+
+export class PlanPushNetworkError extends Error {
+  /**
+   * @param {string} message
+   * @param {{cause?: Error, status?: number}} [options]
+   */
+  constructor(message, options = {}) {
+    super(message, { cause: options.cause });
+    this.status = options.status;
+  }
+}
+
+export class PlanPushProtocolError extends Error {
+  /** @param {string} message @param {{status: number}} options */
+  constructor(message, options) {
+    super(message);
+    this.status = options.status;
+  }
+}
 
 export class PlanPushStateWriteError extends Error {
   /**
@@ -73,7 +90,8 @@ export class PlanPushStateWriteError extends Error {
 /**
  * @typedef {object} RejectedPushResult
  * @property {number} status
- * @property {unknown} body
+ * @property {"diagnostics" | "problem" | null} responseKind
+ * @property {Record<string, unknown> | null} body
  */
 
 /**
@@ -125,6 +143,7 @@ export async function pushPlan({
   ) {
     throw new PlanPushProtocolError(
       "First Draft returned invalid diagnostics.",
+      { status: response.status },
     );
   }
 
@@ -132,13 +151,18 @@ export async function pushPlan({
     if (response.ok) {
       throw new PlanPushProtocolError(
         "First Draft returned an unexpected success status.",
+        { status: response.status },
       );
     }
-    return {
-      status: response.status,
-      body:
-        response.status === 422 || isProblemBody(response, body) ? body : null,
-    };
+    if (response.status === 422) {
+      return { status: response.status, responseKind: "diagnostics", body };
+    }
+
+    if (isProblemBody(response, body)) {
+      return { status: response.status, responseKind: "problem", body };
+    }
+
+    return { status: response.status, responseKind: null, body: null };
   }
 
   const etag = response.headers.get("etag");
@@ -151,6 +175,7 @@ export async function pushPlan({
   ) {
     throw new PlanPushProtocolError(
       "First Draft returned an invalid success response.",
+      { status: response.status },
     );
   }
 
@@ -385,7 +410,9 @@ async function readResponseBytes(response) {
     if (response.body !== null) {
       await response.body.cancel().catch(() => undefined);
     }
-    throw new PlanPushProtocolError("The First Draft response is too large.");
+    throw new PlanPushProtocolError("The First Draft response is too large.", {
+      status: response.status,
+    });
   }
 
   if (response.body === null) return Buffer.alloc(0);
@@ -404,6 +431,7 @@ async function readResponseBytes(response) {
         await reader.cancel().catch(() => undefined);
         throw new PlanPushProtocolError(
           "The First Draft response is too large.",
+          { status: response.status },
         );
       }
       chunks.push(Buffer.from(value));
@@ -414,6 +442,7 @@ async function readResponseBytes(response) {
 
     throw new PlanPushNetworkError("The First Draft response failed.", {
       cause: error,
+      status: response.status,
     });
   }
 

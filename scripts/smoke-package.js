@@ -16,6 +16,13 @@ const npmCli = requiredEnvironmentVariable("npm_execpath");
 const packageMetadata = JSON.parse(readFileSync("package.json", "utf8"));
 const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "firstdraft-cli-"));
 const installationDirectory = path.join(temporaryDirectory, "installation");
+const packedExecutable = path.join(
+  installationDirectory,
+  "node_modules",
+  "firstdraft",
+  "bin",
+  "firstdraft.js",
+);
 
 try {
   const packResult = runNpm([
@@ -67,6 +74,25 @@ try {
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n$/,
   );
   assert.equal(subjectId.stderr, "");
+
+  const invalidPush = spawnPackedCli(
+    ["plan", "push", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assert.equal(invalidPush.status, 2);
+  assert.deepEqual(JSON.parse(invalidPush.stderr), {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft plan push --help' for usage.",
+  });
+  assert.doesNotMatch(invalidPush.stderr, /canary-secret/);
+
+  const localPush = spawnPackedCli(["plan", "push"], installationDirectory);
+  assert.equal(localPush.status, 1);
+  assert.deepEqual(JSON.parse(localPush.stderr), {
+    error: "local_input_unreadable",
+    detail:
+      "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.",
+  });
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
@@ -76,10 +102,7 @@ try {
  * @param {string} [cwd]
  */
 function runNpm(arguments_, cwd = process.cwd()) {
-  const result = spawnSync(process.execPath, [npmCli, ...arguments_], {
-    cwd,
-    encoding: "utf8",
-  });
+  const result = spawnNpm(arguments_, cwd);
 
   assert.equal(
     result.status,
@@ -88,6 +111,28 @@ function runNpm(arguments_, cwd = process.cwd()) {
   );
 
   return result;
+}
+
+/**
+ * @param {string[]} arguments_
+ * @param {string} [cwd]
+ */
+function spawnNpm(arguments_, cwd = process.cwd()) {
+  return spawnSync(process.execPath, [npmCli, ...arguments_], {
+    cwd,
+    encoding: "utf8",
+  });
+}
+
+/**
+ * @param {string[]} arguments_
+ * @param {string} [cwd]
+ */
+function spawnPackedCli(arguments_, cwd = process.cwd()) {
+  return spawnSync(process.execPath, [packedExecutable, ...arguments_], {
+    cwd,
+    encoding: "utf8",
+  });
 }
 
 /** @param {string} name */
