@@ -75,20 +75,79 @@ try {
   );
   assert.equal(subjectId.stderr, "");
 
+  const invalidSubjectId = spawnPackedCli(
+    ["plan", "subject-id", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidSubjectId, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.",
+  });
+
+  const invalidInit = spawnPackedCli(
+    ["plan", "init", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidInit, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft plan init --help' for usage.",
+  });
+
+  const projectDirectory = path.join(temporaryDirectory, "project");
+  mkdirSync(projectDirectory);
+  const initialized = spawnPackedCli(
+    [
+      "plan",
+      "init",
+      "--application-key",
+      "oscar_party",
+      "--name",
+      "Oscar Party",
+    ],
+    projectDirectory,
+  );
+  assert.deepEqual(
+    {
+      status: initialized.status,
+      stdout: initialized.stdout,
+      stderr: initialized.stderr,
+    },
+    {
+      status: 0,
+      stdout: "Initialized .firstdraft/foundation-plan.json.\n",
+      stderr: "",
+    },
+  );
+
+  const repeatedInit = spawnPackedCli(
+    [
+      "plan",
+      "init",
+      "--application-key",
+      "other_application",
+      "--name",
+      "canary-secret-name",
+    ],
+    projectDirectory,
+  );
+  assertHandledFailure(repeatedInit, 1, {
+    error: "local_initialization_failed",
+    detail:
+      "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.",
+  });
+
   const invalidPush = spawnPackedCli(
     ["plan", "push", "--canary-secret-option"],
     installationDirectory,
   );
-  assert.equal(invalidPush.status, 2);
-  assert.deepEqual(JSON.parse(invalidPush.stderr), {
+  assertHandledFailure(invalidPush, 2, {
     error: "invalid_arguments",
     detail: "Invalid arguments. Run 'firstdraft plan push --help' for usage.",
   });
-  assert.doesNotMatch(invalidPush.stderr, /canary-secret/);
 
   const localPush = spawnPackedCli(["plan", "push"], installationDirectory);
-  assert.equal(localPush.status, 1);
-  assert.deepEqual(JSON.parse(localPush.stderr), {
+  assertHandledFailure(localPush, 1, {
     error: "local_input_unreadable",
     detail:
       "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.",
@@ -133,6 +192,18 @@ function spawnPackedCli(arguments_, cwd = process.cwd()) {
     cwd,
     encoding: "utf8",
   });
+}
+
+/**
+ * @param {ReturnType<typeof spawnPackedCli>} execution
+ * @param {number} status
+ * @param {Record<string, unknown>} error
+ */
+function assertHandledFailure(execution, status, error) {
+  assert.equal(execution.status, status);
+  assert.equal(execution.stdout, "");
+  assert.equal(execution.stderr, `${JSON.stringify(error, null, 2)}\n`);
+  assert.doesNotMatch(execution.stderr, /canary-secret/);
 }
 
 /** @param {string} name */
