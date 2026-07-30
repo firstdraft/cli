@@ -87,10 +87,10 @@ const PLAN_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan --help' for usage.\n";
 const PLAN_UNKNOWN_COMMAND =
   "Unknown command.\nRun 'firstdraft plan --help' for usage.\n";
-const PLAN_INIT_USAGE_ERROR =
-  "Invalid arguments.\nRun 'firstdraft plan init --help' for usage.\n";
-const PLAN_INIT_ERROR =
-  "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.\n";
+const PLAN_INIT_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan init --help' for usage.";
+const PLAN_INIT_FAILED_DETAIL =
+  "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.";
 const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
 const PLAN_PUSH_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan push --help' for usage.";
@@ -101,8 +101,8 @@ const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
   "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
-const PLAN_SUBJECT_ID_USAGE_ERROR =
-  "Invalid arguments.\nRun 'firstdraft plan subject-id --help' for usage.\n";
+const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.";
 
 /**
  * @typedef {object} Writer
@@ -318,7 +318,10 @@ function runPlanSubjectId({ argv, stdout, stderr, createSubjectId }) {
   );
 
   if (!parsed) {
-    stderr.write(PLAN_SUBJECT_ID_USAGE_ERROR);
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL,
+    });
     return 2;
   }
 
@@ -476,7 +479,10 @@ function runPlanInit({
   );
 
   if (!parsed || repeatedValueOption(parsed.tokens)) {
-    stderr.write(PLAN_INIT_USAGE_ERROR);
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_INIT_INVALID_ARGUMENTS_DETAIL,
+    });
     return 2;
   }
 
@@ -493,7 +499,10 @@ function runPlanInit({
     typeof name !== "string" ||
     !isValidApplicationName(name)
   ) {
-    stderr.write(PLAN_INIT_USAGE_ERROR);
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_INIT_INVALID_ARGUMENTS_DETAIL,
+    });
     return 2;
   }
 
@@ -510,7 +519,10 @@ function runPlanInit({
   } catch (error) {
     if (!isFileSystemError(error)) throw error;
 
-    stderr.write(PLAN_INIT_ERROR);
+    writeJson(stderr, {
+      error: "local_initialization_failed",
+      detail: PLAN_INIT_FAILED_DETAIL,
+    });
     return 1;
   }
 

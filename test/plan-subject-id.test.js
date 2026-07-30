@@ -15,8 +15,15 @@ The command reads no files and makes no network request.
 Options:
   -h, --help  Show help
 `;
-const USAGE_ERROR =
-  "Invalid arguments.\nRun 'firstdraft plan subject-id --help' for usage.\n";
+const USAGE_ERROR = `${JSON.stringify(
+  {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.",
+  },
+  null,
+  2,
+)}\n`;
 const UUID_V7 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n$/;
 /** @satisfies {Partial<import("../src/cli.js").RunOptions>} */
@@ -132,6 +139,19 @@ test("plan subject-id validates arguments before generating an ID", async () => 
     });
     assert.doesNotMatch(result.stderr, /canary-secret/);
   }
+});
+
+test("unexpected subject ID generation errors remain loud", async () => {
+  await assert.rejects(
+    () =>
+      invoke(["plan", "subject-id"], {
+        ...INACCESSIBLE_DEPENDENCIES,
+        createSubjectId: () => {
+          throw new TypeError("programming error");
+        },
+      }),
+    /programming error/,
+  );
 });
 
 /**

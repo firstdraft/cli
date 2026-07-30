@@ -67,22 +67,27 @@ fully verify. Until First Draft has a read or reconciliation endpoint, an accept
 verified may require manual recovery. If a verified response cannot replace local state, preserve the printed
 recovery state; an adjacent `.tmp` file may contain the same private recovery copy.
 
-Every handled `plan push` failure writes exactly one JSON object to standard error. Agents should branch on its
-stable `error` value, not on the human-readable `detail`:
+Every handled failure from `plan init`, `plan subject-id`, or `plan push` writes exactly one JSON object to standard
+error. Agents should branch on its stable `error` value, not on the human-readable `detail`:
 
-| `error`                   | Exit | Meaning                                                                                                                                                    |
-| ------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid_arguments`       |    2 | The command syntax is invalid; no request was made.                                                                                                        |
-| `invalid_configuration`   |    2 | The configured API origin is invalid or conflicts with pinned local state; no request was made.                                                            |
-| `local_input_unreadable`  |    1 | The local Plan or state could not be read; no request was made.                                                                                            |
-| `request_outcome_unknown` |    1 | A sent request or its response could not be verified. Stop and reconcile before pushing again. The object includes `status` when one was received.         |
-| `server_rejected`         |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
-| `local_state_not_saved`   |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
+| Commands                                    | `error`                       | Exit | Meaning                                                                                                                                                    |
+| ------------------------------------------- | ----------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan init`, `plan subject-id`, `plan push` | `invalid_arguments`           |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
+| `plan init`                                 | `local_initialization_failed` |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
+| `plan push`                                 | `invalid_configuration`       |    2 | The configured API origin is invalid or conflicts with pinned local state; no request was made.                                                            |
+| `plan push`                                 | `local_input_unreadable`      |    1 | The local Plan or state could not be read; no request was made.                                                                                            |
+| `plan push`                                 | `request_outcome_unknown`     |    1 | A sent request or its response could not be verified. Stop and reconcile before pushing again. The object includes `status` when one was received.         |
+| `plan push`                                 | `server_rejected`             |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
+| `plan push`                                 | `local_state_not_saved`       |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
 
-Failure output never includes command arguments, local Plan bytes, raw network errors, or unvalidated response
-bodies. Optional fields inside a validated diagnostic are omitted when absent or when the CLI cannot validate their
-complete shape. Exit status remains a broad shell-level class; the `error` value is the machine-readable recovery
-contract.
+Handled failure output never includes command arguments, local Plan bytes, runtime paths, raw filesystem or network
+errors, or unvalidated response bodies. Optional fields inside a validated diagnostic are omitted when absent or
+when the CLI cannot validate their complete shape. Exit status remains a broad shell-level class; the `error` value
+is the machine-readable recovery contract.
+
+Root-level and `plan` command-group usage failures remain human-readable text on standard error with exit 2. A
+failure before a subcommand can begin, such as an unavailable working directory, also remains uncaught, as do
+unexpected programming defects.
 
 ## Trust model
 

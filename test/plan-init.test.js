@@ -47,10 +47,15 @@ const PLAN_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan --help' for usage.\n";
 const PLAN_UNKNOWN_COMMAND =
   "Unknown command.\nRun 'firstdraft plan --help' for usage.\n";
-const PLAN_INIT_USAGE_ERROR =
-  "Invalid arguments.\nRun 'firstdraft plan init --help' for usage.\n";
-const PLAN_INIT_ERROR =
-  "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.\n";
+const PLAN_INIT_USAGE_ERROR = jsonOutput({
+  error: "invalid_arguments",
+  detail: "Invalid arguments. Run 'firstdraft plan init --help' for usage.",
+});
+const PLAN_INIT_ERROR = jsonOutput({
+  error: "local_initialization_failed",
+  detail:
+    "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.",
+});
 
 const EXPECTED_PLAN = `{
   "format": "firstdraft.foundation-plan.sketch/0.19",
@@ -528,6 +533,11 @@ function assertInitializationFailure(result) {
     stderr: PLAN_INIT_ERROR,
   });
   refuteCanary(result);
+}
+
+/** @param {unknown} value */
+function jsonOutput(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /** @param {import("node:test").TestContext} context */
