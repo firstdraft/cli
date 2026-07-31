@@ -30,6 +30,7 @@ Commands:
   subject-id  Generate a UUIDv7 for a new Plan subject
   push        Send the local Foundation Plan to First Draft
   status      Read the current whole-graph analysis status
+  compile     Compile the accepted Plan into a new local directory
 
 Options:
   -h, --help  Show help

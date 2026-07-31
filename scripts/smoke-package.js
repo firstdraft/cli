@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -168,6 +172,18 @@ try {
     detail:
       "Could not read valid local First Draft state. No network request was made. Run 'firstdraft plan init' if this directory is not initialized; otherwise repair the private state before retrying.",
   });
+
+  const invalidCompile = spawnPackedCli(
+    ["plan", "compile", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidCompile, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft plan compile --help' for usage.",
+  });
+
+  await exercisePackedCompilation(projectDirectory);
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
@@ -208,6 +224,217 @@ function spawnPackedCli(arguments_, cwd = process.cwd()) {
     cwd,
     encoding: "utf8",
   });
+}
+
+/**
+ * @param {string[]} arguments_
+ * @param {string} cwd
+ */
+async function spawnPackedCliAsync(arguments_, cwd) {
+  const child = spawn(process.execPath, [packedExecutable, ...arguments_], {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const [status, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  return { status, stdout, stderr };
+}
+
+/** @param {string} projectDirectory */
+async function exercisePackedCompilation(projectDirectory) {
+  const projectId = "01900000-0000-7000-8000-000000000901";
+  const compilationId = "01900000-0000-7000-8000-000000000902";
+  const analysisId = "01900000-0000-7000-8000-000000000903";
+  const headSha256 = "1".repeat(64);
+  const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
+  const artifactPath = `${statusPath}/artifact`;
+  const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-07";
+  const target = { id: "rails", profile: "rails-sketch/2026-07" };
+  const contents = Buffer.from("class Movie < ApplicationRecord\nend\n");
+  const file = {
+    path: "app/models/movie.rb",
+    sha256: sha256(contents),
+    mode: 0o644,
+    owner: "renderer:model",
+    source_subject_uuids: [],
+    contents_base64: contents.toString("base64"),
+  };
+  const metadata = {
+    path: file.path,
+    sha256: file.sha256,
+    mode: file.mode,
+    owner: file.owner,
+    source_subject_uuids: file.source_subject_uuids,
+  };
+  const manifestSha256 = sha256(
+    Buffer.from(JSON.stringify({ files: [metadata] })),
+  );
+  const artifact = Buffer.from(
+    JSON.stringify({
+      format: "firstdraft.compilation-artifact/1",
+      provenance: {
+        compilation_id: compilationId,
+        project_id: projectId,
+        graph_version: 1,
+        head_source_sha256: headSha256,
+        foundation_plan: {
+          format: "firstdraft.foundation-plan.sketch/0.19",
+          sha256: "2".repeat(64),
+        },
+        analysis: {
+          id: analysisId,
+          release: "foundation-plan-rails/scalar-2026-07",
+        },
+        compiler_release: compilerRelease,
+        target,
+        core: {
+          repository: "firstdraft/foundation-rails-core",
+          revision: "3".repeat(40),
+          sha256: "4".repeat(64),
+        },
+      },
+      manifest_sha256: manifestSha256,
+      files: [file],
+    }),
+  );
+  const artifactSha256 = sha256(artifact);
+  const compilation = {
+    project: { id: projectId, graph_version: 1 },
+    compilation: {
+      id: compilationId,
+      analysis_run_id: analysisId,
+      graph_version: 1,
+      status: "succeeded",
+      compiler_release: compilerRelease,
+      target,
+      status_path: statusPath,
+      cancel_path: `${statusPath}/cancel`,
+      artifact: {
+        path: artifactPath,
+        sha256: artifactSha256,
+        media_type: "application/vnd.firstdraft.compilation-artifact+json",
+        byte_size: artifact.byteLength,
+      },
+      failure: null,
+      created_at: "2026-07-30T12:00:00.000Z",
+      started_at: "2026-07-30T12:00:01.000Z",
+      completed_at: "2026-07-30T12:00:02.000Z",
+    },
+  };
+  let startRequestSeen = false;
+  let artifactRequestSeen = false;
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const requestBody = Buffer.concat(chunks);
+
+    if (
+      request.method === "POST" &&
+      request.url === `/v1/projects/${projectId}/compilations`
+    ) {
+      assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
+      assert.equal(requestBody.byteLength, 0);
+      startRequestSeen = true;
+      respondJson(response, 202, compilation, { Location: statusPath });
+      return;
+    }
+    if (request.method === "GET" && request.url === artifactPath) {
+      artifactRequestSeen = true;
+      response.writeHead(200, {
+        "Content-Type": "application/vnd.firstdraft.compilation-artifact+json",
+        "Content-Length": artifact.byteLength,
+        ETag: `"sha256:${artifactSha256}"`,
+      });
+      response.end(artifact);
+      return;
+    }
+
+    response.writeHead(404).end();
+  });
+
+  try {
+    await new Promise((/** @type {(value?: void) => void} */ resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        resolve();
+      });
+    });
+    const address = server.address();
+    assert(address && typeof address === "object");
+    const apiUrl = `http://127.0.0.1:${address.port}`;
+    writeFileSync(
+      path.join(projectDirectory, ".firstdraft", "state.json"),
+      `${JSON.stringify(
+        {
+          format: "firstdraft.cli-state/1",
+          project_id: projectId,
+          api_url: apiUrl,
+          foundation_plan_etag: `"sha256:${headSha256}"`,
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+    const output = path.join(projectDirectory, "generated");
+    const execution = await spawnPackedCliAsync(
+      ["plan", "compile", "--output", output],
+      projectDirectory,
+    );
+
+    assert.equal(execution.status, 0);
+    assert.equal(execution.stderr, "");
+    assert.equal(JSON.parse(execution.stdout).output.path, output);
+    assert.equal(
+      readFileSync(path.join(output, "app/models/movie.rb"), "utf8"),
+      contents.toString("utf8"),
+    );
+    if (process.platform !== "win32") {
+      assert.equal(
+        lstatSync(path.join(output, "app/models/movie.rb")).mode & 0o777,
+        0o644,
+      );
+    }
+    assert.equal(startRequestSeen, true);
+    assert.equal(artifactRequestSeen, true);
+  } finally {
+    await new Promise(
+      (
+        /** @type {(value?: void) => void} */ resolve,
+        /** @type {(error: Error) => void} */ reject,
+      ) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      },
+    );
+  }
+}
+
+/** @param {import("node:http").ServerResponse} response @param {number} status @param {unknown} body @param {Record<string, string>} [headers] */
+function respondJson(response, status, body, headers = {}) {
+  const source = Buffer.from(JSON.stringify(body));
+  response.writeHead(status, {
+    "Content-Type": "application/json",
+    "Content-Length": source.byteLength,
+    ...headers,
+  });
+  response.end(source);
+}
+
+/** @param {Buffer} value */
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 /**
