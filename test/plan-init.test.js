@@ -29,6 +29,7 @@ Commands:
   init        Create a local empty Foundation Plan
   subject-id  Generate a UUIDv7 for a new Plan subject
   push        Send the local Foundation Plan to First Draft
+  status      Read the current whole-graph analysis status
 
 Options:
   -h, --help  Show help

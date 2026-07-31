@@ -9,6 +9,12 @@ import {
   PlanPushStateWriteError,
   pushPlan,
 } from "./commands/plan-push.js";
+import {
+  PlanStatusChangedError,
+  PlanStatusNotPushedError,
+  PlanStatusTimeoutError,
+  readPlanStatus,
+} from "./commands/plan-status.js";
 import { isFileSystemError } from "./file-system.js";
 import { generateUuidV7 } from "./uuid-v7.js";
 import { VERSION } from "./version.js";
@@ -36,6 +42,7 @@ Commands:
   init        Create a local empty Foundation Plan
   subject-id  Generate a UUIDv7 for a new Plan subject
   push        Send the local Foundation Plan to First Draft
+  status      Read the current whole-graph analysis status
 
 Options:
   -h, --help  Show help
@@ -54,6 +61,19 @@ Environment:
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
+`;
+
+const PLAN_STATUS_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan status [--wait]
+
+Options:
+      --wait  Poll until the current analysis reaches a terminal status
+  -h, --help  Show help
+
+The command uses only the API origin pinned by a successful plan push.
+Without --wait, it makes exactly one status request.
 `;
 
 const PLAN_SUBJECT_ID_HELP = `First Draft CLI
@@ -101,6 +121,22 @@ const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
   "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
+const PLAN_STATUS_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan status --help' for usage.";
+const PLAN_STATUS_LOCAL_INPUT_UNREADABLE_DETAIL =
+  "Could not read valid local First Draft state. No network request was made. Run 'firstdraft plan init' if this directory is not initialized; otherwise repair the private state before retrying.";
+const PLAN_STATUS_NOT_PUSHED_DETAIL =
+  "The local Foundation Plan has not been pushed successfully. Run 'firstdraft plan push' before requesting analysis status.";
+const PLAN_STATUS_UNAVAILABLE_DETAIL =
+  "Could not verify the current analysis status. Retry this read-only request a bounded number of times; if it keeps failing, inspect the API origin pinned in .firstdraft/state.json.";
+const PLAN_STATUS_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid analysis response. Retrying the unchanged request will not repair this protocol mismatch.";
+const PLAN_STATUS_SERVER_REJECTED_DETAIL =
+  "First Draft rejected the analysis status request.";
+const PLAN_STATUS_CHANGED_DETAIL =
+  "The current analysis changed while waiting. Run 'firstdraft plan status --wait' again to follow the latest analysis.";
+const PLAN_STATUS_TIMEOUT_DETAIL =
+  "The current analysis is still processing after the bounded wait. Run 'firstdraft plan status --wait' again to continue waiting.";
 const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.";
 
@@ -122,7 +158,9 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
  * @property {() => string} [createTemporaryId]
- * @property {() => AbortSignal} [createRequestSignal]
+ * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
+ * @property {(delayMs: number) => Promise<void>} [planStatusSleep]
+ * @property {() => number} [planStatusNow]
  * @property {string} [apiUrl]
  */
 
@@ -138,7 +176,9 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
  * @property {() => string} [createTemporaryId]
- * @property {() => AbortSignal} [createRequestSignal]
+ * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
+ * @property {(delayMs: number) => Promise<void>} [planStatusSleep]
+ * @property {() => number} [planStatusNow]
  * @property {string} [apiUrl]
  */
 
@@ -160,6 +200,8 @@ export async function run({
   planPushFileSystem,
   createTemporaryId,
   createRequestSignal,
+  planStatusSleep,
+  planStatusNow,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
 }) {
   if (argv[0] === "plan") {
@@ -176,6 +218,8 @@ export async function run({
       planPushFileSystem,
       createTemporaryId,
       createRequestSignal,
+      planStatusSleep,
+      planStatusNow,
       apiUrl,
     });
   }
@@ -240,6 +284,8 @@ async function runPlan({
   planPushFileSystem,
   createTemporaryId,
   createRequestSignal,
+  planStatusSleep,
+  planStatusNow,
   apiUrl,
 }) {
   if (argv[0] === "init") {
@@ -264,6 +310,20 @@ async function runPlan({
       createTemporaryId,
       createRequestSignal,
       apiUrl,
+    });
+  }
+
+  if (argv[0] === "status") {
+    return runPlanStatus({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd: cwd ?? getCwd(),
+      fetchFunction,
+      planPushFileSystem,
+      createRequestSignal,
+      planStatusSleep,
+      planStatusNow,
     });
   }
 
@@ -450,6 +510,137 @@ async function runPlanPush({
     foundation_plan: result.body.foundation_plan,
     diagnostics: result.body.diagnostics,
   });
+  return 0;
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow">} options
+ */
+async function runPlanStatus({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  fetchFunction,
+  planPushFileSystem,
+  createRequestSignal,
+  planStatusSleep,
+  planStatusNow,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        help: { type: "boolean", short: "h" },
+        wait: { type: "boolean" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_STATUS_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(PLAN_STATUS_HELP);
+    return 0;
+  }
+
+  let result;
+  try {
+    result = await readPlanStatus({
+      cwd,
+      wait: parsed.values.wait,
+      fetchFunction,
+      fileSystem: planPushFileSystem,
+      createRequestSignal,
+      sleep: planStatusSleep,
+      now: planStatusNow,
+    });
+  } catch (error) {
+    if (error instanceof PlanPushLocalError) {
+      writeJson(stderr, {
+        error: "local_input_unreadable",
+        detail: PLAN_STATUS_LOCAL_INPUT_UNREADABLE_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof PlanStatusNotPushedError) {
+      writeJson(stderr, {
+        error: "project_not_pushed",
+        detail: PLAN_STATUS_NOT_PUSHED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof PlanStatusChangedError) {
+      writeJson(stderr, {
+        error: "analysis_changed",
+        detail: PLAN_STATUS_CHANGED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof PlanStatusTimeoutError) {
+      writeJson(stderr, {
+        error: "wait_timed_out",
+        detail: PLAN_STATUS_TIMEOUT_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof PlanPushNetworkError) {
+      writeJson(stderr, {
+        error: "status_unavailable",
+        detail: PLAN_STATUS_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof PlanPushProtocolError) {
+      writeJson(stderr, {
+        error: "invalid_server_response",
+        detail: PLAN_STATUS_INVALID_RESPONSE_DETAIL,
+        status: error.status,
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+
+  if ("responseKind" in result) {
+    if (result.responseKind === null) {
+      writeJson(stderr, {
+        error: "invalid_server_response",
+        detail: PLAN_STATUS_INVALID_RESPONSE_DETAIL,
+        status: result.status,
+      });
+      return 1;
+    }
+
+    const response = safeRejectedResponse(result.responseKind, result.body);
+    writeJson(stderr, {
+      error: "server_rejected",
+      detail: PLAN_STATUS_SERVER_REJECTED_DETAIL,
+      status: result.status,
+      ...(response ? { response } : {}),
+    });
+    return 1;
+  }
+
+  writeJson(stdout, result.body);
   return 0;
 }
 

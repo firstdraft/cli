@@ -152,6 +152,22 @@ try {
     detail:
       "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.",
   });
+
+  const invalidStatus = spawnPackedCli(
+    ["plan", "status", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidStatus, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft plan status --help' for usage.",
+  });
+
+  const localStatus = spawnPackedCli(["plan", "status"], installationDirectory);
+  assertHandledFailure(localStatus, 1, {
+    error: "local_input_unreadable",
+    detail:
+      "Could not read valid local First Draft state. No network request was made. Run 'firstdraft plan init' if this directory is not initialized; otherwise repair the private state before retrying.",
+  });
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
