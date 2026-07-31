@@ -258,8 +258,8 @@ async function exercisePackedCompilation(projectDirectory) {
   const headSha256 = "1".repeat(64);
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
-  const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-07";
-  const target = { id: "rails", profile: "rails-sketch/2026-07" };
+  const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
+  const target = { id: "rails", profile: "rails-sketch/2026-08" };
   const contents = Buffer.from("class Movie < ApplicationRecord\nend\n");
   const file = {
     path: "app/models/movie.rb",
@@ -293,7 +293,7 @@ async function exercisePackedCompilation(projectDirectory) {
         },
         analysis: {
           id: analysisId,
-          release: "foundation-plan-rails/scalar-2026-07",
+          release: "foundation-plan-rails/scalar-2026-08",
         },
         compiler_release: compilerRelease,
         target,
