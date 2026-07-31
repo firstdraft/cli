@@ -1,11 +1,11 @@
 {
-  "name": "firstdraft",
-  "version": "0.1.0-alpha.1",
+  "name": "@firstdraft.com/cli",
+  "version": "0.1.0-alpha.2",
   "description": "Command-line interface for First Draft",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "firstdraft": "./bin/firstdraft.js"
+    "firstdraft": "bin/firstdraft.js"
   },
   "files": [
     "bin",

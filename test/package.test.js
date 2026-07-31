@@ -44,10 +44,10 @@ function releaseSourceChecks(jobSource) {
 }
 
 test("package metadata preserves the audited runtime boundary", () => {
-  assert.equal(metadata.name, "firstdraft");
+  assert.equal(metadata.name, "@firstdraft.com/cli");
   assert.equal(metadata.type, "module");
   assert.equal(metadata.engines.node, ">=22.0.0");
-  assert.deepEqual(metadata.bin, { firstdraft: "./bin/firstdraft.js" });
+  assert.deepEqual(metadata.bin, { firstdraft: "bin/firstdraft.js" });
   assert.deepEqual(metadata.files, ["bin", "src"]);
   assert.equal(metadata.scripts.test, "node scripts/run-tests.js");
 

@@ -18,9 +18,11 @@ prereleases, and publishing the CLI does not make the wider First Draft service 
 Once npm reports a public alpha, install the current prerelease explicitly:
 
 ```sh
-npm install --global firstdraft@next
+npm install --global @firstdraft.com/cli@next
 firstdraft --version
 ```
+
+The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable.
 
 There is intentionally no stable `latest` release yet. Pin an exact prerelease version instead of `next` when a
 repeatable installation matters. Remote Plan push, status, and compilation commands require a compatible First
