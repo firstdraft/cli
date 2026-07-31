@@ -28,8 +28,8 @@ const COMPILATION_ID = "01900000-0000-7000-8000-000000000802";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000000803";
 const SUBJECT_ID = "01900000-0000-7000-8000-000000000804";
 const HEAD_SHA256 = "1".repeat(64);
-const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-07";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-07" };
+const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-08";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const EXPECTED = {
   projectId: PROJECT_ID,
   compilationId: COMPILATION_ID,
@@ -167,7 +167,7 @@ test("pins every available provenance identity", () => {
       provenance: {
         analysis: {
           id: "01900000-0000-7000-8000-000000000899",
-          release: "foundation-plan-rails/scalar-2026-07",
+          release: "foundation-plan-rails/scalar-2026-08",
         },
       },
     }),
@@ -360,7 +360,7 @@ function artifactFixture(changes = {}) {
     },
     analysis: {
       id: ANALYSIS_ID,
-      release: "foundation-plan-rails/scalar-2026-07",
+      release: "foundation-plan-rails/scalar-2026-08",
     },
     compiler_release: COMPILER_RELEASE,
     target: TARGET,

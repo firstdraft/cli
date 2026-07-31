@@ -34,8 +34,8 @@ const COMPLETED_AT = "2026-07-30T12:00:02.000Z";
 const STATUS_PATH = `/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}`;
 const CANCEL_PATH = `${STATUS_PATH}/cancel`;
 const ARTIFACT_PATH = `${STATUS_PATH}/artifact`;
-const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-07";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-07" };
+const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-08";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
@@ -866,7 +866,7 @@ function artifactFixture() {
       },
       analysis: {
         id: ANALYSIS_ID,
-        release: "foundation-plan-rails/scalar-2026-07",
+        release: "foundation-plan-rails/scalar-2026-08",
       },
       compiler_release: COMPILER_RELEASE,
       target: TARGET,

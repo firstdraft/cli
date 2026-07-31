@@ -56,7 +56,7 @@ function emptyPlan(applicationKey, name) {
     format: "firstdraft.foundation-plan.sketch/0.19",
     target: {
       id: "rails",
-      profile: "rails-sketch/2026-07",
+      profile: "rails-sketch/2026-08",
     },
     application: {
       key: applicationKey,
