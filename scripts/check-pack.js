@@ -25,10 +25,13 @@ if (result.status !== 0) {
     "README.md",
     "bin/firstdraft.js",
     "package.json",
+    "src/api-response.js",
     "src/cli.js",
     "src/commands/plan-init.js",
     "src/commands/plan-push.js",
+    "src/commands/plan-status.js",
     "src/file-system.js",
+    "src/plan-state.js",
     "src/uuid-v7.js",
     "src/version.js",
   ]);

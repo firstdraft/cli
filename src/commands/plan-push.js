@@ -2,21 +2,40 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import {
+  FirstDraftProtocolError,
+  isDiagnostic,
+  isProblemBody,
+  readResponseBody,
+  responseMediaType,
+  sendRequest,
+} from "../api-response.js";
 import { isFileSystemError } from "../file-system.js";
+import {
+  MAX_STATE_BYTES,
+  PlanStateConfigurationError,
+  isStrongEtag,
+  normalizeApiUrl,
+  readLocalFile,
+  readPlanState,
+} from "../plan-state.js";
+
+export {
+  PlanStateConfigurationError as PlanPushConfigurationError,
+  PlanStateLocalError as PlanPushLocalError,
+  normalizeApiUrl,
+} from "../plan-state.js";
+export {
+  FirstDraftNetworkError as PlanPushNetworkError,
+  FirstDraftProtocolError as PlanPushProtocolError,
+} from "../api-response.js";
 
 export const DEFAULT_API_URL = "https://firstdraft.com";
 
 const FOUNDATION_PLAN_MEDIA_TYPE =
   "application/vnd.firstdraft.foundation-plan+json";
-const STATE_FORMAT = "firstdraft.cli-state/1";
 const MAX_PLAN_BYTES = 1024 * 1024;
-const MAX_STATE_BYTES = 4096;
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const MAX_ETAG_BYTES = 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROJECT_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const STRONG_ETAG_PATTERN = /^"(?:[\x21\x23-\x7e\x80-\xff])*"$/;
 
 /**
  * @typedef {object} PlanPushFileSystem
@@ -33,28 +52,6 @@ const DEFAULT_FILE_SYSTEM = {
   renameSync,
   writeFileSync,
 };
-
-export class PlanPushConfigurationError extends Error {}
-export class PlanPushLocalError extends Error {}
-
-export class PlanPushNetworkError extends Error {
-  /**
-   * @param {string} message
-   * @param {{cause?: Error, status?: number}} [options]
-   */
-  constructor(message, options = {}) {
-    super(message, { cause: options.cause });
-    this.status = options.status;
-  }
-}
-
-export class PlanPushProtocolError extends Error {
-  /** @param {string} message @param {{status: number}} options */
-  constructor(message, options) {
-    super(message);
-    this.status = options.status;
-  }
-}
 
 export class PlanPushStateWriteError extends Error {
   /**
@@ -106,13 +103,11 @@ export async function pushPlan({
   createTemporaryId = randomUUID,
   createRequestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 }) {
+  const state = readPlanState({ cwd, fileSystem });
   const directory = path.join(cwd, ".firstdraft");
-  assertLocalDirectory(directory, fileSystem);
   const planPath = path.join(directory, "foundation-plan.json");
   const statePath = path.join(directory, "state.json");
   const planSource = readLocalFile(planPath, MAX_PLAN_BYTES, fileSystem);
-  const stateSource = readLocalFile(statePath, MAX_STATE_BYTES, fileSystem);
-  const state = loadState(stateSource);
   const origin = resolveApiUrl(apiUrl, state.api_url);
   const endpoint = new URL(
     `/v1/projects/${state.project_id}/foundation-plan`,
@@ -141,7 +136,7 @@ export async function pushPlan({
     (responseMediaType(response) !== "application/json" ||
       !isDiagnosticBody(body, sourceSha256))
   ) {
-    throw new PlanPushProtocolError(
+    throw new FirstDraftProtocolError(
       "First Draft returned invalid diagnostics.",
       { status: response.status },
     );
@@ -149,7 +144,7 @@ export async function pushPlan({
 
   if (response.status !== 200 && response.status !== 201) {
     if (response.ok) {
-      throw new PlanPushProtocolError(
+      throw new FirstDraftProtocolError(
         "First Draft returned an unexpected success status.",
         { status: response.status },
       );
@@ -173,7 +168,7 @@ export async function pushPlan({
     !isStrongEtag(etag) ||
     !isAcceptedBody(body, state.project_id, sourceSha256)
   ) {
-    throw new PlanPushProtocolError(
+    throw new FirstDraftProtocolError(
       "First Draft returned an invalid success response.",
       { status: response.status },
     );
@@ -205,248 +200,12 @@ function resolveApiUrl(configured, stored) {
     configuredOrigin !== undefined &&
     stored !== configuredOrigin
   ) {
-    throw new PlanPushConfigurationError(
+    throw new PlanStateConfigurationError(
       "The configured API URL does not match local state.",
     );
   }
 
   return stored ?? configuredOrigin ?? DEFAULT_API_URL;
-}
-
-/** @param {string} value */
-export function normalizeApiUrl(value) {
-  let url;
-
-  try {
-    url = new URL(value);
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
-
-    throw new PlanPushConfigurationError("The API URL is invalid.", {
-      cause: error,
-    });
-  }
-
-  const loopbackHttp =
-    url.protocol === "http:" &&
-    (url.hostname === "127.0.0.1" ||
-      url.hostname === "localhost" ||
-      url.hostname === "[::1]");
-  if (
-    (url.protocol !== "https:" && !loopbackHttp) ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.pathname !== "/" ||
-    url.search !== "" ||
-    url.hash !== ""
-  ) {
-    throw new PlanPushConfigurationError("The API URL is invalid.");
-  }
-
-  return url.origin;
-}
-
-/** @param {string} directory @param {PlanPushFileSystem} fileSystem */
-function assertLocalDirectory(directory, fileSystem) {
-  try {
-    if (!fileSystem.lstatSync(directory).isDirectory()) {
-      throw new PlanPushLocalError(
-        "The local First Draft directory is invalid.",
-      );
-    }
-  } catch (error) {
-    if (error instanceof PlanPushLocalError) throw error;
-    if (!isFileSystemError(error)) throw error;
-
-    throw new PlanPushLocalError(
-      "The local First Draft directory could not be read.",
-      { cause: error },
-    );
-  }
-}
-
-/**
- * @param {string} filePath
- * @param {number} maximumBytes
- * @param {PlanPushFileSystem} fileSystem
- */
-function readLocalFile(filePath, maximumBytes, fileSystem) {
-  try {
-    const stat = fileSystem.lstatSync(filePath);
-    if (!stat.isFile() || stat.size > maximumBytes) {
-      throw new PlanPushLocalError("A local First Draft file is invalid.");
-    }
-
-    const source = fileSystem.readFileSync(filePath);
-    if (!Buffer.isBuffer(source) || source.byteLength > maximumBytes) {
-      throw new PlanPushLocalError("A local First Draft file is invalid.");
-    }
-
-    return source;
-  } catch (error) {
-    if (error instanceof PlanPushLocalError) throw error;
-    if (!isFileSystemError(error)) throw error;
-
-    throw new PlanPushLocalError(
-      "A local First Draft file could not be read.",
-      {
-        cause: error,
-      },
-    );
-  }
-}
-
-/** @param {Buffer} source */
-function loadState(source) {
-  let state;
-
-  try {
-    state = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(source),
-    );
-  } catch (error) {
-    if (!(error instanceof SyntaxError || error instanceof TypeError)) {
-      throw error;
-    }
-
-    throw new PlanPushLocalError("Local First Draft state is invalid.", {
-      cause: error,
-    });
-  }
-
-  if (!isRecord(state)) {
-    throw new PlanPushLocalError("Local First Draft state is invalid.");
-  }
-
-  const keys = Object.keys(state).sort();
-  const hasRemoteState =
-    state.api_url !== undefined || state.foundation_plan_etag !== undefined;
-  const expectedKeys = hasRemoteState
-    ? ["api_url", "format", "foundation_plan_etag", "project_id"]
-    : ["format", "project_id"];
-  let storedApiUrl;
-
-  if (typeof state.api_url === "string") {
-    try {
-      storedApiUrl = normalizeApiUrl(state.api_url);
-    } catch (error) {
-      if (!(error instanceof PlanPushConfigurationError)) throw error;
-
-      throw new PlanPushLocalError("Local First Draft state is invalid.", {
-        cause: error,
-      });
-    }
-  }
-
-  if (
-    !arraysEqual(keys, expectedKeys) ||
-    state.format !== STATE_FORMAT ||
-    typeof state.project_id !== "string" ||
-    !PROJECT_ID_PATTERN.test(state.project_id) ||
-    (hasRemoteState && storedApiUrl !== state.api_url) ||
-    (state.foundation_plan_etag !== undefined &&
-      !isStrongEtag(state.foundation_plan_etag))
-  ) {
-    throw new PlanPushLocalError("Local First Draft state is invalid.");
-  }
-
-  return {
-    format: state.format,
-    project_id: state.project_id,
-    ...(storedApiUrl ? { api_url: storedApiUrl } : {}),
-    ...(typeof state.foundation_plan_etag === "string"
-      ? { foundation_plan_etag: state.foundation_plan_etag }
-      : {}),
-  };
-}
-
-/**
- * @param {typeof globalThis.fetch} fetchFunction
- * @param {URL} endpoint
- * @param {RequestInit} request
- */
-async function sendRequest(fetchFunction, endpoint, request) {
-  try {
-    return await fetchFunction(endpoint, request);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-
-    throw new PlanPushNetworkError("The First Draft request failed.", {
-      cause: error,
-    });
-  }
-}
-
-/** @param {Response} response */
-async function readResponseBody(response) {
-  const bytes = await readResponseBytes(response);
-
-  let text;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
-
-    return null;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-
-    return null;
-  }
-}
-
-/** @param {Response} response */
-async function readResponseBytes(response) {
-  const declaredLength = response.headers.get("content-length");
-  if (
-    declaredLength !== null &&
-    /^\d+$/.test(declaredLength) &&
-    Number(declaredLength) > MAX_RESPONSE_BYTES
-  ) {
-    if (response.body !== null) {
-      await response.body.cancel().catch(() => undefined);
-    }
-    throw new PlanPushProtocolError("The First Draft response is too large.", {
-      status: response.status,
-    });
-  }
-
-  if (response.body === null) return Buffer.alloc(0);
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let byteLength = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      byteLength += value.byteLength;
-      if (byteLength > MAX_RESPONSE_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        throw new PlanPushProtocolError(
-          "The First Draft response is too large.",
-          { status: response.status },
-        );
-      }
-      chunks.push(Buffer.from(value));
-    }
-  } catch (error) {
-    if (error instanceof PlanPushProtocolError) throw error;
-    if (!(error instanceof Error)) throw error;
-
-    throw new PlanPushNetworkError("The First Draft response failed.", {
-      cause: error,
-      status: response.status,
-    });
-  }
-
-  return Buffer.concat(chunks, byteLength);
 }
 
 /**
@@ -495,17 +254,6 @@ function saveState({
   }
 }
 
-/** @param {Response} response */
-function responseMediaType(response) {
-  return (
-    response.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() ?? ""
-  );
-}
-
 /**
  * @param {unknown} body
  * @param {string} projectId
@@ -543,55 +291,12 @@ function isDiagnosticBody(body, sourceSha256) {
   );
 }
 
-/** @param {Response} response @param {unknown} body */
-function isProblemBody(response, body) {
-  return (
-    responseMediaType(response) === "application/problem+json" &&
-    isRecord(body) &&
-    (body.type === undefined || body.type === "about:blank") &&
-    typeof body.title === "string" &&
-    body.status === response.status &&
-    typeof body.code === "string" &&
-    typeof body.detail === "string"
-  );
-}
-
 /** @param {unknown} value */
 function isWarningDiagnostic(value) {
   return isDiagnostic(value) && value.severity === "warning";
 }
 
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown> & {severity: "error" | "warning"}}
- */
-function isDiagnostic(value) {
-  return (
-    isRecord(value) &&
-    typeof value.code === "string" &&
-    (value.severity === "error" || value.severity === "warning") &&
-    typeof value.message === "string"
-  );
-}
-
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** @param {unknown} value @returns {value is string} */
-function isStrongEtag(value) {
-  return (
-    typeof value === "string" &&
-    Buffer.byteLength(value) <= MAX_ETAG_BYTES &&
-    STRONG_ETAG_PATTERN.test(value)
-  );
-}
-
-/** @param {string[]} left @param {string[]} right */
-function arraysEqual(left, right) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  );
 }
