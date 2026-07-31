@@ -1,5 +1,23 @@
 import { parseArgs } from "node:util";
 
+import {
+  CompilationArtifactInvalidError,
+  CompilationArtifactResponseInvalidError,
+  CompilationArtifactUnavailableError,
+  CompilationCancelledError,
+  CompilationChangedError,
+  CompilationFailedError,
+  CompilationLocalStateError,
+  CompilationMaterializationError,
+  CompilationNotPushedError,
+  CompilationOutputPathError,
+  CompilationRequestOutcomeUnknownError,
+  CompilationStartRejectedError,
+  CompilationStatusInvalidError,
+  CompilationStatusUnavailableError,
+  CompilationTimeoutError,
+  compilePlan,
+} from "./commands/plan-compile.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
   PlanPushConfigurationError,
@@ -43,6 +61,7 @@ Commands:
   subject-id  Generate a UUIDv7 for a new Plan subject
   push        Send the local Foundation Plan to First Draft
   status      Read the current whole-graph analysis status
+  compile     Compile the accepted Plan into a new local directory
 
 Options:
   -h, --help  Show help
@@ -74,6 +93,20 @@ Options:
 
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
+`;
+
+const PLAN_COMPILE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan compile --output <absent-path>
+
+Options:
+      --output <absent-path>  Materialize the generated application here
+  -h, --help                  Show help
+
+The command starts one compilation of the exact Plan ETag pinned by the
+last successful push, waits up to ten minutes, validates the complete
+artifact, and atomically renames it into an absent output path.
 `;
 
 const PLAN_SUBJECT_ID_HELP = `First Draft CLI
@@ -137,6 +170,38 @@ const PLAN_STATUS_CHANGED_DETAIL =
   "The current analysis changed while waiting. Run 'firstdraft plan status --wait' again to follow the latest analysis.";
 const PLAN_STATUS_TIMEOUT_DETAIL =
   "The current analysis is still processing after the bounded wait. Run 'firstdraft plan status --wait' again to continue waiting.";
+const PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan compile --help' for usage.";
+const PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL =
+  "Could not read valid local First Draft state. No network request was made. Run 'firstdraft plan push' before compiling.";
+const PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL =
+  "The saved Foundation Plan ETag is incompatible with compilation. No network request was made; reconcile the CLI and server contract.";
+const PLAN_COMPILE_NOT_PUSHED_DETAIL =
+  "The local Foundation Plan has not been pushed successfully. Run 'firstdraft plan push' before compiling.";
+const PLAN_COMPILE_REQUEST_OUTCOME_UNKNOWN_DETAIL =
+  "The compilation may have started, but the response could not be verified. Do not start another compilation until the current Project is reconciled.";
+const PLAN_COMPILE_START_REJECTED_DETAIL =
+  "First Draft rejected the compilation start request.";
+const PLAN_COMPILE_STATUS_UNAVAILABLE_DETAIL =
+  "Could not read the pinned compilation status. The command stopped without following or starting another Compilation.";
+const PLAN_COMPILE_STATUS_INVALID_DETAIL =
+  "First Draft returned an invalid compilation status response. Retrying unchanged will not repair this protocol mismatch.";
+const PLAN_COMPILE_CHANGED_DETAIL =
+  "The pinned Compilation changed while being polled. The command stopped without downloading an artifact.";
+const PLAN_COMPILE_TIMEOUT_DETAIL =
+  "The pinned Compilation is still running after the bounded ten-minute wait.";
+const PLAN_COMPILE_FAILED_DETAIL =
+  "The pinned Compilation failed. No artifact was downloaded or materialized.";
+const PLAN_COMPILE_CANCELLED_DETAIL =
+  "The pinned Compilation was cancelled. No artifact was downloaded or materialized.";
+const PLAN_COMPILE_ARTIFACT_UNAVAILABLE_DETAIL =
+  "Could not download the pinned Compilation artifact. No files were materialized.";
+const PLAN_COMPILE_ARTIFACT_INVALID_DETAIL =
+  "The downloaded Compilation artifact did not satisfy the integrity contract. No files were materialized.";
+const PLAN_COMPILE_MATERIALIZATION_FAILED_DETAIL =
+  "The validated Compilation artifact could not be materialized at the requested absent output path.";
+const PLAN_COMPILE_INVALID_OUTPUT_PATH_DETAIL =
+  "The compilation output path must be absent beneath an existing real directory. No network request was made.";
 const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.";
 
@@ -161,6 +226,8 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
  * @property {(delayMs: number) => Promise<void>} [planStatusSleep]
  * @property {() => number} [planStatusNow]
+ * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
+ * @property {() => number} [planCompileNow]
  * @property {string} [apiUrl]
  */
 
@@ -179,6 +246,8 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
  * @property {(delayMs: number) => Promise<void>} [planStatusSleep]
  * @property {() => number} [planStatusNow]
+ * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
+ * @property {() => number} [planCompileNow]
  * @property {string} [apiUrl]
  */
 
@@ -202,6 +271,8 @@ export async function run({
   createRequestSignal,
   planStatusSleep,
   planStatusNow,
+  planCompileSleep,
+  planCompileNow,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
 }) {
   if (argv[0] === "plan") {
@@ -220,6 +291,8 @@ export async function run({
       createRequestSignal,
       planStatusSleep,
       planStatusNow,
+      planCompileSleep,
+      planCompileNow,
       apiUrl,
     });
   }
@@ -286,6 +359,8 @@ async function runPlan({
   createRequestSignal,
   planStatusSleep,
   planStatusNow,
+  planCompileSleep,
+  planCompileNow,
   apiUrl,
 }) {
   if (argv[0] === "init") {
@@ -324,6 +399,20 @@ async function runPlan({
       createRequestSignal,
       planStatusSleep,
       planStatusNow,
+    });
+  }
+
+  if (argv[0] === "compile") {
+    return runPlanCompile({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd: cwd ?? getCwd(),
+      fetchFunction,
+      planPushFileSystem,
+      createRequestSignal,
+      planCompileSleep,
+      planCompileNow,
     });
   }
 
@@ -641,6 +730,215 @@ async function runPlanStatus({
   }
 
   writeJson(stdout, result.body);
+  return 0;
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planCompileSleep" | "planCompileNow">} options
+ */
+async function runPlanCompile({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  fetchFunction,
+  planPushFileSystem,
+  createRequestSignal,
+  planCompileSleep,
+  planCompileNow,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        output: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(PLAN_COMPILE_HELP);
+    return 0;
+  }
+
+  if (
+    typeof parsed.values.output !== "string" ||
+    parsed.values.output.length === 0 ||
+    parsed.values.output.includes("\0")
+  ) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  let result;
+  try {
+    result = await compilePlan({
+      cwd,
+      output: parsed.values.output,
+      fetchFunction,
+      fileSystem: planPushFileSystem,
+      createRequestSignal,
+      sleep: planCompileSleep,
+      now: planCompileNow,
+    });
+  } catch (error) {
+    if (error instanceof PlanPushLocalError) {
+      writeJson(stderr, {
+        error: "local_input_unreadable",
+        detail: PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationLocalStateError) {
+      writeJson(stderr, {
+        error: "invalid_configuration",
+        detail: PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL,
+      });
+      return 2;
+    }
+
+    if (error instanceof CompilationNotPushedError) {
+      writeJson(stderr, {
+        error: "project_not_pushed",
+        detail: PLAN_COMPILE_NOT_PUSHED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationRequestOutcomeUnknownError) {
+      writeJson(stderr, {
+        error: "request_outcome_unknown",
+        detail: PLAN_COMPILE_REQUEST_OUTCOME_UNKNOWN_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationStartRejectedError) {
+      writeJson(stderr, {
+        error: "compilation_start_rejected",
+        detail: PLAN_COMPILE_START_REJECTED_DETAIL,
+        status: error.status,
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationStatusUnavailableError) {
+      writeJson(stderr, {
+        error: "compilation_status_unavailable",
+        detail: PLAN_COMPILE_STATUS_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationStatusInvalidError) {
+      writeJson(stderr, {
+        error: "invalid_compilation_status",
+        detail: PLAN_COMPILE_STATUS_INVALID_DETAIL,
+        status: error.status,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationChangedError) {
+      writeJson(stderr, {
+        error: "compilation_changed",
+        detail: PLAN_COMPILE_CHANGED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationTimeoutError) {
+      writeJson(stderr, {
+        error: "compilation_wait_timed_out",
+        detail: PLAN_COMPILE_TIMEOUT_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationFailedError) {
+      writeJson(stderr, {
+        error: "compilation_failed",
+        detail: PLAN_COMPILE_FAILED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationCancelledError) {
+      writeJson(stderr, {
+        error: "compilation_cancelled",
+        detail: PLAN_COMPILE_CANCELLED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationArtifactUnavailableError) {
+      writeJson(stderr, {
+        error: "artifact_unavailable",
+        detail: PLAN_COMPILE_ARTIFACT_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    if (
+      error instanceof CompilationArtifactResponseInvalidError ||
+      error instanceof CompilationArtifactInvalidError
+    ) {
+      writeJson(stderr, {
+        error: "invalid_artifact",
+        detail: PLAN_COMPILE_ARTIFACT_INVALID_DETAIL,
+        ...(error instanceof CompilationArtifactResponseInvalidError
+          ? { status: error.status }
+          : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationOutputPathError) {
+      writeJson(stderr, {
+        error: "invalid_output_path",
+        detail: PLAN_COMPILE_INVALID_OUTPUT_PATH_DETAIL,
+      });
+      return 2;
+    }
+
+    if (error instanceof CompilationMaterializationError) {
+      writeJson(stderr, {
+        error: "materialization_failed",
+        detail: PLAN_COMPILE_MATERIALIZATION_FAILED_DETAIL,
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+
+  writeJson(stdout, result);
   return 0;
 }
 

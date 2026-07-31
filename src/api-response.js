@@ -95,13 +95,19 @@ export function isDiagnostic(value) {
   );
 }
 
-/** @param {Response} response */
-async function readResponseBytes(response) {
+/**
+ * @param {Response} response
+ * @param {number} [maximumBytes]
+ */
+export async function readResponseBytes(
+  response,
+  maximumBytes = MAX_RESPONSE_BYTES,
+) {
   const declaredLength = response.headers.get("content-length");
   if (
     declaredLength !== null &&
     /^\d+$/.test(declaredLength) &&
-    Number(declaredLength) > MAX_RESPONSE_BYTES
+    Number(declaredLength) > maximumBytes
   ) {
     if (response.body !== null) {
       await response.body.cancel().catch(() => undefined);
@@ -124,7 +130,7 @@ async function readResponseBytes(response) {
       if (done) break;
 
       byteLength += value.byteLength;
-      if (byteLength > MAX_RESPONSE_BYTES) {
+      if (byteLength > maximumBytes) {
         await reader.cancel().catch(() => undefined);
         throw new FirstDraftProtocolError(
           "The First Draft response is too large.",

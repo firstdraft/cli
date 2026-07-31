@@ -5,7 +5,8 @@ built for agents that author and review Foundation Plans with their users.
 
 The package is not released yet. This repository contains the auditable command shell, local Foundation Plan
 initialization, subject identity generation, conditional whole-document push, and whole-graph analysis status
-polling; release behavior will arrive in reviewed increments.
+polling, plus explicit compilation and verified local artifact materialization; release behavior will arrive in
+reviewed increments.
 
 ## Requirements
 
@@ -90,23 +91,59 @@ to retry a bounded number of times because the command sends only `GET` requests
 inspect the API origin pinned in `.firstdraft/state.json`; an invalid server response instead requires reconciling the
 CLI and server contract.
 
-Every handled failure from `plan init`, `plan subject-id`, `plan push`, or `plan status` writes exactly one JSON
-object to standard error. Agents should branch on its stable `error` value, not on the human-readable `detail`:
+## Compile a valid Plan
 
-| Commands                                                   | `error`                       | Exit | Meaning                                                                                                                                                    |
-| ---------------------------------------------------------- | ----------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan init`, `plan subject-id`, `plan push`, `plan status` | `invalid_arguments`           |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
-| `plan init`                                                | `local_initialization_failed` |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
-| `plan push`                                                | `invalid_configuration`       |    2 | The configured API origin is invalid or conflicts with pinned local state; no request was made.                                                            |
-| `plan push`, `plan status`                                 | `local_input_unreadable`      |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
-| `plan status`                                              | `project_not_pushed`          |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
-| `plan push`                                                | `request_outcome_unknown`     |    1 | A sent request or its response could not be verified. Stop and reconcile before pushing again. The object includes `status` when one was received.         |
-| `plan status`                                              | `status_unavailable`          |    1 | The network request or response stream failed. The object includes `status` when headers were received; retry the GET a bounded number of times.           |
-| `plan status`                                              | `invalid_server_response`     |    1 | First Draft returned a response that does not satisfy the status contract. The object includes `status`; retrying unchanged will not repair the mismatch.  |
-| `plan push`, `plan status`                                 | `server_rejected`             |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
-| `plan status --wait`                                       | `analysis_changed`            |    1 | A different current analysis appeared while polling. `current` contains its validated state; start a fresh wait to follow it explicitly.                   |
-| `plan status --wait`                                       | `wait_timed_out`              |    1 | The two-minute wait ended while processing continued. `current` contains the last validated state; another wait is safe.                                   |
-| `plan push`                                                | `local_state_not_saved`       |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
+After the current analysis is `valid`, choose an absent destination:
+
+```sh
+firstdraft plan compile --output ../oscar-party
+```
+
+The command conditionally starts one Compilation using the complete Foundation Plan ETag saved by the last
+successful push. It never reads an API origin from the current environment, retries an ambiguous `POST`, follows a
+replacement Compilation, or overwrites an output path. It polls the accepted Compilation sequentially once per
+second for at most ten minutes. A failed or cancelled Compilation is returned as a handled domain failure.
+
+On success, the CLI downloads the Compilation's deterministic artifact, verifies its media type, declared and actual
+byte sizes, strong digest ETag, exact-byte SHA-256, canonical UTF-8 JSON envelope, provenance, metadata-only manifest
+digest, portable paths, strict Base64 contents, file digests, modes, owners, and source-subject UUIDs. It writes
+exclusively into a uniquely created sibling directory, verifies the complete tree, and atomically renames that
+directory into the still-absent destination. On POSIX, generated directories, including the output root, are created
+and verified at mode `0755` independent of the caller's umask; files use their artifact-declared `0644` or `0755`
+mode. Windows cannot represent those POSIX permission distinctions, so the CLI still verifies the complete structure,
+contents, and digests there without claiming exact mode bits. The success JSON names the pinned Project and
+Compilation and reports the local output path, file count, and manifest digest; it never prints generated file
+contents or private local state.
+
+Every handled failure from `plan init`, `plan subject-id`, `plan push`, `plan status`, or `plan compile` writes
+exactly one JSON object to standard error. Agents should branch on its stable `error` value, not on the human-readable
+`detail`:
+
+| Commands                                                                   | `error`                          | Exit | Meaning                                                                                                                                                    |
+| -------------------------------------------------------------------------- | -------------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan init`, `plan subject-id`, `plan push`, `plan status`, `plan compile` | `invalid_arguments`              |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
+| `plan init`                                                                | `local_initialization_failed`    |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
+| `plan push`, `plan compile`                                                | `invalid_configuration`          |    2 | API configuration or the saved ETag is incompatible with the requested command; no request was made.                                                       |
+| `plan push`, `plan status`, `plan compile`                                 | `local_input_unreadable`         |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
+| `plan status`, `plan compile`                                              | `project_not_pushed`             |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
+| `plan push`, `plan compile`                                                | `request_outcome_unknown`        |    1 | A sent mutation or its response could not be verified. Stop and reconcile instead of retrying it automatically.                                            |
+| `plan status`                                                              | `status_unavailable`             |    1 | The network request or response stream failed. The object includes `status` when headers were received; retry the GET a bounded number of times.           |
+| `plan status`                                                              | `invalid_server_response`        |    1 | First Draft returned a response that does not satisfy the status contract. The object includes `status`; retrying unchanged will not repair the mismatch.  |
+| `plan push`, `plan status`                                                 | `server_rejected`                |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
+| `plan status --wait`                                                       | `analysis_changed`               |    1 | A different current analysis appeared while polling. `current` contains its validated state; start a fresh wait to follow it explicitly.                   |
+| `plan status --wait`                                                       | `wait_timed_out`                 |    1 | The two-minute wait ended while processing continued. `current` contains the last validated state; another wait is safe.                                   |
+| `plan push`                                                                | `local_state_not_saved`          |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
+| `plan compile`                                                             | `compilation_start_rejected`     |    1 | First Draft rejected the conditional start; a validated problem may be included as `response`.                                                             |
+| `plan compile`                                                             | `compilation_status_unavailable` |    1 | The first failed read stopped polling the pinned Compilation; a validated problem may be included.                                                         |
+| `plan compile`                                                             | `invalid_compilation_status`     |    1 | A status response violated the exact Compilation contract.                                                                                                 |
+| `plan compile`                                                             | `compilation_changed`            |    1 | Compilation identity, immutable metadata, or lifecycle progression changed while polling.                                                                  |
+| `plan compile`                                                             | `compilation_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status.                                                                               |
+| `plan compile`                                                             | `compilation_failed`             |    1 | The pinned Compilation failed; `current` contains its validated failure.                                                                                   |
+| `plan compile`                                                             | `compilation_cancelled`          |    1 | The pinned Compilation was cancelled.                                                                                                                      |
+| `plan compile`                                                             | `artifact_unavailable`           |    1 | The artifact GET failed or was rejected before materialization.                                                                                            |
+| `plan compile`                                                             | `invalid_artifact`               |    1 | Artifact transport metadata, bytes, provenance, manifest, or files failed validation.                                                                      |
+| `plan compile`                                                             | `invalid_output_path`            |    2 | The output is not absent beneath an existing real directory; no request was made.                                                                          |
+| `plan compile`                                                             | `materialization_failed`         |    1 | After artifact validation, filesystem state changed or the verified tree could not be written and atomically published.                                    |
 
 Handled failure output never includes command arguments, local Plan bytes, runtime paths, raw filesystem or network
 errors, or unvalidated response bodies. Optional fields inside a validated rejection diagnostic are omitted when
