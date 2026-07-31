@@ -16,14 +16,14 @@ import path from "node:path";
 
 const npmCli = requiredEnvironmentVariable("npm_execpath");
 
-/** @type {{version: string}} */
+/** @type {{name: string, version: string}} */
 const packageMetadata = JSON.parse(readFileSync("package.json", "utf8"));
 const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "firstdraft-cli-"));
 const installationDirectory = path.join(temporaryDirectory, "installation");
 const packedExecutable = path.join(
   installationDirectory,
   "node_modules",
-  "firstdraft",
+  ...packageMetadata.name.split("/"),
   "bin",
   "firstdraft.js",
 );
