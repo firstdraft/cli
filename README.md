@@ -3,15 +3,28 @@
 `firstdraft` is the command-line client for [First Draft](https://github.com/firstdraft/firstdraft). It is being
 built for agents that author and review Foundation Plans with their users.
 
-The package is not released yet. This repository contains the auditable command shell, local Foundation Plan
-initialization, subject identity generation, conditional whole-document push, and whole-graph analysis status
-polling, plus explicit compilation and verified local artifact materialization; release behavior will arrive in
-reviewed increments.
+Public alpha releases use npm's `next` tag. This release line contains the auditable command shell, local Foundation
+Plan initialization, subject identity generation, conditional whole-document push, whole-graph analysis status
+polling, explicit compilation, and verified local artifact materialization. Interfaces may change between
+prereleases, and publishing the CLI does not make the wider First Draft service generally available.
 
 ## Requirements
 
 - Running the CLI: Node.js 22.0.0 or newer
 - Working on this repository: Node.js 24.18.0 (pinned in `.tool-versions`)
+
+## Installation
+
+Once npm reports a public alpha, install the current prerelease explicitly:
+
+```sh
+npm install --global firstdraft@next
+firstdraft --version
+```
+
+There is intentionally no stable `latest` release yet. Pin an exact prerelease version instead of `next` when a
+repeatable installation matters. Remote Plan push, status, and compilation commands require a compatible First
+Draft service and are currently intended for coordinated trials.
 
 ## Development
 
@@ -161,7 +174,7 @@ unexpected programming defects.
   explicitly invoked API command.
 - Package contents are allowlisted and checked before release.
 - CI exercises the exact minimum Node.js version separately from current development tooling.
-- Public releases will use npm provenance after the first useful version bootstraps trusted publishing.
+- Public packages carry npm provenance linking their registry bytes to the reviewed GitHub workflow and commit.
 
 Security issues should follow the
 [private reporting instructions](https://github.com/firstdraft/cli/security/advisories/new).

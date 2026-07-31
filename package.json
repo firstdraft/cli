@@ -1,6 +1,6 @@
 {
   "name": "firstdraft",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "Command-line interface for First Draft",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,10 @@
   },
   "homepage": "https://github.com/firstdraft/cli#readme",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/",
+    "tag": "next"
   },
   "scripts": {
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run pack:check && npm run pack:smoke",
