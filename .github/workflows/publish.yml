@@ -1,0 +1,106 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+      - name: Verify tag and source commit
+        run: |
+          # release-source-checks:begin
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "firstdraft/cli"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_REF_TYPE" = "tag"
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_REF_PROTECTED" = "true"
+          release_sha="$(git rev-parse 'HEAD^{commit}')"
+          event_sha="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          test "$release_sha" = "$event_sha"
+          git fetch --force --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/tags/${GITHUB_REF_NAME}:refs/release-check/tag"
+          remote_tag_sha="$(git rev-parse 'refs/release-check/tag^{commit}')"
+          test "$release_sha" = "$remote_tag_sha"
+          package_version="$(node --print 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+          test "$GITHUB_REF_NAME" = "v$package_version"
+          git rev-list --first-parent refs/remotes/origin/main > "$RUNNER_TEMP/main-first-parent"
+          grep -Fqx "$release_sha" "$RUNNER_TEMP/main-first-parent"
+          # release-source-checks:end
+      - run: npm ci --ignore-scripts
+      - run: npm audit
+      - run: npm run check
+      - run: npm pack --dry-run --json --ignore-scripts
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org/
+      - name: Verify approved release
+        env:
+          NPM_RELEASE_ENABLED: ${{ vars.NPM_RELEASE_ENABLED }}
+        # Inline by design: no tagged repository script runs while the bootstrap secret is in scope.
+        # test/package.test.js enforces synchronization with verify.
+        run: |
+          # release-source-checks:begin
+          set -euo pipefail
+          test "$NPM_RELEASE_ENABLED" = "true"
+          test "$GITHUB_REPOSITORY" = "firstdraft/cli"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_REF_TYPE" = "tag"
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_REF_PROTECTED" = "true"
+          release_sha="$(git rev-parse 'HEAD^{commit}')"
+          event_sha="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          test "$release_sha" = "$event_sha"
+          git fetch --force --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/tags/${GITHUB_REF_NAME}:refs/release-check/tag"
+          remote_tag_sha="$(git rev-parse 'refs/release-check/tag^{commit}')"
+          test "$release_sha" = "$remote_tag_sha"
+          package_version="$(node --print 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+          test "$GITHUB_REF_NAME" = "v$package_version"
+          git rev-list --first-parent refs/remotes/origin/main > "$RUNNER_TEMP/main-first-parent"
+          grep -Fqx "$release_sha" "$RUNNER_TEMP/main-first-parent"
+          # release-source-checks:end
+      - name: Publish verified source
+        run: npm publish --access public --tag next --provenance --ignore-scripts
+        # Remove this credential after the first publish enables trusted publishing.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
