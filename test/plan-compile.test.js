@@ -28,6 +28,7 @@ const ANALYSIS_ID = "01900000-0000-7000-8000-000000000705";
 const SUBJECT_ID = "01900000-0000-7000-8000-000000000706";
 const HEAD_SHA256 = "1".repeat(64);
 const ETAG = `"sha256:${HEAD_SHA256}"`;
+const API_TOKEN = `fd_${"a".repeat(43)}`;
 const CREATED_AT = "2026-07-30T12:00:00.000Z";
 const STARTED_AT = "2026-07-30T12:00:01.000Z";
 const COMPLETED_AT = "2026-07-30T12:00:02.000Z";
@@ -44,6 +45,9 @@ Usage:
 Options:
       --output <absent-path>  Materialize the generated application here
   -h, --help                  Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
 The command starts one compilation of the exact Plan ETag pinned by the
 last successful push, waits up to ten minutes, validates the complete
@@ -139,6 +143,7 @@ test("plan compile uses one pinned POST, sequential polling, and one artifact GE
   assert(start);
   assert.equal(start.body.byteLength, 0);
   assert.equal(start.headers["if-match"], ETAG);
+  assert.equal(start.headers.authorization, `Bearer ${API_TOKEN}`);
   assert.equal(
     start.headers.accept,
     "application/json, application/problem+json",
@@ -150,12 +155,14 @@ test("plan compile uses one pinned POST, sequential polling, and one artifact GE
       statusRequest.headers.accept,
       "application/json, application/problem+json",
     );
+    assert.equal(statusRequest.headers.authorization, `Bearer ${API_TOKEN}`);
   }
   assert(artifactRequest);
   assert.equal(
     artifactRequest.headers.accept,
     `${ARTIFACT_MEDIA_TYPE}, application/problem+json`,
   );
+  assert.equal(artifactRequest.headers.authorization, `Bearer ${API_TOKEN}`);
   assert.equal(
     readFileSync(path.join(output, "app/models/movie.rb"), "utf8"),
     "class Movie < ApplicationRecord\nend\n",
@@ -308,6 +315,90 @@ test("a validated start rejection is safe and does not poll", async (context) =>
     },
   });
   assert.equal(result.status, 1);
+});
+
+test("missing credentials and validated 401 responses use one stable authentication error", async (context) => {
+  const missingDirectory = remoteDirectory(context, "https://api.example.test");
+  let requests = 0;
+  const missing = await invoke(
+    ["plan", "compile", "--output", "missing-auth-output"],
+    {
+      cwd: missingDirectory,
+      apiToken: "",
+      fetchFunction: async () => {
+        requests += 1;
+        throw new Error("request must not be sent");
+      },
+    },
+  );
+
+  assert.deepEqual(JSON.parse(missing.stderr), {
+    error: "authentication_required",
+    detail:
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+  });
+  assert.equal(missing.status, 1);
+  assert.equal(requests, 0);
+
+  const stages = [
+    [
+      problemResponse(
+        401,
+        "authentication_required",
+        "Provide a valid API token.",
+      ),
+    ],
+    [
+      jsonResponse(compilationBody("queued"), 202, {
+        Location: STATUS_PATH,
+      }),
+      problemResponse(
+        401,
+        "authentication_required",
+        "Provide a valid API token.",
+      ),
+    ],
+    [
+      jsonResponse(
+        compilationBody("succeeded", { artifact: artifactFixture() }),
+        202,
+        { Location: STATUS_PATH },
+      ),
+      problemResponse(
+        401,
+        "authentication_required",
+        "Provide a valid API token.",
+      ),
+    ],
+  ];
+
+  for (const [index, responses] of stages.entries()) {
+    const cwd = remoteDirectory(context, `https://api-${index}.example.test`);
+    const result = await invoke(
+      ["plan", "compile", "--output", `auth-output-${index}`],
+      {
+        cwd,
+        fetchFunction: sequenceFetch(responses),
+        planCompileSleep: async () => undefined,
+      },
+    );
+
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: "authentication_required",
+      detail:
+        "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+      status: 401,
+      response: {
+        type: "about:blank",
+        title: "Unauthorized",
+        status: 401,
+        code: "authentication_required",
+        detail: "Provide a valid API token.",
+      },
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.includes(API_TOKEN), false);
+  }
 });
 
 test("an unvalidated non-success start response remains ambiguous", async (context) => {
@@ -935,7 +1026,12 @@ function problemResponse(status, code, detail) {
   return new Response(
     JSON.stringify({
       type: "about:blank",
-      title: status === 409 ? "Conflict" : "Service Unavailable",
+      title:
+        status === 401
+          ? "Unauthorized"
+          : status === 409
+            ? "Conflict"
+            : "Service Unavailable",
       status,
       code,
       detail,
@@ -1025,6 +1121,7 @@ async function invoke(argv, options = {}) {
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
+    apiToken: API_TOKEN,
     ...options,
   });
   return { status, stdout, stderr };

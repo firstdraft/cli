@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const npmCli = requiredEnvironmentVariable("npm_execpath");
+const apiToken = `fd_${"a".repeat(43)}`;
 
 /** @type {{name: string, version: string}} */
 const packageMetadata = JSON.parse(readFileSync("package.json", "utf8"));
@@ -223,6 +224,7 @@ function spawnPackedCli(arguments_, cwd = process.cwd()) {
   return spawnSync(process.execPath, [packedExecutable, ...arguments_], {
     cwd,
     encoding: "utf8",
+    env: { ...process.env, FIRSTDRAFT_API_TOKEN: apiToken },
   });
 }
 
@@ -233,6 +235,7 @@ function spawnPackedCli(arguments_, cwd = process.cwd()) {
 async function spawnPackedCliAsync(arguments_, cwd) {
   const child = spawn(process.execPath, [packedExecutable, ...arguments_], {
     cwd,
+    env: { ...process.env, FIRSTDRAFT_API_TOKEN: apiToken },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -342,6 +345,7 @@ async function exercisePackedCompilation(projectDirectory) {
       request.method === "POST" &&
       request.url === `/v1/projects/${projectId}/compilations`
     ) {
+      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
       assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
       assert.equal(requestBody.byteLength, 0);
       startRequestSeen = true;
@@ -349,6 +353,7 @@ async function exercisePackedCompilation(projectDirectory) {
       return;
     }
     if (request.method === "GET" && request.url === artifactPath) {
+      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
       artifactRequestSeen = true;
       response.writeHead(200, {
         "Content-Type": "application/vnd.firstdraft.compilation-artifact+json",

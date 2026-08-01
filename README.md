@@ -28,6 +28,20 @@ There is intentionally no stable `latest` release yet. Pin an exact prerelease v
 repeatable installation matters. Remote Plan push, status, and compilation commands require a compatible First
 Draft service and are currently intended for coordinated trials.
 
+## Authenticate API commands
+
+Create an API token in First Draft and provide it only through the environment when running a network command:
+
+```sh
+export FIRSTDRAFT_API_TOKEN="your-token"
+firstdraft plan push
+```
+
+`plan push`, `plan status`, and `plan compile` send the token as a Bearer credential on every API request. The CLI
+does not save it in `.firstdraft`, print it, or require it for local commands such as `plan init` and
+`plan subject-id`. Revoke the token in First Draft if it is exposed. A missing token, or First Draft's validated
+`401` problem response with the `authentication_required` code, produces that stable CLI error.
+
 ## Development
 
 ```sh
@@ -139,6 +153,7 @@ exactly one JSON object to standard error. Agents should branch on its stable `e
 | `plan init`, `plan subject-id`, `plan push`, `plan status`, `plan compile` | `invalid_arguments`              |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
 | `plan init`                                                                | `local_initialization_failed`    |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
 | `plan push`, `plan compile`                                                | `invalid_configuration`          |    2 | API configuration or the saved ETag is incompatible with the requested command; no request was made.                                                       |
+| `plan push`, `plan status`, `plan compile`                                 | `authentication_required`        |    1 | `FIRSTDRAFT_API_TOKEN` is missing, or First Draft returned a validated `401` problem with the `authentication_required` code; create or replace the token. |
 | `plan push`, `plan status`, `plan compile`                                 | `local_input_unreadable`         |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
 | `plan status`, `plan compile`                                              | `project_not_pushed`             |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
 | `plan push`, `plan compile`                                                | `request_outcome_unknown`        |    1 | A sent mutation or its response could not be verified. Stop and reconcile instead of retrying it automatically.                                            |

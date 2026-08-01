@@ -1,6 +1,10 @@
 import { parseArgs } from "node:util";
 
 import {
+  authenticatedFetch,
+  isAuthenticationProblem,
+} from "./api-authentication.js";
+import {
   CompilationArtifactInvalidError,
   CompilationArtifactResponseInvalidError,
   CompilationArtifactUnavailableError,
@@ -76,7 +80,8 @@ Options:
   -h, --help  Show help
 
 Environment:
-  FIRSTDRAFT_API_URL  Override the initial API origin
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_URL    Override the initial API origin
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
@@ -91,6 +96,9 @@ Options:
       --wait  Poll until the current analysis reaches a terminal status
   -h, --help  Show help
 
+Environment:
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
 `;
@@ -103,6 +111,9 @@ Usage:
 Options:
       --output <absent-path>  Materialize the generated application here
   -h, --help                  Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
 The command starts one compilation of the exact Plan ETag pinned by the
 last successful push, waits up to ten minutes, validates the complete
@@ -154,6 +165,8 @@ const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
   "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
+const AUTHENTICATION_REQUIRED_DETAIL =
+  "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.";
 const PLAN_STATUS_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan status --help' for usage.";
 const PLAN_STATUS_LOCAL_INPUT_UNREADABLE_DETAIL =
@@ -229,6 +242,7 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
  * @property {() => number} [planCompileNow]
  * @property {string} [apiUrl]
+ * @property {string} [apiToken]
  */
 
 /**
@@ -249,6 +263,7 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
  * @property {() => number} [planCompileNow]
  * @property {string} [apiUrl]
+ * @property {string} [apiToken]
  */
 
 /**
@@ -274,6 +289,7 @@ export async function run({
   planCompileSleep,
   planCompileNow,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
+  apiToken = process.env.FIRSTDRAFT_API_TOKEN,
 }) {
   if (argv[0] === "plan") {
     return runPlan({
@@ -294,6 +310,7 @@ export async function run({
       planCompileSleep,
       planCompileNow,
       apiUrl,
+      apiToken,
     });
   }
 
@@ -362,6 +379,7 @@ async function runPlan({
   planCompileSleep,
   planCompileNow,
   apiUrl,
+  apiToken,
 }) {
   if (argv[0] === "init") {
     return runPlanInit({
@@ -385,6 +403,7 @@ async function runPlan({
       createTemporaryId,
       createRequestSignal,
       apiUrl,
+      apiToken,
     });
   }
 
@@ -399,6 +418,7 @@ async function runPlan({
       createRequestSignal,
       planStatusSleep,
       planStatusNow,
+      apiToken,
     });
   }
 
@@ -413,6 +433,7 @@ async function runPlan({
       createRequestSignal,
       planCompileSleep,
       planCompileNow,
+      apiToken,
     });
   }
 
@@ -484,7 +505,7 @@ function runPlanSubjectId({ argv, stdout, stderr, createSubjectId }) {
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken">} options
  */
 async function runPlanPush({
   argv,
@@ -496,6 +517,7 @@ async function runPlanPush({
   createTemporaryId,
   createRequestSignal,
   apiUrl,
+  apiToken,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -520,12 +542,18 @@ async function runPlanPush({
     return 0;
   }
 
+  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
+  if (authorizedFetch === null) {
+    writeAuthenticationRequired(stderr);
+    return 1;
+  }
+
   let result;
   try {
     result = await pushPlan({
       cwd,
       apiUrl,
-      fetchFunction,
+      fetchFunction: authorizedFetch,
       fileSystem: planPushFileSystem,
       createTemporaryId,
       createRequestSignal,
@@ -583,6 +611,10 @@ async function runPlanPush({
     }
 
     const response = safeRejectedResponse(result.responseKind, result.body);
+    if (isAuthenticationProblem(result.status, response)) {
+      writeAuthenticationRequired(stderr, result.status, response);
+      return 1;
+    }
     writeJson(stderr, {
       error: "server_rejected",
       detail: PLAN_PUSH_SERVER_REJECTED_DETAIL,
@@ -603,7 +635,7 @@ async function runPlanPush({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiToken">} options
  */
 async function runPlanStatus({
   argv,
@@ -615,6 +647,7 @@ async function runPlanStatus({
   createRequestSignal,
   planStatusSleep,
   planStatusNow,
+  apiToken,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -642,12 +675,18 @@ async function runPlanStatus({
     return 0;
   }
 
+  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
+  if (authorizedFetch === null) {
+    writeAuthenticationRequired(stderr);
+    return 1;
+  }
+
   let result;
   try {
     result = await readPlanStatus({
       cwd,
       wait: parsed.values.wait,
-      fetchFunction,
+      fetchFunction: authorizedFetch,
       fileSystem: planPushFileSystem,
       createRequestSignal,
       sleep: planStatusSleep,
@@ -720,6 +759,10 @@ async function runPlanStatus({
     }
 
     const response = safeRejectedResponse(result.responseKind, result.body);
+    if (isAuthenticationProblem(result.status, response)) {
+      writeAuthenticationRequired(stderr, result.status, response);
+      return 1;
+    }
     writeJson(stderr, {
       error: "server_rejected",
       detail: PLAN_STATUS_SERVER_REJECTED_DETAIL,
@@ -734,7 +777,7 @@ async function runPlanStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planCompileSleep" | "planCompileNow">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "apiToken">} options
  */
 async function runPlanCompile({
   argv,
@@ -746,6 +789,7 @@ async function runPlanCompile({
   createRequestSignal,
   planCompileSleep,
   planCompileNow,
+  apiToken,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -785,18 +829,38 @@ async function runPlanCompile({
     return 2;
   }
 
+  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
+  if (authorizedFetch === null) {
+    writeAuthenticationRequired(stderr);
+    return 1;
+  }
+
   let result;
   try {
     result = await compilePlan({
       cwd,
       output: parsed.values.output,
-      fetchFunction,
+      fetchFunction: authorizedFetch,
       fileSystem: planPushFileSystem,
       createRequestSignal,
       sleep: planCompileSleep,
       now: planCompileNow,
     });
   } catch (error) {
+    if (
+      (error instanceof CompilationStartRejectedError ||
+        error instanceof CompilationStatusUnavailableError ||
+        error instanceof CompilationArtifactUnavailableError) &&
+      isAuthenticationProblem(error.status, error.response)
+    ) {
+      writeAuthenticationRequired(
+        stderr,
+        error.status,
+        /** @type {Record<string, unknown>} */ (error.response),
+      );
+      return 1;
+    }
+
     if (error instanceof PlanPushLocalError) {
       writeJson(stderr, {
         error: "local_input_unreadable",
@@ -1099,6 +1163,20 @@ function isParseArgsError(error) {
 /** @param {Writer} writer @param {unknown} value */
 function writeJson(writer, value) {
   writer.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * @param {Writer} writer
+ * @param {number} [status]
+ * @param {Record<string, unknown>} [response]
+ */
+function writeAuthenticationRequired(writer, status, response) {
+  writeJson(writer, {
+    error: "authentication_required",
+    detail: AUTHENTICATION_REQUIRED_DETAIL,
+    ...(status === undefined ? {} : { status }),
+    ...(response === undefined ? {} : { response }),
+  });
 }
 
 /**

@@ -24,6 +24,7 @@ const ANALYSIS_ID = "01900000-0000-7000-8000-000000000401";
 const OTHER_ANALYSIS_ID = "01900000-0000-7000-8000-000000000402";
 const SUBJECT_ID = "01900000-0000-7000-8000-000000000501";
 const API_URL = "https://api.example.test";
+const API_TOKEN = `fd_${"a".repeat(43)}`;
 const ETAG = '"opaque:plan-validator"';
 const STARTED_AT = "2026-07-30T12:00:00.123Z";
 const COMPLETED_AT = "2026-07-30T12:00:01.456Z";
@@ -35,6 +36,9 @@ Usage:
 Options:
       --wait  Poll until the current analysis reaches a terminal status
   -h, --help  Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
@@ -134,6 +138,7 @@ test("plan status makes one bounded GET to only the pinned origin", async (conte
     new Headers(call.init?.headers),
     new Headers({
       Accept: "application/json, application/problem+json",
+      Authorization: `Bearer ${API_TOKEN}`,
     }),
   );
   assert.equal(call.init?.body, undefined);
@@ -604,6 +609,57 @@ test("validated problem responses are whitelisted for agent recovery", async (co
   assert.doesNotMatch(result.stderr, /canary-secret/);
 });
 
+test("missing credentials and a validated 401 use one stable authentication error", async (context) => {
+  const cwd = remoteDirectory(context);
+  let requests = 0;
+  const missing = await invoke(["plan", "status"], {
+    cwd,
+    apiToken: "",
+    fetchFunction: async () => {
+      requests += 1;
+      throw new Error("request must not be sent");
+    },
+  });
+
+  assert.deepEqual(JSON.parse(missing.stderr), {
+    error: "authentication_required",
+    detail:
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+  });
+  assert.equal(missing.status, 1);
+  assert.equal(requests, 0);
+
+  const problem = {
+    type: "about:blank",
+    title: "Unauthorized",
+    status: 401,
+    code: "authentication_required",
+    detail: "Provide a valid API token.",
+    canary: "canary-secret-response-field",
+  };
+  const rejected = await invoke(["plan", "status"], {
+    cwd,
+    fetchFunction: recordingFetch([problemResponse(problem, 401)], []),
+  });
+
+  assert.deepEqual(JSON.parse(rejected.stderr), {
+    error: "authentication_required",
+    detail:
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+    status: 401,
+    response: {
+      type: "about:blank",
+      title: "Unauthorized",
+      status: 401,
+      code: "authentication_required",
+      detail: "Provide a valid API token.",
+    },
+  });
+  assert.equal(rejected.status, 1);
+  assert.doesNotMatch(rejected.stderr, /canary-secret/);
+  assert.equal(rejected.stderr.includes(API_TOKEN), false);
+});
+
 test("invalid HTTP responses are non-retryable and never expose their body", async (context) => {
   for (const response of [
     new Response("canary-secret-json", {
@@ -930,6 +986,7 @@ test("the packaged executable polls a real local analysis endpoint", async (cont
       cwd,
       env: {
         ...process.env,
+        FIRSTDRAFT_API_TOKEN: API_TOKEN,
         FIRSTDRAFT_API_URL: "https://canary-secret.example",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -951,6 +1008,7 @@ test("the packaged executable polls a real local analysis endpoint", async (cont
     requestHeaders?.accept,
     "application/json, application/problem+json",
   );
+  assert.equal(requestHeaders?.authorization, `Bearer ${API_TOKEN}`);
   assert.doesNotMatch(stdout, /canary-secret/);
 });
 
@@ -965,6 +1023,7 @@ async function invoke(argv, overrides = {}) {
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
+    apiToken: API_TOKEN,
     ...overrides,
   });
 

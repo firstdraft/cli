@@ -25,6 +25,7 @@ if (result.status !== 0) {
     "README.md",
     "bin/firstdraft.js",
     "package.json",
+    "src/api-authentication.js",
     "src/api-response.js",
     "src/cli.js",
     "src/commands/plan-compile.js",
