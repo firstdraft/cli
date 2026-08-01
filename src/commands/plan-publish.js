@@ -100,10 +100,14 @@ export class PublicationLocalStateError extends Error {}
 export class PublicationLocalPlanChangedError extends Error {}
 
 export class PublicationRequestOutcomeUnknownError extends Error {
-  /** @param {number | undefined} status */
-  constructor(status) {
+  /**
+   * @param {number | undefined} status
+   * @param {Record<string, unknown> | null} [response]
+   */
+  constructor(status, response = null) {
     super("The publication request outcome is unknown.");
     this.status = status;
+    this.response = response;
   }
 }
 
@@ -140,10 +144,14 @@ export class PublicationStatusInvalidError extends Error {
 }
 
 export class PublicationChangedError extends Error {
-  /** @param {PublicationResponse} current */
-  constructor(current) {
+  /**
+   * @param {PublicationResponse} current
+   * @param {PublicationResponse} rejected
+   */
+  constructor(current, rejected) {
     super("The pinned publication changed while it was being polled.");
     this.current = current;
+    this.rejected = rejected;
   }
 }
 
@@ -270,9 +278,18 @@ export async function publishPlan({
         reconciliationError instanceof PublicationStatusUnavailableError ||
         reconciliationError instanceof PublicationStatusInvalidError
       ) {
-        throw new PublicationRequestOutcomeUnknownError(
-          reconciliationError.status ?? error.status,
-        );
+        let status = reconciliationError.status ?? error.status;
+        let response = error.response;
+        if (
+          reconciliationError instanceof PublicationStatusUnavailableError &&
+          reconciliationError.response !== null
+        ) {
+          status = reconciliationError.status;
+          response = reconciliationError.response;
+        } else if (error.response !== null) {
+          status = error.status;
+        }
+        throw new PublicationRequestOutcomeUnknownError(status, response);
       }
 
       throw reconciliationError;
@@ -299,7 +316,7 @@ export async function publishPlan({
       ),
     });
     if (!samePublication(initial, next) || !validTransition(current, next)) {
-      throw new PublicationChangedError(next);
+      throw new PublicationChangedError(current, next);
     }
     current = next;
   }
@@ -362,6 +379,9 @@ async function startPublication({
     const problem = safeProblem(response, body);
     if (response.ok || problem === null) {
       throw new PublicationRequestOutcomeUnknownError(response.status);
+    }
+    if (response.status === 408 || response.status >= 500) {
+      throw new PublicationRequestOutcomeUnknownError(response.status, problem);
     }
 
     throw new PublicationStartRejectedError(response.status, problem);
@@ -742,6 +762,13 @@ function validPublicationStatusTransition(previous, current) {
       JSON.stringify(current.publication.failure) ===
         JSON.stringify(previous.publication.failure)
     );
+  }
+
+  if (
+    (from === "repository_unknown" && to === "provisioning_repository") ||
+    (from === "publication_unknown" && to === "publishing")
+  ) {
+    return false;
   }
 
   return publicationStage(to) >= publicationStage(from);

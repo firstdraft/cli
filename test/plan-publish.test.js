@@ -53,8 +53,9 @@ Options:
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
-The command publishes the exact Plan ETag pinned by the last successful
-push, waits up to ten minutes, and prints the private GitHub repository URL.
+The command conditionally creates or replays the Project's one Publication.
+Each Project can publish one retained Plan Head in this release. The command
+waits up to ten minutes and prints the private GitHub repository URL.
 `;
 
 test("plan publish sends one conditional singleton PUT and polls sequentially", async (context) => {
@@ -159,7 +160,7 @@ test("plan publish sends one conditional singleton PUT and polls sequentially", 
   assert.doesNotMatch(result.stdout, /canary-secret|sha256/);
 });
 
-test("a repeated singleton PUT returns its existing successful publication", async (context) => {
+test("a repeated singleton PUT accepts provenance matching local Plan state", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
@@ -205,6 +206,47 @@ test("an ambiguous PUT is reconciled by one safe singleton GET", async (context)
     ["PUT", "GET"],
   );
   assert.doesNotMatch(result.stdout, /canary-secret/);
+});
+
+test("an ambiguous PUT does not adopt a singleton from a different Plan Head", async (context) => {
+  const cwd = remoteDirectory(context, "https://api.example.test");
+  const retainedHead = "a".repeat(64);
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const result = await invoke(["plan", "publish"], {
+    cwd,
+    fetchFunction: sequenceFetch(
+      [
+        async () => {
+          throw new TypeError("ambiguous publication request");
+        },
+        jsonResponse(
+          publicationBody("succeeded", {
+            project: {
+              graph_version: 7,
+              head_source_sha256: retainedHead,
+            },
+            compilation: {
+              graph_version: 7,
+              head_source_sha256: retainedHead,
+            },
+          }),
+        ),
+      ],
+      calls,
+    ),
+  });
+
+  assertHandledFailure(result, "request_outcome_unknown");
+  assert.equal(JSON.parse(result.stderr).status, 200);
+  assert.match(
+    JSON.parse(result.stderr).detail,
+    /if this Project's Publication is retained for a different Plan Head, it cannot be repointed/,
+  );
+  assert.deepEqual(
+    calls.map(({ init }) => init?.method),
+    ["PUT", "GET"],
+  );
 });
 
 test("an invalid successful PUT response can reconcile to the exact singleton", async (context) => {
@@ -256,6 +298,10 @@ test("an unresolved ambiguous PUT remains outcome unknown without replaying the 
 
   assertHandledFailure(result, "request_outcome_unknown");
   assert.equal(JSON.parse(result.stderr).status, 404);
+  assert.equal(
+    JSON.parse(result.stderr).response.code,
+    "publication_not_found",
+  );
   assert.deepEqual(
     calls.map(({ init }) => init?.method),
     ["PUT", "GET"],
@@ -423,6 +469,54 @@ test("validated start rejections are distinct from unknown mutation outcomes", a
   assert.doesNotMatch(malformed.stderr, /canary-secret/);
 });
 
+test("validated timeout and server errors reconcile without replaying the PUT", async (context) => {
+  for (const status of [408, 503]) {
+    const cwd = remoteDirectory(context, "https://api.example.test");
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const result = await invoke(["plan", "publish"], {
+      cwd,
+      fetchFunction: sequenceFetch(
+        [
+          problemResponse(status, "publication_unavailable", "Try later."),
+          jsonResponse(publicationBody("succeeded")),
+        ],
+        calls,
+      ),
+    });
+
+    assert.deepEqual(result, {
+      status: 0,
+      stdout: `${REPOSITORY.html_url}\n`,
+      stderr: "",
+    });
+    assert.deepEqual(
+      calls.map(({ init }) => init?.method),
+      ["PUT", "GET"],
+    );
+  }
+
+  const cwd = remoteDirectory(context, "https://api.example.test");
+  const unresolved = await invoke(["plan", "publish"], {
+    cwd,
+    fetchFunction: sequenceFetch([
+      problemResponse(503, "publication_delayed", "Publication is delayed."),
+      new Response("canary-secret", { status: 500 }),
+    ]),
+  });
+
+  assertHandledFailure(unresolved, "request_outcome_unknown");
+  assert.equal(JSON.parse(unresolved.stderr).status, 503);
+  assert.deepEqual(JSON.parse(unresolved.stderr).response, {
+    type: "about:blank",
+    title: "Service Unavailable",
+    status: 503,
+    code: "publication_delayed",
+    detail: "Publication is delayed.",
+  });
+  assert.doesNotMatch(unresolved.stderr, /canary-secret/);
+});
+
 test("polling distinguishes unavailable and invalid status responses", async (context) => {
   const unavailableCwd = remoteDirectory(context, "https://api.example.test");
   const unavailable = await invoke(["plan", "publish"], {
@@ -485,6 +579,14 @@ test("polling rejects replacement identities, regressions, and repository mutati
         },
       }),
     },
+    {
+      initial: publicationBody("repository_unknown"),
+      changed: publicationBody("provisioning_repository"),
+    },
+    {
+      initial: publicationBody("publication_unknown"),
+      changed: publicationBody("publishing"),
+    },
   ];
 
   for (const { initial, changed } of cases) {
@@ -499,6 +601,9 @@ test("polling rejects replacement identities, regressions, and repository mutati
     });
 
     assertHandledFailure(result, "publication_changed");
+    const envelope = JSON.parse(result.stderr);
+    assert.deepEqual(envelope.current, initial);
+    assert.deepEqual(envelope.rejected, changed);
   }
 });
 
@@ -572,6 +677,13 @@ test("exact response shapes and coherent terminal projections are required", asy
     { ...publicationBody("succeeded"), canary: "canary-secret" },
     publicationBody("succeeded", {
       project: { head_source_sha256: "f".repeat(64) },
+    }),
+    publicationBody("succeeded", {
+      project: { graph_version: 7, head_source_sha256: "a".repeat(64) },
+      compilation: {
+        graph_version: 7,
+        head_source_sha256: "a".repeat(64),
+      },
     }),
     publicationBody("succeeded", {
       compilation: { artifact: null },
@@ -720,6 +832,7 @@ function problemResponse(status, code, detail) {
   const titles = {
     401: "Unauthorized",
     404: "Not Found",
+    408: "Request Timeout",
     412: "Precondition Failed",
     503: "Service Unavailable",
   };
