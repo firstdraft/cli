@@ -146,8 +146,9 @@ Options:
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
-The command publishes the exact Plan ETag pinned by the last successful
-push, waits up to ten minutes, and prints the private GitHub repository URL.
+The command conditionally creates or replays the Project's one Publication.
+Each Project can publish one retained Plan Head in this release. The command
+waits up to ten minutes and prints the private GitHub repository URL.
 `;
 
 const PLAN_SUBJECT_ID_HELP = `First Draft CLI
@@ -256,7 +257,7 @@ const PLAN_PUBLISH_NOT_PUSHED_DETAIL =
 const PLAN_PUBLISH_LOCAL_PLAN_CHANGED_DETAIL =
   "The local Foundation Plan has changed since its last successful push. Run 'firstdraft plan push' before publishing.";
 const PLAN_PUBLISH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The publication may have started, but its singleton status could not be reconciled. Run 'firstdraft plan publish' again to safely replay the same conditional request.";
+  "The publication may have started, but its singleton status could not be verified. No mutation was retried. Running 'firstdraft plan publish' again is safe; if this Project's Publication is retained for a different Plan Head, it cannot be repointed.";
 const PLAN_PUBLISH_START_REJECTED_DETAIL =
   "First Draft rejected the publication request.";
 const PLAN_PUBLISH_STATUS_UNAVAILABLE_DETAIL =
@@ -1191,6 +1192,7 @@ async function runPlanPublish({
         error: "request_outcome_unknown",
         detail: PLAN_PUBLISH_REQUEST_OUTCOME_UNKNOWN_DETAIL,
         ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
       });
       return 1;
     }
@@ -1229,6 +1231,7 @@ async function runPlanPublish({
         error: "publication_changed",
         detail: PLAN_PUBLISH_CHANGED_DETAIL,
         current: error.current,
+        rejected: error.rejected,
       });
       return 1;
     }

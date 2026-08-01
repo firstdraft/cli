@@ -158,16 +158,46 @@ push. It then conditionally creates or reuses the Project's singleton GitHub Pub
 saved ETag in `If-Match`. It sends no request when the Plan changed locally; run `plan push` to validate and accept
 those bytes first.
 
-For this application route, `If-Match` is explicitly a precondition on the Project's current Foundation Plan head,
-not a cache validator for the possibly absent Publication representation. The server route must consume that domain
-precondition directly instead of delegating it to generic conditional-response middleware.
+For this application route, `If-Match` is a domain precondition, not a cache validator for the possibly absent
+Publication representation. A first creation compares it with the Project's current Foundation Plan Head. A
+singleton replay compares it with the Publication's retained Head provenance, even if the live Project has since
+changed. The server route must apply those semantics directly instead of delegating to generic conditional-response
+middleware.
 
 A repeated command safely receives the same Publication instead of creating another. If the first mutation's
 response is lost or invalid, the CLI makes one read-only singleton `GET` to reconcile it and never automatically
 repeats the mutation. An unresolved request reports `request_outcome_unknown`; running the same command again safely
-replays the singleton request. The CLI polls a validated Publication sequentially once per second for at most ten
-minutes and rejects changes to its Project, Plan digest, Compilation input digest, Publication, or allocated
-repository identity.
+replays the singleton request. A `408` or `5xx` start response is ambiguous even with a valid problem, so the CLI
+uses the same read-only reconciliation; every other validated rejection is definitive and must not have created or
+changed a Publication.
+
+When `request_outcome_unknown` includes `status` and `response`, a validated problem from the reconciliation `GET`
+takes precedence; otherwise they describe the `PUT`. A `status` without `response` may be a success code when the
+read returned a structurally invalid or foreign projection. Never infer from this error alone that no mutation
+occurred.
+
+The response's `project` object is immutable Publication provenance, not a projection of the live mutable Project.
+Every `201`, `200`, and read-only `GET` response must retain the graph version and Head digest selected when the
+Publication was created. The CLI requires that retained Head digest to equal the local Plan bytes and saved ETag,
+requires the associated Compilation to agree with the retained Project snapshot, and pins the snapshot for the
+rest of polling. This lets a command whose local state still names the original Head safely replay after the live
+Project changes elsewhere. A local file/state pair advanced to a newer Head cannot adopt the older Publication.
+This release supports one Publication bound to one retained Head for the lifetime of each Project. It cannot
+re-point that Publication or publish a later accepted Head, and no same-Project republish path exists yet.
+
+The CLI polls a validated Publication sequentially once per second for at most ten minutes and rejects changes to
+its retained Project provenance, Compilation input, Publication identity, or allocated repository identity.
+`repository_unknown` and `publication_unknown` are one-way server-side uncertainty states: polling remains
+read-only, and the CLI rejects a regression from either state to the corresponding mutating phase. Either state may
+still advance to a later phase or a terminal state when the server has enough evidence. The CLI does not offer a
+publication-cancel mutation; it only reports a server-authoritative `cancelled` terminal state and does not infer
+that cancellation reversed any remote side effect.
+
+Any non-success outcome after publication processing began may leave a private GitHub repository. A `current`
+projection identifies the last accepted repository when present; `publication_changed` also includes the rejected
+next projection. A null or missing repository does not prove that none was created, especially after
+`repository_unknown`. Use a safe command replay or direct GitHub inspection to find every repository. The CLI never
+deletes one; inspect it before separately deciding whether destructive GitHub deletion is appropriate.
 
 On success, stdout contains only the validated `https://github.com/OWNER/REPOSITORY` URL. Repository conflicts and
 other failed publication phases include the validated terminal state in a handled `publication_failed` error. This
@@ -188,7 +218,7 @@ exactly one JSON object to standard error. Agents should branch on its stable `e
 | `plan push`, `plan status`, `plan compile`, `plan publish`                                 | `local_input_unreadable`         |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
 | `plan status`, `plan compile`, `plan publish`                                              | `project_not_pushed`             |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
 | `plan push`, `plan compile`                                                                | `request_outcome_unknown`        |    1 | A sent mutation or its response could not be verified. Stop and reconcile instead of retrying it automatically.                                            |
-| `plan publish`                                                                             | `request_outcome_unknown`        |    1 | The singleton could not be reconciled after an ambiguous `PUT`; repeating `plan publish` safely replays the same conditional resource request.             |
+| `plan publish`                                                                             | `request_outcome_unknown`        |    1 | The ambiguous PUT could not be reconciled. No mutation was retried; retry is safe, and a validated problem may be included.                                |
 | `plan status`                                                                              | `status_unavailable`             |    1 | The network request or response stream failed. The object includes `status` when headers were received; retry the GET a bounded number of times.           |
 | `plan status`                                                                              | `invalid_server_response`        |    1 | First Draft returned a response that does not satisfy the status contract. The object includes `status`; retrying unchanged will not repair the mismatch.  |
 | `plan push`, `plan status`                                                                 | `server_rejected`                |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
@@ -207,11 +237,11 @@ exactly one JSON object to standard error. Agents should branch on its stable `e
 | `plan compile`                                                                             | `invalid_output_path`            |    2 | The output is not absent beneath an existing real directory; no request was made.                                                                          |
 | `plan compile`                                                                             | `materialization_failed`         |    1 | After artifact validation, filesystem state changed or the verified tree could not be written and atomically published.                                    |
 | `plan publish`                                                                             | `local_plan_changed`             |    1 | Local Plan bytes no longer match the last successful push; push the complete Plan before publishing.                                                       |
-| `plan publish`                                                                             | `publication_start_rejected`     |    1 | First Draft definitively rejected the conditional singleton request; a validated problem is included.                                                      |
-| `plan publish`                                                                             | `publication_status_unavailable` |    1 | The first failed singleton read stopped polling; a validated problem may be included.                                                                      |
+| `plan publish`                                                                             | `publication_start_rejected`     |    1 | First Draft definitively rejected the conditional singleton request; no Publication was created or changed, and a validated problem is included.           |
+| `plan publish`                                                                             | `publication_status_unavailable` |    1 | The first failed singleton read stopped polling; rerun `plan publish` to replay the singleton and resume. A validated problem may be included.             |
 | `plan publish`                                                                             | `invalid_publication_status`     |    1 | A status response violated the complete Project, Compilation, Publication, or repository projection contract.                                              |
-| `plan publish`                                                                             | `publication_changed`            |    1 | Publication identity, immutable metadata, repository identity, or lifecycle progression changed while polling.                                             |
-| `plan publish`                                                                             | `publication_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status.                                                                               |
+| `plan publish`                                                                             | `publication_changed`            |    1 | Publication identity, metadata, repository, or lifecycle changed. `current` is the pinned projection and `rejected` is the next response; rerun to resume. |
+| `plan publish`                                                                             | `publication_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status. Rerun `plan publish` to resume.                                               |
 | `plan publish`                                                                             | `publication_failed`             |    1 | The pinned Publication failed or reached `repository_conflict`; `current` contains its validated failure.                                                  |
 | `plan publish`                                                                             | `publication_cancelled`          |    1 | The pinned Publication was cancelled; `current` contains its validated terminal state.                                                                     |
 
