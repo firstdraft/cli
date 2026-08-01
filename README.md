@@ -5,8 +5,9 @@ built for agents that author and review Foundation Plans with their users.
 
 Public alpha releases use npm's `next` tag. This release line contains the auditable command shell, local Foundation
 Plan initialization, subject identity generation, conditional whole-document push, whole-graph analysis status
-polling, explicit compilation, and verified local artifact materialization. Interfaces may change between
-prereleases, and publishing the CLI does not make the wider First Draft service generally available.
+polling, explicit compilation, verified local artifact materialization, and conditional GitHub publication.
+Interfaces may change between prereleases, and publishing the CLI does not make the wider First Draft service
+generally available.
 
 ## Requirements
 
@@ -25,8 +26,8 @@ firstdraft --version
 The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable.
 
 There is intentionally no stable `latest` release yet. Pin an exact prerelease version instead of `next` when a
-repeatable installation matters. Remote Plan push, status, and compilation commands require a compatible First
-Draft service and are currently intended for coordinated trials.
+repeatable installation matters. Remote Plan push, status, compilation, and publication commands require a
+compatible First Draft service and are currently intended for coordinated trials.
 
 ## Authenticate API commands
 
@@ -37,8 +38,8 @@ export FIRSTDRAFT_API_TOKEN="your-token"
 firstdraft plan push
 ```
 
-`plan push`, `plan status`, and `plan compile` send the token as a Bearer credential on every API request. The CLI
-does not save it in `.firstdraft`, print it, or require it for local commands such as `plan init` and
+`plan push`, `plan status`, `plan compile`, and `plan publish` send the token as a Bearer credential on every API
+request. The CLI does not save it in `.firstdraft`, print it, or require it for local commands such as `plan init` and
 `plan subject-id`. Revoke the token in First Draft if it is exposed. A missing token, or First Draft's validated
 `401` problem response with the `authentication_required` code, produces that stable CLI error.
 
@@ -144,36 +145,75 @@ contents, and digests there without claiming exact mode bits. The success JSON n
 Compilation and reports the local output path, file count, and manifest digest; it never prints generated file
 contents or private local state.
 
-Every handled failure from `plan init`, `plan subject-id`, `plan push`, `plan status`, or `plan compile` writes
+## Publish a valid Plan to GitHub
+
+To compile the accepted Plan and publish it as a new private repository in your connected personal GitHub account:
+
+```sh
+firstdraft plan publish
+```
+
+The command first verifies that the exact local Plan bytes still match the strong ETag saved by the last successful
+push. It then conditionally creates or reuses the Project's singleton GitHub Publication with one `PUT` and the full
+saved ETag in `If-Match`. It sends no request when the Plan changed locally; run `plan push` to validate and accept
+those bytes first.
+
+For this application route, `If-Match` is explicitly a precondition on the Project's current Foundation Plan head,
+not a cache validator for the possibly absent Publication representation. The server route must consume that domain
+precondition directly instead of delegating it to generic conditional-response middleware.
+
+A repeated command safely receives the same Publication instead of creating another. If the first mutation's
+response is lost or invalid, the CLI makes one read-only singleton `GET` to reconcile it and never automatically
+repeats the mutation. An unresolved request reports `request_outcome_unknown`; running the same command again safely
+replays the singleton request. The CLI polls a validated Publication sequentially once per second for at most ten
+minutes and rejects changes to its Project, Plan digest, Compilation input digest, Publication, or allocated
+repository identity.
+
+On success, stdout contains only the validated `https://github.com/OWNER/REPOSITORY` URL. Repository conflicts and
+other failed publication phases include the validated terminal state in a handled `publication_failed` error. This
+client currently assumes the provisional `{ project, compilation, publication }` response described by its tests;
+the server route is not yet implemented, and no live GitHub publication smoke has been completed.
+
+Every handled failure from `plan init`, `plan subject-id`, `plan push`, `plan status`, `plan compile`, or
+`plan publish` writes
 exactly one JSON object to standard error. Agents should branch on its stable `error` value, not on the human-readable
 `detail`:
 
-| Commands                                                                   | `error`                          | Exit | Meaning                                                                                                                                                    |
-| -------------------------------------------------------------------------- | -------------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan init`, `plan subject-id`, `plan push`, `plan status`, `plan compile` | `invalid_arguments`              |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
-| `plan init`                                                                | `local_initialization_failed`    |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
-| `plan push`, `plan compile`                                                | `invalid_configuration`          |    2 | API configuration or the saved ETag is incompatible with the requested command; no request was made.                                                       |
-| `plan push`, `plan status`, `plan compile`                                 | `authentication_required`        |    1 | `FIRSTDRAFT_API_TOKEN` is missing, or First Draft returned a validated `401` problem with the `authentication_required` code; create or replace the token. |
-| `plan push`, `plan status`, `plan compile`                                 | `local_input_unreadable`         |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
-| `plan status`, `plan compile`                                              | `project_not_pushed`             |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
-| `plan push`, `plan compile`                                                | `request_outcome_unknown`        |    1 | A sent mutation or its response could not be verified. Stop and reconcile instead of retrying it automatically.                                            |
-| `plan status`                                                              | `status_unavailable`             |    1 | The network request or response stream failed. The object includes `status` when headers were received; retry the GET a bounded number of times.           |
-| `plan status`                                                              | `invalid_server_response`        |    1 | First Draft returned a response that does not satisfy the status contract. The object includes `status`; retrying unchanged will not repair the mismatch.  |
-| `plan push`, `plan status`                                                 | `server_rejected`                |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
-| `plan status --wait`                                                       | `analysis_changed`               |    1 | A different current analysis appeared while polling. `current` contains its validated state; start a fresh wait to follow it explicitly.                   |
-| `plan status --wait`                                                       | `wait_timed_out`                 |    1 | The two-minute wait ended while processing continued. `current` contains the last validated state; another wait is safe.                                   |
-| `plan push`                                                                | `local_state_not_saved`          |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
-| `plan compile`                                                             | `compilation_start_rejected`     |    1 | First Draft rejected the conditional start; a validated problem may be included as `response`.                                                             |
-| `plan compile`                                                             | `compilation_status_unavailable` |    1 | The first failed read stopped polling the pinned Compilation; a validated problem may be included.                                                         |
-| `plan compile`                                                             | `invalid_compilation_status`     |    1 | A status response violated the exact Compilation contract.                                                                                                 |
-| `plan compile`                                                             | `compilation_changed`            |    1 | Compilation identity, immutable metadata, or lifecycle progression changed while polling.                                                                  |
-| `plan compile`                                                             | `compilation_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status.                                                                               |
-| `plan compile`                                                             | `compilation_failed`             |    1 | The pinned Compilation failed; `current` contains its validated failure.                                                                                   |
-| `plan compile`                                                             | `compilation_cancelled`          |    1 | The pinned Compilation was cancelled.                                                                                                                      |
-| `plan compile`                                                             | `artifact_unavailable`           |    1 | The artifact GET failed or was rejected before materialization.                                                                                            |
-| `plan compile`                                                             | `invalid_artifact`               |    1 | Artifact transport metadata, bytes, provenance, manifest, or files failed validation.                                                                      |
-| `plan compile`                                                             | `invalid_output_path`            |    2 | The output is not absent beneath an existing real directory; no request was made.                                                                          |
-| `plan compile`                                                             | `materialization_failed`         |    1 | After artifact validation, filesystem state changed or the verified tree could not be written and atomically published.                                    |
+| Commands                                                                                   | `error`                          | Exit | Meaning                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------ | -------------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan init`, `plan subject-id`, `plan push`, `plan status`, `plan compile`, `plan publish` | `invalid_arguments`              |    2 | The command syntax is invalid; nothing was written and no request was made.                                                                                |
+| `plan init`                                                                                | `local_initialization_failed`    |    1 | Local initialization failed. The directory may be incomplete; existing files were not overwritten.                                                         |
+| `plan push`, `plan compile`, `plan publish`                                                | `invalid_configuration`          |    2 | API configuration or the saved ETag is incompatible with the requested command; no request was made.                                                       |
+| `plan push`, `plan status`, `plan compile`, `plan publish`                                 | `authentication_required`        |    1 | `FIRSTDRAFT_API_TOKEN` is missing, or First Draft returned a validated `401` problem with the `authentication_required` code; create or replace the token. |
+| `plan push`, `plan status`, `plan compile`, `plan publish`                                 | `local_input_unreadable`         |    1 | The required local Plan or private state could not be read; no request was made.                                                                           |
+| `plan status`, `plan compile`, `plan publish`                                              | `project_not_pushed`             |    1 | Local state is valid but has no pinned remote Project yet; run `plan push` first.                                                                          |
+| `plan push`, `plan compile`                                                                | `request_outcome_unknown`        |    1 | A sent mutation or its response could not be verified. Stop and reconcile instead of retrying it automatically.                                            |
+| `plan publish`                                                                             | `request_outcome_unknown`        |    1 | The singleton could not be reconciled after an ambiguous `PUT`; repeating `plan publish` safely replays the same conditional resource request.             |
+| `plan status`                                                                              | `status_unavailable`             |    1 | The network request or response stream failed. The object includes `status` when headers were received; retry the GET a bounded number of times.           |
+| `plan status`                                                                              | `invalid_server_response`        |    1 | First Draft returned a response that does not satisfy the status contract. The object includes `status`; retrying unchanged will not repair the mismatch.  |
+| `plan push`, `plan status`                                                                 | `server_rejected`                |    1 | First Draft returned a validated rejection. The object includes `status` and a whitelisted `response` containing validated problem details or diagnostics. |
+| `plan status --wait`                                                                       | `analysis_changed`               |    1 | A different current analysis appeared while polling. `current` contains its validated state; start a fresh wait to follow it explicitly.                   |
+| `plan status --wait`                                                                       | `wait_timed_out`                 |    1 | The two-minute wait ended while processing continued. `current` contains the last validated state; another wait is safe.                                   |
+| `plan push`                                                                                | `local_state_not_saved`          |    1 | The server accepted the Plan, but local state replacement failed. This is the only error that includes private `recovery_state`.                           |
+| `plan compile`                                                                             | `compilation_start_rejected`     |    1 | First Draft rejected the conditional start; a validated problem may be included as `response`.                                                             |
+| `plan compile`                                                                             | `compilation_status_unavailable` |    1 | The first failed read stopped polling the pinned Compilation; a validated problem may be included.                                                         |
+| `plan compile`                                                                             | `invalid_compilation_status`     |    1 | A status response violated the exact Compilation contract.                                                                                                 |
+| `plan compile`                                                                             | `compilation_changed`            |    1 | Compilation identity, immutable metadata, or lifecycle progression changed while polling.                                                                  |
+| `plan compile`                                                                             | `compilation_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status.                                                                               |
+| `plan compile`                                                                             | `compilation_failed`             |    1 | The pinned Compilation failed; `current` contains its validated failure.                                                                                   |
+| `plan compile`                                                                             | `compilation_cancelled`          |    1 | The pinned Compilation was cancelled.                                                                                                                      |
+| `plan compile`                                                                             | `artifact_unavailable`           |    1 | The artifact GET failed or was rejected before materialization.                                                                                            |
+| `plan compile`                                                                             | `invalid_artifact`               |    1 | Artifact transport metadata, bytes, provenance, manifest, or files failed validation.                                                                      |
+| `plan compile`                                                                             | `invalid_output_path`            |    2 | The output is not absent beneath an existing real directory; no request was made.                                                                          |
+| `plan compile`                                                                             | `materialization_failed`         |    1 | After artifact validation, filesystem state changed or the verified tree could not be written and atomically published.                                    |
+| `plan publish`                                                                             | `local_plan_changed`             |    1 | Local Plan bytes no longer match the last successful push; push the complete Plan before publishing.                                                       |
+| `plan publish`                                                                             | `publication_start_rejected`     |    1 | First Draft definitively rejected the conditional singleton request; a validated problem is included.                                                      |
+| `plan publish`                                                                             | `publication_status_unavailable` |    1 | The first failed singleton read stopped polling; a validated problem may be included.                                                                      |
+| `plan publish`                                                                             | `invalid_publication_status`     |    1 | A status response violated the complete Project, Compilation, Publication, or repository projection contract.                                              |
+| `plan publish`                                                                             | `publication_changed`            |    1 | Publication identity, immutable metadata, repository identity, or lifecycle progression changed while polling.                                             |
+| `plan publish`                                                                             | `publication_wait_timed_out`     |    1 | The ten-minute deadline ended; `current` contains the last validated status.                                                                               |
+| `plan publish`                                                                             | `publication_failed`             |    1 | The pinned Publication failed or reached `repository_conflict`; `current` contains its validated failure.                                                  |
+| `plan publish`                                                                             | `publication_cancelled`          |    1 | The pinned Publication was cancelled; `current` contains its validated terminal state.                                                                     |
 
 Handled failure output never includes command arguments, local Plan bytes, runtime paths, raw filesystem or network
 errors, or unvalidated response bodies. Optional fields inside a validated rejection diagnostic are omitted when

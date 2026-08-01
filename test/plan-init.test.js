@@ -31,6 +31,7 @@ Commands:
   push        Send the local Foundation Plan to First Draft
   status      Read the current whole-graph analysis status
   compile     Compile the accepted Plan into a new local directory
+  publish     Compile and publish the accepted Plan to GitHub
 
 Options:
   -h, --help  Show help

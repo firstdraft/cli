@@ -184,6 +184,26 @@ try {
       "Invalid arguments. Run 'firstdraft plan compile --help' for usage.",
   });
 
+  const invalidPublish = spawnPackedCli(
+    ["plan", "publish", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidPublish, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft plan publish --help' for usage.",
+  });
+
+  const localPublish = spawnPackedCli(
+    ["plan", "publish"],
+    installationDirectory,
+  );
+  assertHandledFailure(localPublish, 1, {
+    error: "local_input_unreadable",
+    detail:
+      "Could not read valid local First Draft state or Plan bytes. No network request was made. Run 'firstdraft plan push' before publishing.",
+  });
+
   await exercisePackedCompilation(projectDirectory);
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -258,7 +278,12 @@ async function exercisePackedCompilation(projectDirectory) {
   const projectId = "01900000-0000-7000-8000-000000000901";
   const compilationId = "01900000-0000-7000-8000-000000000902";
   const analysisId = "01900000-0000-7000-8000-000000000903";
-  const headSha256 = "1".repeat(64);
+  const publicationId = "01900000-0000-7000-8000-000000000904";
+  const headSha256 = sha256(
+    readFileSync(
+      path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
+    ),
+  );
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
   const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
@@ -334,8 +359,49 @@ async function exercisePackedCompilation(projectDirectory) {
       completed_at: "2026-07-30T12:00:02.000Z",
     },
   };
+  const repositoryUrl = "https://github.com/octocat/oscar-party";
+  const publication = {
+    project: {
+      id: projectId,
+      graph_version: 1,
+      head_source_sha256: headSha256,
+    },
+    compilation: {
+      id: compilationId,
+      analysis_run_id: analysisId,
+      graph_version: 1,
+      head_source_sha256: headSha256,
+      status: "succeeded",
+      compiler_release: compilerRelease,
+      target,
+      artifact: {
+        sha256: artifactSha256,
+        manifest_sha256: manifestSha256,
+        file_count: 1,
+      },
+    },
+    publication: {
+      id: publicationId,
+      status: "succeeded",
+      repository: {
+        id: 1_234_567,
+        private: true,
+        owner: { id: 7_654_321, login: "octocat", type: "User" },
+        full_name: "octocat/oscar-party",
+        default_branch: "main",
+        html_url: repositoryUrl,
+        tree_sha: "5".repeat(40),
+        commit_sha: "6".repeat(40),
+      },
+      failure: null,
+      created_at: "2026-07-30T12:00:00.000Z",
+      started_at: "2026-07-30T12:00:01.000Z",
+      completed_at: "2026-07-30T12:00:02.000Z",
+    },
+  };
   let startRequestSeen = false;
   let artifactRequestSeen = false;
+  let publicationRequestSeen = false;
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -361,6 +427,17 @@ async function exercisePackedCompilation(projectDirectory) {
         ETag: `"sha256:${artifactSha256}"`,
       });
       response.end(artifact);
+      return;
+    }
+    if (
+      request.method === "PUT" &&
+      request.url === `/v1/projects/${projectId}/github-publication`
+    ) {
+      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
+      assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
+      assert.equal(requestBody.byteLength, 0);
+      publicationRequestSeen = true;
+      respondJson(response, 201, publication);
       return;
     }
 
@@ -411,6 +488,17 @@ async function exercisePackedCompilation(projectDirectory) {
     }
     assert.equal(startRequestSeen, true);
     assert.equal(artifactRequestSeen, true);
+
+    const published = await spawnPackedCliAsync(
+      ["plan", "publish"],
+      projectDirectory,
+    );
+    assert.deepEqual(published, {
+      status: 0,
+      stdout: `${repositoryUrl}\n`,
+      stderr: "",
+    });
+    assert.equal(publicationRequestSeen, true);
   } finally {
     await new Promise(
       (

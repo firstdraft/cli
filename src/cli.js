@@ -24,6 +24,20 @@ import {
 } from "./commands/plan-compile.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
+  PublicationCancelledError,
+  PublicationChangedError,
+  PublicationFailedError,
+  PublicationLocalPlanChangedError,
+  PublicationLocalStateError,
+  PublicationNotPushedError,
+  PublicationRequestOutcomeUnknownError,
+  PublicationStartRejectedError,
+  PublicationStatusInvalidError,
+  PublicationStatusUnavailableError,
+  PublicationTimeoutError,
+  publishPlan,
+} from "./commands/plan-publish.js";
+import {
   PlanPushConfigurationError,
   PlanPushLocalError,
   PlanPushNetworkError,
@@ -66,6 +80,7 @@ Commands:
   push        Send the local Foundation Plan to First Draft
   status      Read the current whole-graph analysis status
   compile     Compile the accepted Plan into a new local directory
+  publish     Compile and publish the accepted Plan to GitHub
 
 Options:
   -h, --help  Show help
@@ -118,6 +133,21 @@ Environment:
 The command starts one compilation of the exact Plan ETag pinned by the
 last successful push, waits up to ten minutes, validates the complete
 artifact, and atomically renames it into an absent output path.
+`;
+
+const PLAN_PUBLISH_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan publish
+
+Options:
+  -h, --help  Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+
+The command publishes the exact Plan ETag pinned by the last successful
+push, waits up to ten minutes, and prints the private GitHub repository URL.
 `;
 
 const PLAN_SUBJECT_ID_HELP = `First Draft CLI
@@ -215,6 +245,31 @@ const PLAN_COMPILE_MATERIALIZATION_FAILED_DETAIL =
   "The validated Compilation artifact could not be materialized at the requested absent output path.";
 const PLAN_COMPILE_INVALID_OUTPUT_PATH_DETAIL =
   "The compilation output path must be absent beneath an existing real directory. No network request was made.";
+const PLAN_PUBLISH_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft plan publish --help' for usage.";
+const PLAN_PUBLISH_LOCAL_INPUT_UNREADABLE_DETAIL =
+  "Could not read valid local First Draft state or Plan bytes. No network request was made. Run 'firstdraft plan push' before publishing.";
+const PLAN_PUBLISH_INCOMPATIBLE_STATE_DETAIL =
+  "The saved Foundation Plan ETag is incompatible with publication. No network request was made; reconcile the CLI and server contract.";
+const PLAN_PUBLISH_NOT_PUSHED_DETAIL =
+  "The local Foundation Plan has not been pushed successfully. Run 'firstdraft plan push' before publishing.";
+const PLAN_PUBLISH_LOCAL_PLAN_CHANGED_DETAIL =
+  "The local Foundation Plan has changed since its last successful push. Run 'firstdraft plan push' before publishing.";
+const PLAN_PUBLISH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
+  "The publication may have started, but its singleton status could not be reconciled. Run 'firstdraft plan publish' again to safely replay the same conditional request.";
+const PLAN_PUBLISH_START_REJECTED_DETAIL =
+  "First Draft rejected the publication request.";
+const PLAN_PUBLISH_STATUS_UNAVAILABLE_DETAIL =
+  "Could not read the pinned publication status. The command stopped without starting another Publication.";
+const PLAN_PUBLISH_STATUS_INVALID_DETAIL =
+  "First Draft returned an invalid publication status response. Retrying unchanged will not repair this protocol mismatch.";
+const PLAN_PUBLISH_CHANGED_DETAIL =
+  "The pinned Publication changed while being polled. The command stopped without following a replacement.";
+const PLAN_PUBLISH_TIMEOUT_DETAIL =
+  "The pinned Publication is still processing after the bounded ten-minute wait.";
+const PLAN_PUBLISH_FAILED_DETAIL =
+  "The pinned Publication failed. Its validated status identifies the failed phase.";
+const PLAN_PUBLISH_CANCELLED_DETAIL = "The pinned Publication was cancelled.";
 const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.";
 
@@ -241,6 +296,8 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {() => number} [planStatusNow]
  * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
  * @property {() => number} [planCompileNow]
+ * @property {(delayMs: number) => Promise<void>} [planPublishSleep]
+ * @property {() => number} [planPublishNow]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
  */
@@ -262,6 +319,8 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {() => number} [planStatusNow]
  * @property {(delayMs: number) => Promise<void>} [planCompileSleep]
  * @property {() => number} [planCompileNow]
+ * @property {(delayMs: number) => Promise<void>} [planPublishSleep]
+ * @property {() => number} [planPublishNow]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
  */
@@ -288,6 +347,8 @@ export async function run({
   planStatusNow,
   planCompileSleep,
   planCompileNow,
+  planPublishSleep,
+  planPublishNow,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
   apiToken = process.env.FIRSTDRAFT_API_TOKEN,
 }) {
@@ -309,6 +370,8 @@ export async function run({
       planStatusNow,
       planCompileSleep,
       planCompileNow,
+      planPublishSleep,
+      planPublishNow,
       apiUrl,
       apiToken,
     });
@@ -378,6 +441,8 @@ async function runPlan({
   planStatusNow,
   planCompileSleep,
   planCompileNow,
+  planPublishSleep,
+  planPublishNow,
   apiUrl,
   apiToken,
 }) {
@@ -433,6 +498,21 @@ async function runPlan({
       createRequestSignal,
       planCompileSleep,
       planCompileNow,
+      apiToken,
+    });
+  }
+
+  if (argv[0] === "publish") {
+    return runPlanPublish({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd: cwd ?? getCwd(),
+      fetchFunction,
+      planPushFileSystem,
+      createRequestSignal,
+      planPublishSleep,
+      planPublishNow,
       apiToken,
     });
   }
@@ -1003,6 +1083,191 @@ async function runPlanCompile({
   }
 
   writeJson(stdout, result);
+  return 0;
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planPublishSleep" | "planPublishNow" | "apiToken">} options
+ */
+async function runPlanPublish({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  fetchFunction,
+  planPushFileSystem,
+  createRequestSignal,
+  planPublishSleep,
+  planPublishNow,
+  apiToken,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: { help: { type: "boolean", short: "h" } },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_PUBLISH_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(PLAN_PUBLISH_HELP);
+    return 0;
+  }
+
+  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
+  if (authorizedFetch === null) {
+    writeAuthenticationRequired(stderr);
+    return 1;
+  }
+
+  let result;
+  try {
+    result = await publishPlan({
+      cwd,
+      fetchFunction: authorizedFetch,
+      fileSystem: planPushFileSystem,
+      createRequestSignal,
+      sleep: planPublishSleep,
+      now: planPublishNow,
+    });
+  } catch (error) {
+    if (
+      (error instanceof PublicationStartRejectedError ||
+        error instanceof PublicationStatusUnavailableError) &&
+      isAuthenticationProblem(error.status, error.response)
+    ) {
+      writeAuthenticationRequired(
+        stderr,
+        error.status,
+        /** @type {Record<string, unknown>} */ (error.response),
+      );
+      return 1;
+    }
+
+    if (error instanceof PlanPushLocalError) {
+      writeJson(stderr, {
+        error: "local_input_unreadable",
+        detail: PLAN_PUBLISH_LOCAL_INPUT_UNREADABLE_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationLocalStateError) {
+      writeJson(stderr, {
+        error: "invalid_configuration",
+        detail: PLAN_PUBLISH_INCOMPATIBLE_STATE_DETAIL,
+      });
+      return 2;
+    }
+
+    if (error instanceof PublicationNotPushedError) {
+      writeJson(stderr, {
+        error: "project_not_pushed",
+        detail: PLAN_PUBLISH_NOT_PUSHED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationLocalPlanChangedError) {
+      writeJson(stderr, {
+        error: "local_plan_changed",
+        detail: PLAN_PUBLISH_LOCAL_PLAN_CHANGED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationRequestOutcomeUnknownError) {
+      writeJson(stderr, {
+        error: "request_outcome_unknown",
+        detail: PLAN_PUBLISH_REQUEST_OUTCOME_UNKNOWN_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationStartRejectedError) {
+      writeJson(stderr, {
+        error: "publication_start_rejected",
+        detail: PLAN_PUBLISH_START_REJECTED_DETAIL,
+        status: error.status,
+        response: error.response,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationStatusUnavailableError) {
+      writeJson(stderr, {
+        error: "publication_status_unavailable",
+        detail: PLAN_PUBLISH_STATUS_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationStatusInvalidError) {
+      writeJson(stderr, {
+        error: "invalid_publication_status",
+        detail: PLAN_PUBLISH_STATUS_INVALID_DETAIL,
+        status: error.status,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationChangedError) {
+      writeJson(stderr, {
+        error: "publication_changed",
+        detail: PLAN_PUBLISH_CHANGED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationTimeoutError) {
+      writeJson(stderr, {
+        error: "publication_wait_timed_out",
+        detail: PLAN_PUBLISH_TIMEOUT_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationFailedError) {
+      writeJson(stderr, {
+        error: "publication_failed",
+        detail: PLAN_PUBLISH_FAILED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    if (error instanceof PublicationCancelledError) {
+      writeJson(stderr, {
+        error: "publication_cancelled",
+        detail: PLAN_PUBLISH_CANCELLED_DETAIL,
+        current: error.current,
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+
+  const repository = result.publication.repository;
+  if (repository === null) {
+    throw new Error("A successful Publication must identify its repository.");
+  }
+  stdout.write(`${repository.html_url}\n`);
   return 0;
 }
 
