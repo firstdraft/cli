@@ -30,6 +30,7 @@ import {
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000000301";
 const API_URL = "https://api.example.test";
+const API_TOKEN = `fd_${"a".repeat(43)}`;
 const FIRST_ETAG = '"opaque:first-validator"';
 const SECOND_ETAG = '"opaque:second-validator"';
 const PLAN_PUSH_HELP = `First Draft CLI
@@ -41,7 +42,8 @@ Options:
   -h, --help  Show help
 
 Environment:
-  FIRSTDRAFT_API_URL  Override the initial API origin
+  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_URL    Override the initial API origin
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
@@ -118,6 +120,7 @@ test("the initial push sends exact bytes and saves its origin and ETag", async (
   );
   assert.equal(headers.get("if-none-match"), "*");
   assert.equal(headers.has("if-match"), false);
+  assert.equal(headers.get("authorization"), `Bearer ${API_TOKEN}`);
   assert(Buffer.isBuffer(call.init?.body));
   assert.deepEqual(call.init.body, source);
 
@@ -442,6 +445,61 @@ test("server rejection envelopes expose only validated response fields", async (
     },
   });
   assert.doesNotMatch(problemResult.stderr, /canary-secret/);
+});
+
+test("missing credentials and a validated 401 use one stable authentication error", async (context) => {
+  const cwd = await initializedDirectory(context);
+  let requests = 0;
+  for (const apiToken of ["", " \t\n"]) {
+    const missing = await invoke(["plan", "push"], {
+      cwd,
+      apiUrl: API_URL,
+      apiToken,
+      fetchFunction: async () => {
+        requests += 1;
+        throw new Error("request must not be sent");
+      },
+    });
+
+    assert.deepEqual(JSON.parse(missing.stderr), {
+      error: "authentication_required",
+      detail:
+        "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+    });
+    assert.equal(missing.status, 1);
+  }
+  assert.equal(requests, 0);
+
+  const problem = {
+    type: "about:blank",
+    title: "Unauthorized",
+    status: 401,
+    code: "authentication_required",
+    detail: "Provide a valid API token.",
+    canary: "canary-secret-response-field",
+  };
+  const rejected = await invoke(["plan", "push"], {
+    cwd,
+    apiUrl: API_URL,
+    fetchFunction: recordingFetch(problemResponse(problem, 401), []),
+  });
+
+  assert.deepEqual(JSON.parse(rejected.stderr), {
+    error: "authentication_required",
+    detail:
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+    status: 401,
+    response: {
+      type: "about:blank",
+      title: "Unauthorized",
+      status: 401,
+      code: "authentication_required",
+      detail: "Provide a valid API token.",
+    },
+  });
+  assert.equal(rejected.status, 1);
+  assert.doesNotMatch(rejected.stderr, /canary-secret/);
+  assert.equal(rejected.stderr.includes(API_TOKEN), false);
 });
 
 test("a stale update preserves the prior ETag and exact local state", async (context) => {
@@ -1085,7 +1143,11 @@ test("the packaged executable completes a real local HTTP push", async (context)
   );
   const child = spawn(process.execPath, [executable, "plan", "push"], {
     cwd,
-    env: { ...process.env, FIRSTDRAFT_API_URL: apiUrl },
+    env: {
+      ...process.env,
+      FIRSTDRAFT_API_TOKEN: API_TOKEN,
+      FIRSTDRAFT_API_URL: apiUrl,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.setEncoding("utf8");
@@ -1105,6 +1167,7 @@ test("the packaged executable completes a real local HTTP push", async (context)
     requestHeaders?.["content-type"],
     "application/vnd.firstdraft.foundation-plan+json",
   );
+  assert.equal(requestHeaders?.authorization, `Bearer ${API_TOKEN}`);
   assert.equal(readState(cwd).api_url, apiUrl);
   assert.equal(readState(cwd).foundation_plan_etag, FIRST_ETAG);
 });
@@ -1120,6 +1183,7 @@ async function invoke(argv, overrides = {}) {
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
+    apiToken: API_TOKEN,
     ...overrides,
   });
 
