@@ -29,6 +29,7 @@ if (result.status !== 0) {
     "src/api-response.js",
     "src/application-identity.js",
     "src/cli.js",
+    "src/commands/compilation.js",
     "src/commands/plan-compile.js",
     "src/commands/plan-init.js",
     "src/commands/plan-publish.js",

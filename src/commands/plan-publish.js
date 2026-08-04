@@ -189,6 +189,7 @@ export class PublicationCancelledError extends Error {
 /**
  * @typedef {object} PublishPlanOptions
  * @property {string} cwd
+ * @property {string} [expectedEtag]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {PlanPublishFileSystem} [fileSystem]
  * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
@@ -202,6 +203,7 @@ export class PublicationCancelledError extends Error {
  */
 export async function publishPlan({
   cwd,
+  expectedEtag,
   fetchFunction = globalThis.fetch,
   fileSystem = DEFAULT_FILE_SYSTEM,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
@@ -215,7 +217,17 @@ export async function publishPlan({
     );
   }
 
-  const match = HEAD_ETAG_PATTERN.exec(state.foundation_plan_etag);
+  if (
+    expectedEtag !== undefined &&
+    state.foundation_plan_etag !== expectedEtag
+  ) {
+    throw new PublicationLocalPlanChangedError(
+      "Local Plan state changed after this command accepted its Plan.",
+    );
+  }
+
+  const publicationEtag = expectedEtag ?? state.foundation_plan_etag;
+  const match = HEAD_ETAG_PATTERN.exec(publicationEtag);
   if (match === null) {
     throw new PublicationLocalStateError(
       "The saved Foundation Plan ETag cannot identify its accepted source.",
@@ -245,7 +257,7 @@ export async function publishPlan({
       endpoint,
       projectId: state.project_id,
       headSourceSha256,
-      etag: state.foundation_plan_etag,
+      etag: publicationEtag,
       fetchFunction,
       createRequestSignal,
     });

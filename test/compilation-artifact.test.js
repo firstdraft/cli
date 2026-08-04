@@ -159,6 +159,14 @@ test("pins every available provenance identity", () => {
       provenance: {
         foundation_plan: {
           format: "firstdraft.foundation-plan.sketch/0.18",
+          sha256: HEAD_SHA256,
+        },
+      },
+    }),
+    artifactFixture({
+      provenance: {
+        foundation_plan: {
+          format: FOUNDATION_PLAN_FORMAT,
           sha256: "2".repeat(64),
         },
       },
@@ -356,7 +364,7 @@ function artifactFixture(changes = {}) {
     head_source_sha256: HEAD_SHA256,
     foundation_plan: {
       format: FOUNDATION_PLAN_FORMAT,
-      sha256: "2".repeat(64),
+      sha256: HEAD_SHA256,
     },
     analysis: {
       id: ANALYSIS_ID,
