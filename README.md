@@ -51,6 +51,13 @@ npm run check
 npm run pack:check
 ```
 
+To reproduce the length-delimited SHA-256 used by external evidence to identify the packaged JavaScript runtime
+inputs (`package.json`, `bin/firstdraft.js`, and every `.js` file under `src/`), run from the repository root:
+
+```sh
+node scripts/runtime-digest.js
+```
+
 ## Start a Foundation Plan
 
 From the project that the Plan describes:
@@ -156,6 +163,8 @@ structured output; no Compilation or Publication is requested.
 Only a `valid` analysis proceeds to the internal GitHub Publication lifecycle. Invoking `plan compile` is the
 authorization to request that lifecycle. Immediately before its conditional mutation, the CLI re-reads the local
 Plan and requires its exact bytes to match the accepted Head, so bytes changed after analysis cannot be published.
+It extracts the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and then sends that
+complete ETag in `If-Match`.
 The command writes no progress output to stdout. Success is exactly one validated JSON object containing the
 retained `project`, `compilation`, and `publication`, including the private GitHub repository URL.
 
