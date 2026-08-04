@@ -65,6 +65,19 @@ export class CompilationMaterializationError extends Error {}
 export class CompilationOutputPathError extends Error {}
 
 /**
+ * @typedef {object} ValidatedCompilationProvenance
+ * @property {string} compilation_id
+ * @property {string} project_id
+ * @property {number} graph_version
+ * @property {string} head_source_sha256
+ * @property {{format: string, sha256: string}} foundation_plan
+ * @property {{id: string, release: string}} analysis
+ * @property {string} compiler_release
+ * @property {{id: string, profile: string}} target
+ * @property {{repository: string, revision: string, sha256: string}} core
+ */
+
+/**
  * @typedef {object} CompilationArtifactExpectations
  * @property {string} projectId
  * @property {string} compilationId
@@ -88,7 +101,7 @@ export class CompilationOutputPathError extends Error {}
 /**
  * @typedef {object} ValidatedCompilationArtifact
  * @property {string} manifest_sha256
- * @property {Record<string, unknown>} provenance
+ * @property {ValidatedCompilationProvenance} provenance
  * @property {ValidatedArtifactFile[]} files
  */
 
@@ -236,8 +249,11 @@ export function materializeCompilationArtifact(artifact, target) {
 /**
  * @param {unknown} value
  * @param {CompilationArtifactExpectations} expected
+ * @returns {ValidatedCompilationProvenance}
  */
 function parseProvenance(value, expected) {
+  // The outer artifact digest authenticates the canonical Plan digest, which
+  // need not equal the digest of the exact submitted Head bytes.
   if (
     !hasExactKeys(value, PROVENANCE_KEYS) ||
     value.compilation_id !== expected.compilationId ||
@@ -246,7 +262,8 @@ function parseProvenance(value, expected) {
     value.head_source_sha256 !== expected.headSourceSha256 ||
     !hasExactKeys(value.foundation_plan, FOUNDATION_PLAN_KEYS) ||
     value.foundation_plan.format !== FOUNDATION_PLAN_FORMAT ||
-    value.foundation_plan.sha256 !== expected.headSourceSha256 ||
+    typeof value.foundation_plan.sha256 !== "string" ||
+    !SHA256_PATTERN.test(value.foundation_plan.sha256) ||
     !hasExactKeys(value.analysis, ANALYSIS_KEYS) ||
     value.analysis.id !== expected.analysisRunId ||
     !isRelease(value.analysis.release) ||

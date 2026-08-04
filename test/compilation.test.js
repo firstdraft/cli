@@ -23,6 +23,7 @@ const COMPILATION_ID = "01900000-0000-7000-8000-000000003002";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000003004";
 const API_TOKEN = `fd_${"b".repeat(43)}`;
 const RETAINED_HEAD = "1".repeat(64);
+const CANONICAL_PLAN = "4".repeat(64);
 const LOCAL_HEAD = "9".repeat(64);
 const CREATED_AT = "2026-08-04T12:00:00.000000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000000Z";
@@ -142,7 +143,7 @@ test("compilation status has a bounded wait and validates exact response shapes"
   }
 });
 
-test("compilation download reads retained status and artifact once without starting work", async (context) => {
+test("compilation download distinguishes Head and Plan provenance without starting work", async (context) => {
   const cwd = remoteDirectory(context);
   const fixture = artifactFixture();
   const status = compilationBody("succeeded", { artifact: fixture });
@@ -198,7 +199,7 @@ test("download requires succeeded status and validates historical Head provenanc
   assert.equal(queuedCalls.length, 1);
   assert.equal(existsSync(queuedOutput), false);
 
-  const mismatched = artifactFixture({ foundationPlanSha256: LOCAL_HEAD });
+  const mismatched = artifactFixture({ headSourceSha256: LOCAL_HEAD });
   const mismatchOutput = path.join(cwd, "mismatch-output");
   const mismatch = await invoke(
     ["compilation", "download", COMPILATION_ID, "--output", mismatchOutput],
@@ -381,7 +382,7 @@ function compilationBody(status, changes = {}) {
   };
 }
 
-/** @param {{foundationPlanSha256?: string}} [changes] */
+/** @param {{headSourceSha256?: string}} [changes] */
 function artifactFixture(changes = {}) {
   const contents = Buffer.from("Movie Catalog\n");
   const file = {
@@ -409,10 +410,10 @@ function artifactFixture(changes = {}) {
       compilation_id: COMPILATION_ID,
       project_id: PROJECT_ID,
       graph_version: 7,
-      head_source_sha256: RETAINED_HEAD,
+      head_source_sha256: changes.headSourceSha256 ?? RETAINED_HEAD,
       foundation_plan: {
         format: FOUNDATION_PLAN_FORMAT,
-        sha256: changes.foundationPlanSha256 ?? RETAINED_HEAD,
+        sha256: CANONICAL_PLAN,
       },
       analysis: {
         id: ANALYSIS_ID,
