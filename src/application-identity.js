@@ -5,6 +5,7 @@ export const MAX_DERIVED_APPLICATION_KEY_BYTES = 63;
 const DIGEST_HEX_LENGTH = 12;
 const APPLICATION_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
 const MARK_PATTERN = /\p{Mark}/u;
+// NFKD does not decompose these Latin letters, so map them before ASCII filtering.
 const LATIN_TRANSLITERATIONS = new Map([
   ["Æ", "ae"],
   ["æ", "ae"],
