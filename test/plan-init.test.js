@@ -26,12 +26,11 @@ Usage:
   firstdraft plan <command> [options]
 
 Commands:
-  init        Create a local empty Foundation Plan
-  subject-id  Generate a UUIDv7 for a new Plan subject
-  push        Send the local Foundation Plan to First Draft
-  status      Read the current whole-graph analysis status
-  compile     Compile the accepted Plan into a new local directory
-  publish     Compile and publish the accepted Plan to GitHub
+  init     Create a local empty Foundation Plan
+  push     Send the local Foundation Plan to First Draft
+  status   Read the current whole-graph analysis status
+  compile  Compile the accepted Plan into a new local directory
+  publish  Compile and publish the accepted Plan to GitHub
 
 Options:
   -h, --help  Show help
@@ -39,12 +38,15 @@ Options:
 const PLAN_INIT_HELP = `First Draft CLI
 
 Usage:
-  firstdraft plan init --application-key <key> --name <name>
+  firstdraft plan init [--application-key <key>] [--name <name>]
 
 Options:
       --application-key <key>  Lower-snake-case application key
       --name <name>            Application display name
   -h, --help                   Show help
+
+Provide at least one of --application-key or --name. The command derives a
+missing key from the name or a missing display name from the key.
 `;
 const PLAN_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan --help' for usage.\n";
@@ -186,6 +188,58 @@ test("plan init creates exact deterministic local files", async (context) => {
   }
 });
 
+test("plan init derives either missing application identity value", async (context) => {
+  const nameOnlyCwd = temporaryDirectory(context);
+  const nameOnly = await invoke(["plan", "init", "--name", "Café Planner"], {
+    cwd: nameOnlyCwd,
+    createProjectId: () => PROJECT_ID,
+  });
+  const nameOnlyPlan = readPlan(nameOnlyCwd);
+
+  assert.equal(nameOnly.status, 0);
+  assert.deepEqual(nameOnlyPlan.application, {
+    key: "cafe_planner",
+    name: "Café Planner",
+    native: {},
+    delivery: {},
+    entities: [],
+  });
+
+  const keyOnlyCwd = temporaryDirectory(context);
+  const keyOnly = await invoke(
+    ["plan", "init", "--application-key", "movie___catalog___"],
+    { cwd: keyOnlyCwd, createProjectId: () => PROJECT_ID },
+  );
+  const keyOnlyPlan = readPlan(keyOnlyCwd);
+
+  assert.equal(keyOnly.status, 0);
+  assert.equal(keyOnlyPlan.application.key, "movie___catalog___");
+  assert.equal(keyOnlyPlan.application.name, "Movie Catalog");
+});
+
+test("plan init preserves both explicitly supplied identity values", async (context) => {
+  const cwd = temporaryDirectory(context);
+  const result = await invoke(
+    ["plan", "init", "--application-key", "movie_catalog", "--name", "MC"],
+    { cwd, createProjectId: () => PROJECT_ID },
+  );
+
+  assert.equal(result.status, 0);
+  assert.equal(readPlan(cwd).application.name, "MC");
+});
+
+test("plan init accepts explicit schema-valid keys beyond the derived limit", async (context) => {
+  const cwd = temporaryDirectory(context);
+  const applicationKey = `${"a".repeat(100)}_`;
+  const result = await invoke(
+    ["plan", "init", "--application-key", applicationKey],
+    { cwd, createProjectId: () => PROJECT_ID },
+  );
+
+  assert.equal(result.status, 0);
+  assert.equal(readPlan(cwd).application.key, applicationKey);
+});
+
 test("the executable initializes with a production UUIDv7", (context) => {
   const cwd = temporaryDirectory(context);
   const executable = fileURLToPath(
@@ -275,8 +329,6 @@ test("an existing root gitignore remains byte-for-byte unchanged", async (contex
 test("plan init validates every argument before randomness or filesystem access", async () => {
   const invalidArguments = [
     ["plan", "init"],
-    ["plan", "init", "--application-key", "oscar_party"],
-    ["plan", "init", "--name", "Oscar Party"],
     [
       "plan",
       "init",
@@ -520,6 +572,13 @@ async function invokeValidInit(cwd, overrides = {}) {
       "Oscar Party",
     ],
     { cwd, createProjectId: () => PROJECT_ID, ...overrides },
+  );
+}
+
+/** @param {string} cwd */
+function readPlan(cwd) {
+  return JSON.parse(
+    readFileSync(path.join(cwd, ".firstdraft", "foundation-plan.json"), "utf8"),
   );
 }
 

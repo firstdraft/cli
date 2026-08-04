@@ -69,25 +69,42 @@ try {
   assert.equal(execution.stdout, `${packageMetadata.version}\n`);
   assert.equal(execution.stderr, "");
 
-  const subjectId = runNpm(
-    ["exec", "--offline", "--", "firstdraft", "plan", "subject-id"],
+  const generatedUuids = runNpm(
+    [
+      "exec",
+      "--offline",
+      "--",
+      "firstdraft",
+      "generate",
+      "uuid",
+      "--count",
+      "2",
+    ],
     installationDirectory,
   );
 
   assert.match(
-    subjectId.stdout,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n$/,
+    generatedUuids.stdout,
+    /^(?:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n){2}$/,
   );
-  assert.equal(subjectId.stderr, "");
+  assert.equal(generatedUuids.stderr, "");
 
-  const invalidSubjectId = spawnPackedCli(
-    ["plan", "subject-id", "--canary-secret-option"],
+  const applicationKey = spawnPackedCli(
+    ["generate", "application-key", "--name", "Café Planner"],
     installationDirectory,
   );
-  assertHandledFailure(invalidSubjectId, 2, {
+
+  assert.equal(applicationKey.stdout, "cafe_planner\n");
+  assert.equal(applicationKey.stderr, "");
+
+  const invalidGeneratedUuid = spawnPackedCli(
+    ["generate", "uuid", "--count", "0"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidGeneratedUuid, 2, {
     error: "invalid_arguments",
     detail:
-      "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.",
+      "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.",
   });
 
   const invalidInit = spawnPackedCli(
@@ -102,14 +119,7 @@ try {
   const projectDirectory = path.join(temporaryDirectory, "project");
   mkdirSync(projectDirectory);
   const initialized = spawnPackedCli(
-    [
-      "plan",
-      "init",
-      "--application-key",
-      "oscar_party",
-      "--name",
-      "Oscar Party",
-    ],
+    ["plan", "init", "--name", "Oscar Party"],
     projectDirectory,
   );
   assert.deepEqual(
@@ -124,6 +134,39 @@ try {
       stderr: "",
     },
   );
+  const initializedPlan = JSON.parse(
+    readFileSync(
+      path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    {
+      key: initializedPlan.application.key,
+      name: initializedPlan.application.name,
+    },
+    { key: "oscar_party", name: "Oscar Party" },
+  );
+
+  const keyOnlyProjectDirectory = path.join(
+    temporaryDirectory,
+    "key-only-project",
+  );
+  mkdirSync(keyOnlyProjectDirectory);
+  const keyOnlyInitialization = spawnPackedCli(
+    ["plan", "init", "--application-key", "movie___catalog___"],
+    keyOnlyProjectDirectory,
+  );
+  assert.equal(keyOnlyInitialization.status, 0);
+  assert.equal(keyOnlyInitialization.stderr, "");
+  const keyOnlyPlan = JSON.parse(
+    readFileSync(
+      path.join(keyOnlyProjectDirectory, ".firstdraft", "foundation-plan.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(keyOnlyPlan.application.key, "movie___catalog___");
+  assert.equal(keyOnlyPlan.application.name, "Movie Catalog");
 
   const repeatedInit = spawnPackedCli(
     [

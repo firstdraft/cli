@@ -27,6 +27,7 @@ if (result.status !== 0) {
     "package.json",
     "src/api-authentication.js",
     "src/api-response.js",
+    "src/application-identity.js",
     "src/cli.js",
     "src/commands/plan-compile.js",
     "src/commands/plan-init.js",

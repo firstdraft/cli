@@ -1,6 +1,12 @@
 import { parseArgs } from "node:util";
 
 import {
+  deriveApplicationKey,
+  deriveApplicationName,
+  isValidApplicationKey,
+  isValidApplicationName,
+} from "./application-identity.js";
+import {
   authenticatedFetch,
   isAuthenticationProblem,
 } from "./api-authentication.js";
@@ -62,7 +68,8 @@ Usage:
   firstdraft [options]
 
 Commands:
-  plan  Work with Foundation Plans
+  generate  Generate local values
+  plan      Work with Foundation Plans
 
 Options:
   -h, --help     Show help
@@ -75,15 +82,53 @@ Usage:
   firstdraft plan <command> [options]
 
 Commands:
-  init        Create a local empty Foundation Plan
-  subject-id  Generate a UUIDv7 for a new Plan subject
-  push        Send the local Foundation Plan to First Draft
-  status      Read the current whole-graph analysis status
-  compile     Compile the accepted Plan into a new local directory
-  publish     Compile and publish the accepted Plan to GitHub
+  init     Create a local empty Foundation Plan
+  push     Send the local Foundation Plan to First Draft
+  status   Read the current whole-graph analysis status
+  compile  Compile the accepted Plan into a new local directory
+  publish  Compile and publish the accepted Plan to GitHub
 
 Options:
   -h, --help  Show help
+`;
+
+const GENERATE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft generate <command> [options]
+
+Commands:
+  uuid             Generate one or more UUIDv7 values
+  application-key  Derive a lower-snake-case application key
+
+Options:
+  -h, --help  Show help
+`;
+
+const GENERATE_UUID_HELP = `First Draft CLI
+
+Usage:
+  firstdraft generate uuid [--count <n>]
+
+Options:
+      --count <n>  Number to generate (positive integer)
+  -h, --help       Show help
+
+The command reads no files and makes no network request. Each UUID is printed
+on its own line.
+`;
+
+const GENERATE_APPLICATION_KEY_HELP = `First Draft CLI
+
+Usage:
+  firstdraft generate application-key --name <name>
+
+Options:
+      --name <name>  Application display name
+  -h, --help         Show help
+
+The command derives the same application key used by name-only plan init.
+Generated keys are at most 63 ASCII bytes.
 `;
 
 const PLAN_PUSH_HELP = `First Draft CLI
@@ -151,33 +196,28 @@ Each Project can publish one retained Plan Head in this release. The command
 waits up to ten minutes and prints the private GitHub repository URL.
 `;
 
-const PLAN_SUBJECT_ID_HELP = `First Draft CLI
-
-Usage:
-  firstdraft plan subject-id
-
-Prints one UUIDv7 for a new independently mutable Plan subject.
-The command reads no files and makes no network request.
-
-Options:
-  -h, --help  Show help
-`;
-
 const PLAN_INIT_HELP = `First Draft CLI
 
 Usage:
-  firstdraft plan init --application-key <key> --name <name>
+  firstdraft plan init [--application-key <key>] [--name <name>]
 
 Options:
       --application-key <key>  Lower-snake-case application key
       --name <name>            Application display name
   -h, --help                   Show help
+
+Provide at least one of --application-key or --name. The command derives a
+missing key from the name or a missing display name from the key.
 `;
 
 const ROOT_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft --help' for usage.\n";
 const ROOT_UNKNOWN_COMMAND =
   "Unknown command.\nRun 'firstdraft --help' for usage.\n";
+const GENERATE_USAGE_ERROR =
+  "Invalid arguments.\nRun 'firstdraft generate --help' for usage.\n";
+const GENERATE_UNKNOWN_COMMAND =
+  "Unknown command.\nRun 'firstdraft generate --help' for usage.\n";
 const PLAN_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan --help' for usage.\n";
 const PLAN_UNKNOWN_COMMAND =
@@ -271,8 +311,10 @@ const PLAN_PUBLISH_TIMEOUT_DETAIL =
 const PLAN_PUBLISH_FAILED_DETAIL =
   "The pinned Publication failed. Its validated status identifies the failed phase.";
 const PLAN_PUBLISH_CANCELLED_DETAIL = "The pinned Publication was cancelled.";
-const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
-  "Invalid arguments. Run 'firstdraft plan subject-id --help' for usage.";
+const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.";
+const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft generate application-key --help' for usage.";
 
 /**
  * @typedef {object} Writer
@@ -287,7 +329,7 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {string} [cwd]
  * @property {() => string} [getCwd]
  * @property {() => string} [createProjectId]
- * @property {() => string} [createSubjectId]
+ * @property {() => string} [createUuid]
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
@@ -310,7 +352,7 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  * @property {Writer} stderr
  * @property {string} cwd
  * @property {() => string} createProjectId
- * @property {() => string} createSubjectId
+ * @property {() => string} createUuid
  * @property {import("./commands/plan-init.js").FileSystem} [fileSystem]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./commands/plan-push.js").PlanPushFileSystem} [planPushFileSystem]
@@ -327,7 +369,11 @@ const PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL =
  */
 
 /**
- * @typedef {Omit<CommandOptions, "cwd"> & {cwd?: string, getCwd: () => string}} PlanCommandOptions
+ * @typedef {Omit<CommandOptions, "cwd" | "createUuid"> & {cwd?: string, getCwd: () => string}} PlanCommandOptions
+ */
+
+/**
+ * @typedef {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "createUuid">} GenerateCommandOptions
  */
 
 /** @param {RunOptions} options */
@@ -338,7 +384,7 @@ export async function run({
   cwd,
   getCwd = process.cwd,
   createProjectId = generateUuidV7,
-  createSubjectId = generateUuidV7,
+  createUuid = generateUuidV7,
   fileSystem,
   fetchFunction,
   planPushFileSystem,
@@ -353,6 +399,15 @@ export async function run({
   apiUrl = process.env.FIRSTDRAFT_API_URL,
   apiToken = process.env.FIRSTDRAFT_API_TOKEN,
 }) {
+  if (argv[0] === "generate") {
+    return runGenerate({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      createUuid,
+    });
+  }
+
   if (argv[0] === "plan") {
     return runPlan({
       argv: argv.slice(1),
@@ -361,7 +416,6 @@ export async function run({
       cwd,
       getCwd,
       createProjectId,
-      createSubjectId,
       fileSystem,
       fetchFunction,
       planPushFileSystem,
@@ -432,7 +486,6 @@ async function runPlan({
   cwd,
   getCwd,
   createProjectId,
-  createSubjectId,
   fileSystem,
   fetchFunction,
   planPushFileSystem,
@@ -518,15 +571,6 @@ async function runPlan({
     });
   }
 
-  if (argv[0] === "subject-id") {
-    return runPlanSubjectId({
-      argv: argv.slice(1),
-      stdout,
-      stderr,
-      createSubjectId,
-    });
-  }
-
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
@@ -556,32 +600,136 @@ async function runPlan({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "createSubjectId">} options
+ * @param {GenerateCommandOptions} options
  */
-function runPlanSubjectId({ argv, stdout, stderr, createSubjectId }) {
+function runGenerate({ argv, stdout, stderr, createUuid }) {
+  if (argv[0] === "uuid") {
+    return runGenerateUuid({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      createUuid,
+    });
+  }
+
+  if (argv[0] === "application-key") {
+    return runGenerateApplicationKey({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+    });
+  }
+
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
       options: { help: { type: "boolean", short: "h" } },
-      allowPositionals: false,
+      allowPositionals: true,
       strict: true,
     }),
   );
 
   if (!parsed) {
+    stderr.write(GENERATE_USAGE_ERROR);
+    return 2;
+  }
+
+  if (parsed.positionals.length > 0) {
+    stderr.write(GENERATE_UNKNOWN_COMMAND);
+    return 2;
+  }
+
+  if (argv.length === 0 || parsed.values.help) {
+    stdout.write(GENERATE_HELP);
+    return 0;
+  }
+
+  stdout.write(GENERATE_HELP);
+  return 0;
+}
+
+/** @param {GenerateCommandOptions} options */
+function runGenerateUuid({ argv, stdout, stderr, createUuid }) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        count: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
     writeJson(stderr, {
       error: "invalid_arguments",
-      detail: PLAN_SUBJECT_ID_INVALID_ARGUMENTS_DETAIL,
+      detail: GENERATE_UUID_INVALID_ARGUMENTS_DETAIL,
     });
     return 2;
   }
 
   if (parsed.values.help) {
-    stdout.write(PLAN_SUBJECT_ID_HELP);
+    stdout.write(GENERATE_UUID_HELP);
     return 0;
   }
 
-  stdout.write(`${createSubjectId()}\n`);
+  const count = parseUuidCount(parsed.values.count);
+  if (count === null) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: GENERATE_UUID_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    stdout.write(`${createUuid()}\n`);
+  }
+  return 0;
+}
+
+/**
+ * @param {Pick<GenerateCommandOptions, "argv" | "stdout" | "stderr">} options
+ */
+function runGenerateApplicationKey({ argv, stdout, stderr }) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        name: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(GENERATE_APPLICATION_KEY_HELP);
+    return 0;
+  }
+
+  if (!isValidApplicationName(parsed.values.name)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  stdout.write(`${deriveApplicationKey(parsed.values.name)}\n`);
   return 0;
 }
 
@@ -1312,19 +1460,32 @@ function runPlanInit({
     return 0;
   }
 
-  const applicationKey = parsed.values["application-key"];
-  const name = parsed.values.name;
+  const providedApplicationKey = parsed.values["application-key"];
+  const providedName = parsed.values.name;
   if (
-    typeof applicationKey !== "string" ||
-    !/^[a-z][a-z0-9_]*$/.test(applicationKey) ||
-    typeof name !== "string" ||
-    !isValidApplicationName(name)
+    (providedApplicationKey !== undefined &&
+      !isValidApplicationKey(providedApplicationKey)) ||
+    (providedName !== undefined && !isValidApplicationName(providedName)) ||
+    (providedApplicationKey === undefined && providedName === undefined)
   ) {
     writeJson(stderr, {
       error: "invalid_arguments",
       detail: PLAN_INIT_INVALID_ARGUMENTS_DETAIL,
     });
     return 2;
+  }
+
+  let applicationKey;
+  let name;
+  if (providedApplicationKey !== undefined) {
+    applicationKey = providedApplicationKey;
+    name =
+      providedName === undefined
+        ? deriveApplicationName(providedApplicationKey)
+        : providedName;
+  } else {
+    name = /** @type {string} */ (providedName);
+    applicationKey = deriveApplicationKey(name);
   }
 
   const projectId = createProjectId();
@@ -1351,42 +1512,13 @@ function runPlanInit({
   return 0;
 }
 
-/** @param {string} name */
-function isValidApplicationName(name) {
-  let hasNonWhitespace = false;
+/** @param {unknown} value */
+function parseUuidCount(value) {
+  if (value === undefined) return 1;
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return null;
 
-  for (const character of name) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    if (
-      codePoint === 0 ||
-      (codePoint >= 0xd800 && codePoint <= 0xdfff) ||
-      (codePoint >= 0xfdd0 && codePoint <= 0xfdef) ||
-      (codePoint & 0xfffe) === 0xfffe
-    ) {
-      return false;
-    }
-
-    if (!isUnicodeWhitespace(codePoint)) hasNonWhitespace = true;
-  }
-
-  return hasNonWhitespace;
-}
-
-/** @param {number} codePoint */
-function isUnicodeWhitespace(codePoint) {
-  return (
-    (codePoint >= 0x0009 && codePoint <= 0x000d) ||
-    codePoint === 0x0020 ||
-    codePoint === 0x0085 ||
-    codePoint === 0x00a0 ||
-    codePoint === 0x1680 ||
-    (codePoint >= 0x2000 && codePoint <= 0x200a) ||
-    codePoint === 0x2028 ||
-    codePoint === 0x2029 ||
-    codePoint === 0x202f ||
-    codePoint === 0x205f ||
-    codePoint === 0x3000
-  );
+  const count = Number(value);
+  return Number.isSafeInteger(count) ? count : null;
 }
 
 /**
