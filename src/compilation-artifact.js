@@ -246,8 +246,7 @@ function parseProvenance(value, expected) {
     value.head_source_sha256 !== expected.headSourceSha256 ||
     !hasExactKeys(value.foundation_plan, FOUNDATION_PLAN_KEYS) ||
     value.foundation_plan.format !== FOUNDATION_PLAN_FORMAT ||
-    typeof value.foundation_plan.sha256 !== "string" ||
-    !SHA256_PATTERN.test(value.foundation_plan.sha256) ||
+    value.foundation_plan.sha256 !== expected.headSourceSha256 ||
     !hasExactKeys(value.analysis, ANALYSIS_KEYS) ||
     value.analysis.id !== expected.analysisRunId ||
     !isRelease(value.analysis.release) ||

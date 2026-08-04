@@ -227,24 +227,25 @@ try {
       "Invalid arguments. Run 'firstdraft plan compile --help' for usage.",
   });
 
-  const invalidPublish = spawnPackedCli(
-    ["plan", "publish", "--canary-secret-option"],
-    installationDirectory,
-  );
-  assertHandledFailure(invalidPublish, 2, {
-    error: "invalid_arguments",
-    detail:
-      "Invalid arguments. Run 'firstdraft plan publish --help' for usage.",
-  });
-
-  const localPublish = spawnPackedCli(
+  const removedPublish = spawnPackedCli(
     ["plan", "publish"],
     installationDirectory,
   );
-  assertHandledFailure(localPublish, 1, {
-    error: "local_input_unreadable",
+  assert.equal(removedPublish.status, 2);
+  assert.equal(removedPublish.stdout, "");
+  assert.equal(
+    removedPublish.stderr,
+    "Unknown command.\nRun 'firstdraft plan --help' for usage.\n",
+  );
+
+  const invalidCompilation = spawnPackedCli(
+    ["compilation", "status", "not-a-uuid"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidCompilation, 2, {
+    error: "invalid_arguments",
     detail:
-      "Could not read valid local First Draft state or Plan bytes. No network request was made. Run 'firstdraft plan push' before publishing.",
+      "Invalid arguments. Run 'firstdraft compilation status --help' for usage.",
   });
 
   await exercisePackedCompilation(projectDirectory);
@@ -322,11 +323,10 @@ async function exercisePackedCompilation(projectDirectory) {
   const compilationId = "01900000-0000-7000-8000-000000000902";
   const analysisId = "01900000-0000-7000-8000-000000000903";
   const publicationId = "01900000-0000-7000-8000-000000000904";
-  const headSha256 = sha256(
-    readFileSync(
-      path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
-    ),
+  const plan = readFileSync(
+    path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
   );
+  const headSha256 = sha256(plan);
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
   const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
@@ -360,7 +360,7 @@ async function exercisePackedCompilation(projectDirectory) {
         head_source_sha256: headSha256,
         foundation_plan: {
           format: "firstdraft.foundation-plan.sketch/0.19",
-          sha256: "2".repeat(64),
+          sha256: headSha256,
         },
         analysis: {
           id: analysisId,
@@ -385,6 +385,7 @@ async function exercisePackedCompilation(projectDirectory) {
       id: compilationId,
       analysis_run_id: analysisId,
       graph_version: 1,
+      head_source_sha256: headSha256,
       status: "succeeded",
       compiler_release: compilerRelease,
       target,
@@ -397,12 +398,23 @@ async function exercisePackedCompilation(projectDirectory) {
         byte_size: artifact.byteLength,
       },
       failure: null,
-      created_at: "2026-07-30T12:00:00.000Z",
-      started_at: "2026-07-30T12:00:01.000Z",
-      completed_at: "2026-07-30T12:00:02.000Z",
+      created_at: "2026-07-30T12:00:00.000000Z",
+      started_at: "2026-07-30T12:00:01.000000Z",
+      completed_at: "2026-07-30T12:00:02.000000Z",
     },
   };
-  const repositoryUrl = "https://github.com/octocat/oscar-party";
+  const analysis = {
+    project: { id: projectId, graph_version: 1 },
+    analysis: {
+      id: analysisId,
+      graph_version: 1,
+      analyzer_release: "foundation-plan-analyzer/2026-08",
+      status: "valid",
+      diagnostics: [],
+      started_at: "2026-07-30T12:00:00.000Z",
+      completed_at: "2026-07-30T12:00:01.000Z",
+    },
+  };
   const publication = {
     project: {
       id: projectId,
@@ -432,7 +444,7 @@ async function exercisePackedCompilation(projectDirectory) {
         owner: { id: 7_654_321, login: "octocat", type: "User" },
         full_name: "octocat/oscar-party",
         default_branch: "main",
-        html_url: repositoryUrl,
+        html_url: "https://github.com/octocat/oscar-party",
         tree_sha: "5".repeat(40),
         commit_sha: "6".repeat(40),
       },
@@ -442,45 +454,75 @@ async function exercisePackedCompilation(projectDirectory) {
       completed_at: "2026-07-30T12:00:02.000Z",
     },
   };
-  let startRequestSeen = false;
-  let artifactRequestSeen = false;
-  let publicationRequestSeen = false;
+  const seen = {
+    plan: false,
+    analysis: false,
+    publication: false,
+    status: false,
+    artifact: false,
+    post: false,
+  };
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const requestBody = Buffer.concat(chunks);
+    assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
+    if (request.method === "POST") seen.post = true;
 
     if (
-      request.method === "POST" &&
-      request.url === `/v1/projects/${projectId}/compilations`
+      request.method === "PUT" &&
+      request.url === `/v1/projects/${projectId}/foundation-plan`
     ) {
-      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
+      assert.deepEqual(requestBody, plan);
       assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
-      assert.equal(requestBody.byteLength, 0);
-      startRequestSeen = true;
-      respondJson(response, 202, compilation, { Location: statusPath });
+      seen.plan = true;
+      respondJson(
+        response,
+        200,
+        {
+          project: { id: projectId, graph_version: 1 },
+          foundation_plan: {
+            format: "firstdraft.foundation-plan.sketch/0.19",
+            source_sha256: headSha256,
+          },
+          diagnostics: [],
+        },
+        { ETag: `"sha256:${headSha256}"` },
+      );
       return;
     }
-    if (request.method === "GET" && request.url === artifactPath) {
-      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
-      artifactRequestSeen = true;
-      response.writeHead(200, {
-        "Content-Type": "application/vnd.firstdraft.compilation-artifact+json",
-        "Content-Length": artifact.byteLength,
-        ETag: `"sha256:${artifactSha256}"`,
-      });
-      response.end(artifact);
+    if (
+      request.method === "GET" &&
+      request.url === `/v1/projects/${projectId}/analysis`
+    ) {
+      seen.analysis = true;
+      respondJson(response, 200, analysis);
       return;
     }
     if (
       request.method === "PUT" &&
       request.url === `/v1/projects/${projectId}/github-publication`
     ) {
-      assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
       assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
       assert.equal(requestBody.byteLength, 0);
-      publicationRequestSeen = true;
+      seen.publication = true;
       respondJson(response, 201, publication);
+      return;
+    }
+    if (request.method === "GET" && request.url === statusPath) {
+      seen.status = true;
+      respondJson(response, 200, compilation);
+      return;
+    }
+    if (request.method === "GET" && request.url === artifactPath) {
+      seen.artifact = true;
+      response.writeHead(200, {
+        "Content-Type": "application/vnd.firstdraft.compilation-artifact+json",
+        "Content-Length": artifact.byteLength,
+        "Cache-Control": "no-store, no-transform",
+        ETag: `"sha256:${artifactSha256}"`,
+      });
+      response.end(artifact);
       return;
     }
 
@@ -489,9 +531,7 @@ async function exercisePackedCompilation(projectDirectory) {
 
   try {
     await new Promise((/** @type {(value?: void) => void} */ resolve) => {
-      server.listen(0, "127.0.0.1", () => {
-        resolve();
-      });
+      server.listen(0, "127.0.0.1", resolve);
     });
     const address = server.address();
     assert(address && typeof address === "object");
@@ -510,15 +550,35 @@ async function exercisePackedCompilation(projectDirectory) {
       )}\n`,
       { mode: 0o600 },
     );
-    const output = path.join(projectDirectory, "generated");
-    const execution = await spawnPackedCliAsync(
-      ["plan", "compile", "--output", output],
+
+    const compiled = await spawnPackedCliAsync(
+      ["plan", "compile"],
       projectDirectory,
     );
+    assert.deepEqual(compiled, {
+      status: 0,
+      stdout: `${JSON.stringify(publication, null, 2)}\n`,
+      stderr: "",
+    });
 
-    assert.equal(execution.status, 0);
-    assert.equal(execution.stderr, "");
-    assert.equal(JSON.parse(execution.stdout).output.path, output);
+    const status = await spawnPackedCliAsync(
+      ["compilation", "status", compilationId],
+      projectDirectory,
+    );
+    assert.deepEqual(status, {
+      status: 0,
+      stdout: `${JSON.stringify(compilation, null, 2)}\n`,
+      stderr: "",
+    });
+
+    const output = path.join(projectDirectory, "generated");
+    const downloaded = await spawnPackedCliAsync(
+      ["compilation", "download", compilationId, "--output", output],
+      projectDirectory,
+    );
+    assert.equal(downloaded.status, 0);
+    assert.equal(downloaded.stderr, "");
+    assert.equal(JSON.parse(downloaded.stdout).output.path, output);
     assert.equal(
       readFileSync(path.join(output, "app/models/movie.rb"), "utf8"),
       contents.toString("utf8"),
@@ -529,19 +589,14 @@ async function exercisePackedCompilation(projectDirectory) {
         0o644,
       );
     }
-    assert.equal(startRequestSeen, true);
-    assert.equal(artifactRequestSeen, true);
-
-    const published = await spawnPackedCliAsync(
-      ["plan", "publish"],
-      projectDirectory,
-    );
-    assert.deepEqual(published, {
-      status: 0,
-      stdout: `${repositoryUrl}\n`,
-      stderr: "",
+    assert.deepEqual(seen, {
+      plan: true,
+      analysis: true,
+      publication: true,
+      status: true,
+      artifact: true,
+      post: false,
     });
-    assert.equal(publicationRequestSeen, true);
   } finally {
     await new Promise(
       (

@@ -72,6 +72,7 @@ export class PlanStatusTimeoutError extends Error {
  * @typedef {object} PlanStatusOptions
  * @property {string} cwd
  * @property {boolean} [wait]
+ * @property {number} [expectedGraphVersion]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {PlanStatusFileSystem} [fileSystem]
  * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
@@ -109,6 +110,7 @@ export class PlanStatusTimeoutError extends Error {
 export async function readPlanStatus({
   cwd,
   wait = false,
+  expectedGraphVersion,
   fetchFunction = globalThis.fetch,
   fileSystem = DEFAULT_FILE_SYSTEM,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
@@ -196,6 +198,20 @@ export async function readPlanStatus({
     }
 
     current = parsed;
+    if (
+      expectedGraphVersion !== undefined &&
+      current.analysis.graph_version !== expectedGraphVersion
+    ) {
+      if (!wait || current.analysis.graph_version > expectedGraphVersion) {
+        throw new PlanStatusChangedError(current);
+      }
+
+      const remaining = deadline === null ? 0 : deadline - now();
+      if (remaining <= 0) throw new PlanStatusTimeoutError(current);
+      await sleep(Math.min(POLL_INTERVAL_MS, remaining));
+      continue;
+    }
+
     first ??= parsed;
     if (
       current.analysis.id !== first.analysis.id ||

@@ -15,8 +15,9 @@ Usage:
   firstdraft [options]
 
 Commands:
-  generate  Generate local values
-  plan      Work with Foundation Plans
+  compilation  Inspect and download Compilations
+  generate     Generate local values
+  plan         Work with Foundation Plans
 
 Options:
   -h, --help     Show help

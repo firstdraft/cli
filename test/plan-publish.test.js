@@ -42,23 +42,25 @@ const REPOSITORY = {
   tree_sha: TREE_SHA,
   commit_sha: COMMIT_SHA,
 };
-const PLAN_PUBLISH_HELP = `First Draft CLI
+const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
-  firstdraft plan publish
+  firstdraft plan compile
 
 Options:
   -h, --help  Show help
 
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_URL    Override the initial API origin
 
-The command conditionally creates or replays the Project's one Publication.
-Each Project can publish one retained Plan Head in this release. The command
-waits up to ten minutes and prints the private GitHub repository URL.
+The command submits the exact current whole-file Plan, waits for its analysis,
+and proceeds only when that analysis is valid. It then conditionally creates
+or replays the internal GitHub Publication lifecycle and prints its complete
+validated Project, Compilation, and Publication projection.
 `;
 
-test("plan publish sends one conditional singleton PUT and polls sequentially", async (context) => {
+test("plan compile invokes Publication and one conditional singleton PUT and polls sequentially", async (context) => {
   /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
   const requests = [];
   let reads = 0;
@@ -105,7 +107,7 @@ test("plan publish sends one conditional singleton PUT and polls sequentially", 
   const timeouts = [];
   /** @type {number[]} */
   const delays = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     apiUrl: "https://canary-secret.example",
     createRequestSignal: (/** @type {number} */ timeoutMs) => {
@@ -119,7 +121,7 @@ test("plan publish sends one conditional singleton PUT and polls sequentially", 
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: `${REPOSITORY.html_url}\n`,
+    stdout: jsonLine(publicationBody("succeeded")),
     stderr: "",
   });
   assert.deepEqual(delays, [1000, 1000, 1000, 1000, 1000, 1000]);
@@ -157,14 +159,14 @@ test("plan publish sends one conditional singleton PUT and polls sequentially", 
       "application/json, application/problem+json",
     );
   }
-  assert.doesNotMatch(result.stdout, /canary-secret|sha256/);
+  assert.doesNotMatch(result.stdout, /canary-secret/);
 });
 
 test("a repeated singleton PUT accepts provenance matching local Plan state", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch(
       [jsonResponse(publicationBody("succeeded"), 200)],
@@ -173,7 +175,7 @@ test("a repeated singleton PUT accepts provenance matching local Plan state", as
   });
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, `${REPOSITORY.html_url}\n`);
+  assert.equal(result.stdout, jsonLine(publicationBody("succeeded")));
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.init?.method, "PUT");
   assert.equal(new Headers(calls[0]?.init?.headers).get("if-match"), ETAG);
@@ -183,7 +185,7 @@ test("an ambiguous PUT is reconciled by one safe singleton GET", async (context)
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -198,7 +200,7 @@ test("an ambiguous PUT is reconciled by one safe singleton GET", async (context)
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: `${REPOSITORY.html_url}\n`,
+    stdout: jsonLine(publicationBody("succeeded")),
     stderr: "",
   });
   assert.deepEqual(
@@ -213,7 +215,7 @@ test("an ambiguous PUT does not adopt a singleton from a different Plan Head", a
   const retainedHead = "a".repeat(64);
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -241,7 +243,7 @@ test("an ambiguous PUT does not adopt a singleton from a different Plan Head", a
   assert.equal(JSON.parse(result.stderr).status, 200);
   assert.match(
     JSON.parse(result.stderr).detail,
-    /if this Project's Publication is retained for a different Plan Head, it cannot be repointed/,
+    /Running 'firstdraft plan compile' again is safe/,
   );
   assert.deepEqual(
     calls.map(({ init }) => init?.method),
@@ -253,7 +255,7 @@ test("an invalid successful PUT response can reconcile to the exact singleton", 
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -269,7 +271,7 @@ test("an invalid successful PUT response can reconcile to the exact singleton", 
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: `${REPOSITORY.html_url}\n`,
+    stdout: jsonLine(publicationBody("succeeded")),
     stderr: "",
   });
   assert.deepEqual(
@@ -283,7 +285,7 @@ test("an unresolved ambiguous PUT remains outcome unknown without replaying the 
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -315,9 +317,9 @@ test("help and invalid arguments have no local or network prerequisites", async 
   };
 
   for (const argv of [
-    ["plan", "publish", "--help"],
-    ["plan", "publish", "-h"],
-    ["plan", "publish", "--help", "--help"],
+    ["plan", "compile", "--help"],
+    ["plan", "compile", "-h"],
+    ["plan", "compile", "--help", "--help"],
   ]) {
     assert.deepEqual(
       await invoke(argv, {
@@ -327,13 +329,13 @@ test("help and invalid arguments have no local or network prerequisites", async 
         planPushFileSystem: inaccessibleFileSystem(),
         apiToken: undefined,
       }),
-      { status: 0, stdout: PLAN_PUBLISH_HELP, stderr: "" },
+      { status: 0, stdout: PLAN_COMPILE_HELP, stderr: "" },
     );
   }
 
   for (const argv of [
-    ["plan", "publish", "canary-secret"],
-    ["plan", "publish", "--canary-secret"],
+    ["plan", "compile", "canary-secret"],
+    ["plan", "compile", "--canary-secret"],
   ]) {
     const result = await invoke(argv, {
       fetchFunction: inaccessible,
@@ -342,6 +344,19 @@ test("help and invalid arguments have no local or network prerequisites", async 
     assertHandledFailure(result, "invalid_arguments", 2);
     assert.doesNotMatch(result.stderr, /canary-secret/);
   }
+
+  assert.deepEqual(
+    await invoke(["plan", "publish"], {
+      getCwd: inaccessible,
+      fetchFunction: inaccessible,
+      planPushFileSystem: inaccessibleFileSystem(),
+    }),
+    {
+      status: 2,
+      stdout: "",
+      stderr: "Unknown command.\nRun 'firstdraft plan --help' for usage.\n",
+    },
+  );
 });
 
 test("local prerequisites reject before publication network access", async (context) => {
@@ -351,7 +366,7 @@ test("local prerequisites reject before publication network access", async (cont
     project_id: PROJECT_ID,
   });
   assertHandledFailure(
-    await invoke(["plan", "publish"], {
+    await invoke(["plan", "compile"], {
       cwd: unpushed,
       fetchFunction: inaccessible,
     }),
@@ -365,9 +380,15 @@ test("local prerequisites reject before publication network access", async (cont
     foundation_plan_etag: '"opaque"',
   });
   assertHandledFailure(
-    await invoke(["plan", "publish"], {
+    await invoke(["plan", "compile"], {
       cwd: opaque,
       fetchFunction: inaccessible,
+      planCompilePush: async () => ({
+        status: 200,
+        etag: '"opaque"',
+        outcome: "updated",
+        body: { project: { graph_version: 11 } },
+      }),
     }),
     "invalid_configuration",
     2,
@@ -379,7 +400,7 @@ test("local prerequisites reject before publication network access", async (cont
     Buffer.concat([PLAN_SOURCE, Buffer.from(" ")]),
   );
   assertHandledFailure(
-    await invoke(["plan", "publish"], {
+    await invoke(["plan", "compile"], {
       cwd: changed,
       fetchFunction: inaccessible,
     }),
@@ -389,7 +410,7 @@ test("local prerequisites reject before publication network access", async (cont
   const missingPlan = remoteDirectory(context, "https://api.example.test");
   rmSync(planPath(missingPlan));
   assertHandledFailure(
-    await invoke(["plan", "publish"], {
+    await invoke(["plan", "compile"], {
       cwd: missingPlan,
       fetchFunction: inaccessible,
     }),
@@ -399,14 +420,14 @@ test("local prerequisites reject before publication network access", async (cont
 
 test("missing and rejected credentials use the stable authentication error", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const missing = await invoke(["plan", "publish"], {
+  const missing = await invoke(["plan", "compile"], {
     cwd,
     apiToken: undefined,
     fetchFunction: inaccessibleFetch(),
   });
   assertHandledFailure(missing, "authentication_required");
 
-  const rejected = await invoke(["plan", "publish"], {
+  const rejected = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(
@@ -419,7 +440,7 @@ test("missing and rejected credentials use the stable authentication error", asy
   assertHandledFailure(rejected, "authentication_required");
   assert.equal(JSON.parse(rejected.stderr).status, 401);
 
-  const reconciliation = await invoke(["plan", "publish"], {
+  const reconciliation = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       async () => {
@@ -438,7 +459,7 @@ test("missing and rejected credentials use the stable authentication error", asy
 
 test("validated start rejections are distinct from unknown mutation outcomes", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const rejected = await invoke(["plan", "publish"], {
+  const rejected = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(412, "precondition_failed", "The Plan changed."),
@@ -458,7 +479,7 @@ test("validated start rejections are distinct from unknown mutation outcomes", a
     },
   });
 
-  const malformed = await invoke(["plan", "publish"], {
+  const malformed = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       new Response("canary-secret", { status: 500 }),
@@ -474,7 +495,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
     const cwd = remoteDirectory(context, "https://api.example.test");
     /** @type {FetchCall[]} */
     const calls = [];
-    const result = await invoke(["plan", "publish"], {
+    const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch(
         [
@@ -487,7 +508,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
 
     assert.deepEqual(result, {
       status: 0,
-      stdout: `${REPOSITORY.html_url}\n`,
+      stdout: jsonLine(publicationBody("succeeded")),
       stderr: "",
     });
     assert.deepEqual(
@@ -497,7 +518,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
   }
 
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const unresolved = await invoke(["plan", "publish"], {
+  const unresolved = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(503, "publication_delayed", "Publication is delayed."),
@@ -519,7 +540,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
 
 test("polling distinguishes unavailable and invalid status responses", async (context) => {
   const unavailableCwd = remoteDirectory(context, "https://api.example.test");
-  const unavailable = await invoke(["plan", "publish"], {
+  const unavailable = await invoke(["plan", "compile"], {
     cwd: unavailableCwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -539,7 +560,7 @@ test("polling distinguishes unavailable and invalid status responses", async (co
     ...publicationBody("provisioning_repository"),
     canary: "canary-secret",
   };
-  const invalid = await invoke(["plan", "publish"], {
+  const invalid = await invoke(["plan", "compile"], {
     cwd: invalidCwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -591,7 +612,7 @@ test("polling rejects replacement identities, regressions, and repository mutati
 
   for (const { initial, changed } of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "publish"], {
+    const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(initial, 201),
@@ -610,7 +631,7 @@ test("polling rejects replacement identities, regressions, and repository mutati
 test("the bounded wait reports its last validated status", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
   let clock = 0;
-  const result = await invoke(["plan", "publish"], {
+  const result = await invoke(["plan", "compile"], {
     cwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -638,7 +659,7 @@ test("failed, conflicted, and cancelled publications preserve terminal status", 
 
   for (const [status, expectedError] of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "publish"], {
+    const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(publicationBody(status), 201),
@@ -651,7 +672,7 @@ test("failed, conflicted, and cancelled publications preserve terminal status", 
 
   for (const status of ["failed", "cancelled"]) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "publish"], {
+    const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(
@@ -727,7 +748,7 @@ test("exact response shapes and coherent terminal projections are required", asy
 
   for (const [index, body] of invalidBodies.entries()) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "publish"], {
+    const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(body, 201),
@@ -944,9 +965,39 @@ async function invoke(argv, options = {}) {
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
     apiToken: API_TOKEN,
+    planCompilePush: async () => ({
+      status: 200,
+      etag: ETAG,
+      outcome: "updated",
+      body: { project: { graph_version: 11 } },
+    }),
+    planCompileReadStatus: async () => ({
+      status: 200,
+      body: validAnalysis(),
+    }),
     ...options,
   });
   return { status, stdout, stderr };
+}
+
+function validAnalysis() {
+  return {
+    project: { id: PROJECT_ID, graph_version: 11 },
+    analysis: {
+      id: ANALYSIS_ID,
+      graph_version: 11,
+      analyzer_release: "foundation-plan-analyzer/2026-08",
+      status: "valid",
+      diagnostics: [],
+      started_at: STARTED_AT,
+      completed_at: COMPLETED_AT,
+    },
+  };
+}
+
+/** @param {unknown} value */
+function jsonLine(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /**
@@ -958,6 +1009,9 @@ function assertHandledFailure(result, error, status = 1) {
   assert.equal(result.status, status);
   assert.equal(result.stdout, "");
   assert.equal(JSON.parse(result.stderr).error, error);
+  if (error === "request_outcome_unknown") {
+    assert.equal(JSON.parse(result.stderr).phase, "publication");
+  }
 }
 
 function inaccessibleFetch() {
