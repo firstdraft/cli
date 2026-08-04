@@ -28,6 +28,7 @@ const COMPILATION_ID = "01900000-0000-7000-8000-000000000802";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000000803";
 const SUBJECT_ID = "01900000-0000-7000-8000-000000000804";
 const HEAD_SHA256 = "1".repeat(64);
+const FOUNDATION_PLAN_SHA256 = "5".repeat(64);
 const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-08";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const EXPECTED = {
@@ -44,6 +45,15 @@ test("parses canonical binary-safe artifact bytes and materializes an exact tree
   assert.equal(MAX_ARTIFACT_BYTES, 16 * 1024 * 1024);
   const fixture = artifactFixture();
   const artifact = parseCompilationArtifact(fixture.source, EXPECTED);
+  assert.equal(artifact.provenance.head_source_sha256, HEAD_SHA256);
+  assert.equal(
+    artifact.provenance.foundation_plan.sha256,
+    FOUNDATION_PLAN_SHA256,
+  );
+  assert.notEqual(
+    artifact.provenance.head_source_sha256,
+    artifact.provenance.foundation_plan.sha256,
+  );
   const parent = temporaryDirectory(context);
   const target = resolveOutputTarget({
     cwd: parent,
@@ -134,7 +144,7 @@ test("rejects noncanonical, duplicate-key, additive, and non-UTF-8 envelopes", (
   }
 });
 
-test("pins every available provenance identity", () => {
+test("pins external provenance identities and validates nested metadata", () => {
   /** @type {[string, string | number][]} */
   const cases = [
     ["compilation_id", "01900000-0000-7000-8000-000000000899"],
@@ -159,7 +169,7 @@ test("pins every available provenance identity", () => {
       provenance: {
         foundation_plan: {
           format: "firstdraft.foundation-plan.sketch/0.18",
-          sha256: HEAD_SHA256,
+          sha256: FOUNDATION_PLAN_SHA256,
         },
       },
     }),
@@ -167,7 +177,7 @@ test("pins every available provenance identity", () => {
       provenance: {
         foundation_plan: {
           format: FOUNDATION_PLAN_FORMAT,
-          sha256: "2".repeat(64),
+          sha256: "not-a-sha256",
         },
       },
     }),
@@ -364,7 +374,7 @@ function artifactFixture(changes = {}) {
     head_source_sha256: HEAD_SHA256,
     foundation_plan: {
       format: FOUNDATION_PLAN_FORMAT,
-      sha256: HEAD_SHA256,
+      sha256: FOUNDATION_PLAN_SHA256,
     },
     analysis: {
       id: ANALYSIS_ID,

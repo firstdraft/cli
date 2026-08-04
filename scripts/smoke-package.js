@@ -327,6 +327,9 @@ async function exercisePackedCompilation(projectDirectory) {
     path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
   );
   const headSha256 = sha256(plan);
+  const foundationPlanSha256 = sha256(
+    Buffer.from("canonical Foundation Plan snapshot"),
+  );
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
   const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
@@ -360,7 +363,7 @@ async function exercisePackedCompilation(projectDirectory) {
         head_source_sha256: headSha256,
         foundation_plan: {
           format: "firstdraft.foundation-plan.sketch/0.19",
-          sha256: headSha256,
+          sha256: foundationPlanSha256,
         },
         analysis: {
           id: analysisId,

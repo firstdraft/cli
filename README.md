@@ -51,6 +51,13 @@ npm run check
 npm run pack:check
 ```
 
+To reproduce the length-delimited SHA-256 used by external evidence to identify the packaged JavaScript runtime
+inputs (`package.json`, `bin/firstdraft.js`, and every `.js` file under `src/`), run from the repository root:
+
+```sh
+node scripts/runtime-digest.js
+```
+
 ## Start a Foundation Plan
 
 From the project that the Plan describes:
@@ -195,8 +202,10 @@ firstdraft compilation download 01900000-0000-7000-8000-000000000001 --output ..
 
 The command validates the UUID and output path before network access, makes one status `GET`, requires
 `succeeded`, and makes one artifact `GET`. It never starts work or polls. Historical artifact validation uses
-the retained `compilation.head_source_sha256`, not the current local Plan or ETag; both artifact
-`head_source_sha256` and `foundation_plan.sha256` must equal that retained Head.
+the retained `compilation.head_source_sha256`, not the current local Plan or ETag, to pin the artifact's exact
+`head_source_sha256`. The artifact's canonical `foundation_plan.sha256` may differ because it identifies the
+normalized Compiler input. It is validated as a SHA-256 digest inside the exact artifact bytes authenticated by
+the status response's `artifact.sha256`; it is not equated to the submitted Head digest.
 
 Before materialization, the CLI verifies the artifact media type, declared and actual byte sizes, strong digest
 ETag, exact-byte SHA-256, canonical UTF-8 JSON envelope, provenance, metadata-only manifest digest, portable paths,
