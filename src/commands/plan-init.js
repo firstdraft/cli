@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { FOUNDATION_PLAN_FORMAT } from "../compilation-artifact.js";
+
 /**
  * @typedef {object} FileSystem
  * @property {typeof mkdirSync} mkdirSync
@@ -53,7 +55,7 @@ export function initializePlan({
 /** @param {string} applicationKey @param {string} name */
 function emptyPlan(applicationKey, name) {
   return {
-    format: "firstdraft.foundation-plan.sketch/0.19",
+    format: FOUNDATION_PLAN_FORMAT,
     target: {
       id: "rails",
       profile: "rails-sketch/2026-08",

@@ -3,6 +3,32 @@
 Publishing is a separate, explicit action after a release-preparation pull request has merged. npm registry bytes
 and package versions cannot be replaced, so do not create or push a release tag as a dry run.
 
+## Coordinated candidate eligibility
+
+`release/compatibility.json` declares this package's SemVer version, the First Draft API-contract range it accepts,
+and the exact Foundation Plan formats it accepts. It is source-only release metadata and is intentionally absent from
+the npm tarball. The normal test suite validates the manifest's shape, keeps its version equal to `package.json`, and
+binds its Foundation Plan format to the implemented CLI constant.
+
+The `script/release_compatibility_check` evaluator in `firstdraft/firstdraft` reads this declaration with the matching
+declarations from exact, clean checkouts of `firstdraft/firstdraft` and `firstdraft/skills`. It implements SemVer 2.0
+precedence. The service API contract is currently the stable `0.1.0` contract line even though this CLI package is a
+prerelease. Comparator arrays form one conjunction, while `foundation_plan_formats` lists alternatives. A
+prerelease satisfies a comparator set only when a comparator explicitly names a prerelease with the same major,
+minor, and patch numbers; Skills therefore names this CLI alpha explicitly. `firstdraft.release-compatibility/1` is
+intentionally closed. The evaluator in `firstdraft/firstdraft` rejects an unrecognized format and unknown keys, so
+adding a key requires a coordinated compatibility-format bump rather than silently changing version 1.
+
+A compatible result establishes candidate eligibility, not authorization or runtime proof. Exact Git SHAs identify
+the three-repository candidate. A merge to `main` is integration only: report the merged SHA and ask the user whether
+to coordinate the three repositories and promote that candidate. If promotion is declined, record the SHA as
+unpromoted.
+
+Promotion is manual and approval-gated. One operator serializes mutations: qualify the exact candidate on staging,
+obtain human approval, and only then promote the approved service revision to production or authorize the
+corresponding npm and plugin releases. Do not publish npm, deploy either environment, or release the plugin merely
+because the compatibility check passes.
+
 ## Repository and registry setup
 
 Before the first release, a repository administrator must:
@@ -78,10 +104,12 @@ Do not move or reuse that tag or version. The first organization-scoped candidat
 
 ## Prepare a release
 
-1. Update `package.json` and `package-lock.json` to the exact release version.
-2. Keep prereleases on the `next` dist-tag. Do not create `latest` until a stable release is intentionally approved.
-3. Update user-facing documentation and release notes for behavior changes.
-4. Run:
+1. Update `package.json`, `package-lock.json`, and `release/compatibility.json` to the exact release version.
+2. When that version changes, coordinate the matching explicit CLI comparator in `firstdraft/skills` before
+   qualification; an old alpha comparator intentionally makes the three-repository candidate ineligible.
+3. Keep prereleases on the `next` dist-tag. Do not create `latest` until a stable release is intentionally approved.
+4. Update user-facing documentation and release notes for behavior changes.
+5. Run:
 
    ```sh
    npm ci --ignore-scripts
@@ -89,7 +117,7 @@ Do not move or reuse that tag or version. The first organization-scoped candidat
    npm run check
    ```
 
-5. Merge the reviewed pull request only after local and hosted checks pass.
+6. Merge the reviewed pull request only after local and hosted checks pass.
 
 ## Publish
 
