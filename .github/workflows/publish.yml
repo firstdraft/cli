@@ -30,6 +30,8 @@ jobs:
         run: |
           # release-source-checks:begin
           set -euo pipefail
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
           test "$GITHUB_REPOSITORY" = "firstdraft/cli"
           test "$GITHUB_EVENT_NAME" = "push"
           test "$GITHUB_REF_TYPE" = "tag"
@@ -75,12 +77,14 @@ jobs:
       - name: Verify approved release
         env:
           NPM_RELEASE_ENABLED: ${{ vars.NPM_RELEASE_ENABLED }}
-        # Inline by design: no tagged repository script runs while the bootstrap secret is in scope.
+        # Inline by design: the approved job reruns the reviewed checks before OIDC publication.
         # test/package.test.js enforces synchronization with verify.
         run: |
           # release-source-checks:begin
           set -euo pipefail
           test "$NPM_RELEASE_ENABLED" = "true"
+          test "$(node --version)" = "v24.18.0"
+          test "$(npm --version)" = "11.16.0"
           test "$GITHUB_REPOSITORY" = "firstdraft/cli"
           test "$GITHUB_EVENT_NAME" = "push"
           test "$GITHUB_REF_TYPE" = "tag"
@@ -99,8 +103,5 @@ jobs:
           git rev-list --first-parent refs/remotes/origin/main > "$RUNNER_TEMP/main-first-parent"
           grep -Fqx "$release_sha" "$RUNNER_TEMP/main-first-parent"
           # release-source-checks:end
-      - name: Publish verified source
+      - name: Publish verified source with OIDC
         run: npm publish --access public --tag next --provenance --ignore-scripts
-        # Remove after v0.1.0 and before any later release tag.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

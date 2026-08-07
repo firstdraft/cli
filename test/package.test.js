@@ -82,15 +82,15 @@ test("ordinary pre-1.0 versions use the approval-gated distribution channel", ()
   });
 });
 
-test("privileged publication repeats every release source check", () => {
+test("OIDC publication repeats every release source check", () => {
   const verifyJobStart = publishWorkflow.indexOf("\n  verify:\n");
   const publishJobStart = publishWorkflow.indexOf("\n  publish:\n");
 
   assert.ok(verifyJobStart >= 0, "verify job must exist");
   assert.ok(publishJobStart > verifyJobStart, "publish job must follow verify");
 
-  const verifyJob = publishWorkflow.slice(verifyJobStart, publishJobStart);
-  const publishJob = publishWorkflow.slice(publishJobStart);
+  const verifyJob = workflowJob(publishWorkflow, "verify");
+  const publishJob = workflowJob(publishWorkflow, "publish");
   const npmApprovalGate = 'test "$NPM_RELEASE_ENABLED" = "true"';
   const verifyChecks = releaseSourceChecks(verifyJob);
   const publishChecks = releaseSourceChecks(publishJob);
@@ -101,6 +101,16 @@ test("privileged publication repeats every release source check", () => {
     "npm publish --access public --tag next --provenance --ignore-scripts";
   const publishCommandIndex = publishJob.indexOf(publishCommand);
   const publishInvocation = "npm publish";
+  const oidcPermission = "\n      id-token: write\n";
+  const oidcPermissionIndex = publishJob.indexOf(oidcPermission);
+  const approvalEnvironmentKey = "\n    environment:";
+  const approvalEnvironment = "\n    environment: npm\n";
+  const approvalEnvironmentIndex = publishJob.indexOf(approvalEnvironment);
+  const runnerKey = "\n    runs-on:";
+  const approvedRunner = "\n    runs-on: ubuntu-latest\n";
+  const approvedRunnerIndex = publishJob.indexOf(approvedRunner);
+  const nodeVersion = "\n          node-version: 24.18.0\n";
+  const npmVersionCheck = 'test "$(npm --version)" = "11.16.0"';
   const publishChecksEndIndex = publishJob.indexOf(
     "# release-source-checks:end",
   );
@@ -140,13 +150,86 @@ test("privileged publication repeats every release source check", () => {
     false,
     "publication must not mutate a dist-tag separately",
   );
-  if (metadata.version !== "0.1.0") {
-    assert.equal(
-      publishWorkflow.includes("NODE_AUTH_TOKEN"),
-      false,
-      "only v0.1.0 may use the bootstrap publication credential",
-    );
-  }
+  assert.ok(oidcPermissionIndex >= 0, "publication must permit OIDC tokens");
+  assert.equal(
+    publishJob.indexOf(
+      oidcPermission,
+      oidcPermissionIndex + oidcPermission.length,
+    ),
+    -1,
+    "the OIDC permission must be unique",
+  );
+  assert.equal(
+    verifyJob.includes(oidcPermission),
+    false,
+    "only publication may request an OIDC token",
+  );
+  assert.ok(
+    approvalEnvironmentIndex >= 0,
+    "publication must select the approval-gated npm environment",
+  );
+  assert.equal(
+    publishJob.indexOf(approvalEnvironmentKey),
+    approvalEnvironmentIndex,
+    "publication must use the exact approval-gated environment",
+  );
+  assert.equal(
+    publishJob.indexOf(
+      approvalEnvironmentKey,
+      approvalEnvironmentIndex + approvalEnvironmentKey.length,
+    ),
+    -1,
+    "the approval-gated environment must be unique",
+  );
+  assert.equal(
+    verifyJob.includes(approvalEnvironmentKey),
+    false,
+    "verification must not enter the npm environment",
+  );
+  assert.ok(
+    approvedRunnerIndex >= 0,
+    "trusted publication must use the approved GitHub-hosted runner",
+  );
+  assert.equal(
+    publishJob.indexOf(runnerKey),
+    approvedRunnerIndex,
+    "the publish job must use only the approved runner syntax",
+  );
+  assert.equal(
+    publishJob.indexOf(runnerKey, approvedRunnerIndex + runnerKey.length),
+    -1,
+    "the publish job must declare one runner",
+  );
+  assert.equal(
+    publishJob.includes(nodeVersion),
+    true,
+    "trusted publication must use the pinned Node version",
+  );
+  assert.equal(
+    publishChecks.includes(npmVersionCheck),
+    true,
+    "trusted publication must verify the pinned npm version",
+  );
+  assert.equal(
+    publishWorkflow.includes("NODE_AUTH_TOKEN"),
+    false,
+    "trusted publication must not use a persistent npm credential",
+  );
+  assert.equal(
+    publishWorkflow.includes("NPM_TOKEN"),
+    false,
+    "trusted publication must not name a persistent npm token",
+  );
+  assert.doesNotMatch(
+    publishWorkflow,
+    /\bsecrets\b/i,
+    "trusted publication must not read a GitHub Actions secret",
+  );
+  assert.doesNotMatch(
+    publishWorkflow,
+    /auth[_-]?token/i,
+    "trusted publication must not configure an authentication token",
+  );
   assert.ok(
     publishChecksEndIndex < publishCommandIndex,
     "release checks must precede publication",
@@ -156,6 +239,33 @@ test("privileged publication repeats every release source check", () => {
     verifyChecks,
   );
 });
+
+/**
+ * @param {string} workflowSource
+ * @param {string} jobName
+ * @returns {string}
+ */
+function workflowJob(workflowSource, jobName) {
+  const marker = `\n  ${jobName}:\n`;
+  const startIndex = workflowSource.indexOf(marker);
+
+  assert.ok(startIndex >= 0, `${jobName} job must exist`);
+  assert.equal(
+    workflowSource.indexOf(marker, startIndex + marker.length),
+    -1,
+    `${jobName} job must be unique`,
+  );
+
+  const contentStart = startIndex + marker.length;
+  const followingJob = /\n {2}[a-zA-Z0-9_-]+:\n/.exec(
+    workflowSource.slice(contentStart),
+  );
+  const endIndex = followingJob
+    ? contentStart + followingJob.index
+    : workflowSource.length;
+
+  return workflowSource.slice(startIndex, endIndex);
+}
 
 test("package metadata defines no installation lifecycle", () => {
   for (const script of [

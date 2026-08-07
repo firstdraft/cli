@@ -3,6 +3,10 @@
 Publishing is a separate, explicit action after a release-preparation pull request has merged. npm registry bytes
 and package versions cannot be replaced, so do not create or push a release tag as a dry run.
 
+Only a version that npm reports as published or a protected release tag that exists is immutable. Before either
+exists, an unpublished candidate may be revised without changing its proposed version; its exact source SHA and
+reviewed digests identify it. Reconcile the registry and remote tags before deciding that a version was consumed.
+
 ## Pre-1.0 version and channel policy
 
 Before `1.0.0`, First Draft CLI uses ordinary `0.MINOR.PATCH` versions. Increase `MINOR` for a breaking
@@ -66,11 +70,9 @@ The published scoped package already exists. Before another release, a repositor
    npm view '@firstdraft.com/cli' name repository.url versions dist-tags --json
    ```
 
-5. If trusted publishing has not yet been verified, `v0.1.0` is the final release permitted to use the bootstrap
-   credential. Create a one-day granular npm token with read/write access limited to the existing
-   `@firstdraft.com/cli` package, no organization-management access, and bypass 2FA enabled. Add it directly as the
-   `npm` environment secret `NPM_TOKEN`; never put it in an Issue, chat, workflow file, repository file, or command
-   history.
+5. Before creating the first ordinary `v0.1.0` tag, verify npm trusted publishing for the exact package, repository,
+   workflow, protected environment, and allowed publish operation. No persistent npm credential is permitted for
+   this or a later release workflow.
 
 Use the repository-pinned Node.js 24.18.0 toolchain with npm 11.16.0 to verify the organization's durable read/write
 access. Grant it only if the package did not inherit access for the `developers` team:
@@ -82,7 +84,7 @@ npm access grant read-write firstdraft.com:developers '@firstdraft.com/cli'
 ```
 
 Using an interactive npm login backed by the account's 2FA, configure trusted publishing for the exact package,
-repository, workflow, and protected environment. Do not use the bypass-2FA bootstrap token for trust setup:
+repository, workflow, protected environment, and allowed publish action:
 
 ```sh
 npm trust github '@firstdraft.com/cli' \
@@ -93,18 +95,18 @@ npm trust github '@firstdraft.com/cli' \
 npm trust list '@firstdraft.com/cli'
 ```
 
-Confirm the listed relationship identifies `firstdraft/cli`, `publish.yml`, the `npm` environment, and publish
-permission. After publishing `v0.1.0` and before creating any later release tag, merge a follow-up pull request that
-removes the `NODE_AUTH_TOKEN` environment from the publish step. Then remove the GitHub secret, revoke the bootstrap
-token, and configure the package to disallow token publication:
+Confirm `npm trust list` reports type `github`, repository `firstdraft/cli`, file `publish.yml`, environment `npm`,
+and permission `createPackage`, which is npm's trust-list vocabulary for the allowed publish operation, before
+creating `v0.1.0`. npm does not validate the saved relationship by attempting an exchange, so each case-sensitive
+value must be inspected. The publish job must remain on a GitHub-hosted runner with `id-token: write` and must not
+read `NODE_AUTH_TOKEN`, an npm token, or any GitHub Actions secret. Confirm the repository and `npm` environment
+secret lists contain no npm automation secret. Trusted publishing's short-lived OIDC exchange is the sole workflow
+publication credential; an authentication failure stops the release and must never fall back to a persistent token.
 
-```sh
-npm access set mfa=publish '@firstdraft.com/cli'
-```
-
-Confirm that the package's npm Publishing access now requires 2FA and disallows tokens. The workflow continues
-through GitHub OIDC without a persistent npm credential. Apply this restriction only after the trusted publisher
-has been verified.
+As optional defense-in-depth after trusted publication is operationally proven, an npm administrator may complete
+the separate security-key ceremony and set package **Publishing access** to **Require two-factor authentication and
+disallow tokens**. This package-level setting is not a `v0.1.0` release prerequisite and must not be reported as
+enabled until it is directly observed.
 
 ## Historical alpha publications
 
@@ -126,9 +128,13 @@ approved promotion.
 3. Apply the pre-1.0 policy: use a minor increment for a breaking compatibility line and a patch increment for a
    change that is otherwise backward-compatible. Keep the initial distribution under `next` independently of that
    version choice. Do not move `latest` during release publication.
-4. Confirm neither the exact package version nor its `v<package-version>` tag already exists.
-5. Update user-facing documentation and release notes for behavior changes.
-6. Run:
+4. Confirm neither the exact package version nor its `v<package-version>` tag already exists. If both remain absent,
+   the unpublished candidate may retain its proposed version while its exact SHA and digests are revised.
+5. Re-run `npm trust list '@firstdraft.com/cli'`, verify the exact `github`/repository/file/environment/`createPackage`
+   relationship described above, and confirm the workflow contains no persistent npm credential or GitHub Actions
+   secret.
+6. Update user-facing documentation and release notes for behavior changes.
+7. Run:
 
    ```sh
    npm ci --ignore-scripts
@@ -136,7 +142,7 @@ approved promotion.
    npm run check
    ```
 
-7. Merge the reviewed pull request only after local and hosted checks pass.
+8. Merge the reviewed pull request only after local and hosted checks pass.
 
 ## Publish
 
@@ -150,7 +156,8 @@ equals `v` plus the version in `package.json`, the remote tag still identifies t
 appears in the first-parent history of `origin/main`. First-parent membership allows an older reviewed `main` state
 after another change lands while rejecting intermediate commits from a merged side branch. The workflow reruns the
 complete check, waits for approval in the `npm` environment, reverifies the remote refs, and publishes to the public
-registry with provenance under `next`.
+registry with provenance under `next`. It authenticates only through the exact npm trusted-publisher relationship and
+the job's short-lived GitHub OIDC token; it reads no persistent npm credential or GitHub Actions secret.
 
 The tag ruleset and `npm` environment approval are the external trust boundary because a tag-push run loads its
 workflow from the tagged commit. Before approving the `npm` deployment, the reviewer must confirm:
@@ -159,6 +166,8 @@ workflow from the tagged commit. Before approving the `npm` deployment, the revi
 - The commit is a known reviewed state in protected `main` history and its required checks passed.
 - `.github/workflows/publish.yml` at that commit is the reviewed workflow, still selects the `npm` environment, and
   publishes the public `@firstdraft.com/cli` package only under `next` with provenance.
+- npm lists the exact `github`/`firstdraft/cli`/`publish.yml`/`npm`/`createPackage` trusted-publisher relationship,
+  and the GitHub repository and `npm` environment contain no npm automation secret.
 - The unprivileged verification job passed for that exact commit.
 
 Do not move or reuse a release tag. If the tagged commit is not a first-parent state of `main`, merge the intended
@@ -177,6 +186,11 @@ npm dist-tag ls '@firstdraft.com/cli'
 
 Install `@firstdraft.com/cli@0.1.0` into a fresh temporary prefix, confirm `firstdraft --version`, compare the
 packed file list with the release workflow, and run `npm audit signatures` after an exact installation.
+
+If OIDC authentication fails, reconcile both the registry version and protected remote tag first. If only npm's
+listed relationship is wrong, correct it on npm and rerun the existing workflow's failed jobs without changing the
+tagged source. If the workflow filename, environment, permissions, or other identity at the tagged commit is wrong,
+the protected tag is immutable: prepare the next version rather than moving the tag. Never add a token fallback.
 
 A published version cannot be overwritten or reused. For a bad release, move `next` only to a known-good compatible
 version if one exists; otherwise deprecate the bad version and publish a corrected higher version. Treat

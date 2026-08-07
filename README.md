@@ -35,6 +35,13 @@ identifies `0.1.0-alpha.2`. After `0.1.0` is published under `next`, an untagged
 that historical alpha rather than `0.1.0` until the separate promotion occurs. Remote Plan and Compilation commands
 require a compatible First Draft service and are currently intended for coordinated trials.
 
+Before the first ordinary `v0.1.0` release tag is created, an operator must inspect npm's exact listed
+[GitHub Actions trusted-publisher](https://docs.npmjs.com/trusted-publishers/) relationship for
+`@firstdraft.com/cli`, type `github`, the `firstdraft/cli` repository, `publish.yml`, the protected `npm` environment,
+and permission `createPackage` (npm's trust-list vocabulary for the allowed publish operation). The release workflow
+authenticates only with a short-lived GitHub OIDC credential. A persistent npm token, `NODE_AUTH_TOKEN`, or GitHub
+Actions secret is not permitted as a publication fallback.
+
 ## Authenticate API commands
 
 Create an API token in First Draft and provide it only through the environment when running a network command:
