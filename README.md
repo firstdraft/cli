@@ -173,6 +173,15 @@ URLs, raw server projections, local paths, or environment values. Success writes
 GitHub repository URL plus a newline to stdout. If the command fails after progress has begun, its existing
 structured JSON error envelope is the final stderr document after the progress lines.
 
+The closed API `0.2.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+`github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
+`github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
+`github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
+`github.preflight_unavailable.authorization`, `github.preflight_unavailable.repository_client`,
+`github.preflight_unavailable.artifact_preparation`, `github.preflight_unavailable.installation_token`,
+`github.preflight_unavailable.publication_preparation`, and `github.preflight_unavailable.repository_ref_client`.
+Other values make the response invalid rather than becoming terminal output.
+
 The internal Publication is a Project singleton in this release. A repeat safely receives the same Publication
 instead of creating another. If the first conditional `PUT` has an ambiguous result, the CLI reconciles it with
 one read-only singleton `GET` and never automatically repeats the mutation within that invocation. Do not run

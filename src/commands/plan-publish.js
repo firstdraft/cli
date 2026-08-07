@@ -111,6 +111,14 @@ const PROGRESS_REASON_CODES = new Set([
   "github.installation_unavailable",
   "github.installation_not_ready",
   "github.preflight_unavailable",
+  "github.preflight_unclassified",
+  "github.preflight_unavailable.configuration",
+  "github.preflight_unavailable.authorization",
+  "github.preflight_unavailable.repository_client",
+  "github.preflight_unavailable.artifact_preparation",
+  "github.preflight_unavailable.installation_token",
+  "github.preflight_unavailable.publication_preparation",
+  "github.preflight_unavailable.repository_ref_client",
 ]);
 const MAX_PROGRESS_RETRY_COUNT = 7;
 const RETRY_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;

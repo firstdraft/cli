@@ -33,6 +33,24 @@ const ARTIFACT = {
 };
 const TREE_SHA = "3".repeat(40);
 const COMMIT_SHA = "4".repeat(40);
+const SAFE_PROGRESS_REASON_CODES = [
+  "github.configuration_missing",
+  "github.oauth_unavailable",
+  "github.api_unavailable",
+  "github.reauthorization_required",
+  "github.account_mismatch",
+  "github.installation_unavailable",
+  "github.installation_not_ready",
+  "github.preflight_unavailable",
+  "github.preflight_unclassified",
+  "github.preflight_unavailable.configuration",
+  "github.preflight_unavailable.authorization",
+  "github.preflight_unavailable.repository_client",
+  "github.preflight_unavailable.artifact_preparation",
+  "github.preflight_unavailable.installation_token",
+  "github.preflight_unavailable.publication_preparation",
+  "github.preflight_unavailable.repository_ref_client",
+];
 const REPOSITORY = {
   id: 1_234_567,
   private: true,
@@ -346,6 +364,47 @@ First Draft: GitHub publication complete.
   ]) {
     assert.doesNotMatch(result.stderr, new RegExp(privateValue));
   }
+});
+
+test("progress accepts every coordinated safe reason code", async (context) => {
+  const cwd = remoteDirectory(context, "https://api.example.test");
+  const responses = SAFE_PROGRESS_REASON_CODES.map((reasonCode) =>
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: {
+          progress: {
+            phase: "github_preflight",
+            retry_at: RETRY_AT,
+            retry_count: 1,
+            reason_code: reasonCode,
+          },
+        },
+      }),
+    ),
+  );
+  responses.push(jsonResponse(publicationBody("succeeded")));
+
+  const result = await invoke(["plan", "compile"], {
+    cwd,
+    fetchFunction: sequenceFetch(responses),
+    planPublishSleep: async () => {},
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+${SAFE_PROGRESS_REASON_CODES.map(
+  (reasonCode) =>
+    `First Draft: Checking GitHub access (reason: ${reasonCode}; retry count: 1; next retry: ${RETRY_AT}).`,
+).join("\n")}
+First Draft: GitHub publication complete.
+`,
+  );
 });
 
 test("a repeated singleton PUT accepts provenance matching local Plan state", async (context) => {
@@ -1019,6 +1078,16 @@ test("exact response shapes and coherent terminal projections are required", asy
           retry_at: RETRY_AT,
           retry_count: 1,
           reason_code: "github.canary-secret",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: RETRY_AT,
+          retry_count: 1,
+          reason_code: "github.preflight_unavailable.canary-secret",
         },
       },
     }),
