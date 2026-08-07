@@ -101,6 +101,6 @@ jobs:
           # release-source-checks:end
       - name: Publish verified source
         run: npm publish --access public --tag next --provenance --ignore-scripts
-        # Remove this credential after the first publish enables trusted publishing.
+        # Remove after v0.1.0 and before any later release tag.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

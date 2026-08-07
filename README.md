@@ -3,11 +3,13 @@
 `firstdraft` is the command-line client for [First Draft](https://github.com/firstdraft/firstdraft). It is being
 built for agents that author and review Foundation Plans with their users.
 
-Public alpha releases use npm's `next` tag. This release line contains the auditable command shell, local Foundation
-Plan initialization, local application-key and UUID generation, conditional whole-document push, whole-graph
-analysis status polling, compile-and-publish orchestration, and read-only retained-Compilation download.
-Interfaces may change between prereleases, and publishing the CLI does not make the wider First Draft service
-generally available.
+The current `0.1.x` line contains the auditable command shell, local Foundation Plan initialization, local
+application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling,
+compile-and-publish orchestration, and read-only retained-Compilation download. Before `1.0.0`, increasing the minor
+version starts a breaking compatibility line; increasing the patch version is otherwise backward-compatible within
+that line. This policy applies to ordinary versions; historical prereleases are outside those compatibility
+guarantees. `0.1.0` intentionally supersedes `0.1.0-alpha.2` and requires the service's `0.2.x` API contract.
+Publishing the CLI does not make the wider First Draft service generally available.
 
 ## Requirements
 
@@ -16,18 +18,22 @@ generally available.
 
 ## Installation
 
-Once npm reports a public alpha, install the current prerelease explicitly:
+Once npm reports an approved coordinated release, install it from the approval-gated `next` channel:
 
 ```sh
 npm install --global @firstdraft.com/cli@next
 firstdraft --version
 ```
 
-The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable.
+The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable. `next` is a distribution channel,
+not a claim that the selected version has SemVer prerelease syntax.
 
-There is intentionally no stable `latest` release yet. Pin an exact prerelease version instead of `next` when a
-repeatable installation matters. Remote Plan and Compilation commands require a
-compatible First Draft service and are currently intended for coordinated trials.
+Pin an exact compatible version, such as `@firstdraft.com/cli@0.1.0` after the registry reports it, instead of
+`next` when a repeatable installation matters. Moving npm's `latest` tag is a separate approval-gated promotion
+after qualification; the initial release workflow does not move it. As observed on August 7, 2026, `latest` still
+identifies `0.1.0-alpha.2`. After `0.1.0` is published under `next`, an untagged npm install will continue to select
+that historical alpha rather than `0.1.0` until the separate promotion occurs. Remote Plan and Compilation commands
+require a compatible First Draft service and are currently intended for coordinated trials.
 
 ## Authenticate API commands
 
@@ -165,22 +171,41 @@ authorization to request that lifecycle. Immediately before its conditional muta
 Plan and requires its exact bytes to match the accepted Head, so bytes changed after analysis cannot be published.
 It extracts the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and then sends that
 complete ETag in `If-Match`.
-The command writes no progress output to stdout. Success is exactly one validated JSON object containing the
-retained `project`, `compilation`, and `publication`, including the private GitHub repository URL.
+The command writes stable human-readable progress to stderr, with every line prefixed by `First Draft:`. It reports
+analysis, compilation completion or terminal failure or cancellation, the current GitHub phase, and an allowlisted
+reason, retry count, and exact UTC retry time when a GitHub preflight check is delayed. A retained retry with no next
+time is reported as paused and requiring operator recovery. Progress never includes IDs, hashes, repository names or
+URLs, raw server projections, local paths, or environment values. Success writes exactly the validated private
+GitHub repository URL plus a newline to stdout. If the command fails after progress has begun, its existing
+structured JSON error envelope is the final stderr document after the progress lines.
+
+The closed API `0.2.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+`github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
+`github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
+`github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
+`github.preflight_unavailable.authorization`, `github.preflight_unavailable.repository_client`,
+`github.preflight_unavailable.artifact_preparation`, `github.preflight_unavailable.installation_token`,
+`github.preflight_unavailable.publication_preparation`, and `github.preflight_unavailable.repository_ref_client`.
+Other values make the response invalid rather than becoming terminal output.
 
 The internal Publication is a Project singleton in this release. A repeat safely receives the same Publication
 instead of creating another. If the first conditional `PUT` has an ambiguous result, the CLI reconciles it with
-one read-only singleton `GET` and never automatically repeats the mutation. Rerunning `plan compile` safely
-replays the singleton request. Publication polling is sequential, bounded to ten minutes, and pinned to the
-retained Project Head, Compilation input, Publication identity, and repository identity.
+one read-only singleton `GET` and never automatically repeats the mutation within that invocation. Do not run
+concurrent Compile commands. After an invocation exits because the initial outcome or a later status read is
+unavailable, wait and rerun `plan compile` with unchanged Plan bytes; its conditional request safely reconciles or
+resumes the same retained singleton without creating another Compilation, repository, or push. Publication polling
+is sequential, bounded to ten minutes, and pinned to the retained Project Head, Compilation input, Publication
+identity, and repository identity.
 
 This release cannot repoint a Project's Publication to a later accepted Head. The public CLI therefore has no
-`plan publish` command and no local-start `plan compile --output` mode. Use the standalone retained-Compilation
-commands below when local generated source is useful.
+`plan publish` command and no local-start `plan compile --output` mode. It retains lower-level Compilation commands
+for operational callers that acquire an ID separately, but they are intentionally not a continuation of the
+URL-only `plan compile` journey.
 
 ## Inspect a retained Compilation
 
-Read one Compilation ID returned by `plan compile`:
+These lower-level commands are for callers that already hold a retained Compilation ID from authenticated API
+metadata or operational tooling; `plan compile` prints only the final repository URL:
 
 ```sh
 firstdraft compilation status 01900000-0000-7000-8000-000000000001
@@ -216,13 +241,16 @@ structure, contents, and digests without claiming POSIX mode bits.
 
 ## Handled failures
 
-Every handled subcommand failure writes exactly one JSON object to standard error. Branch on its stable `error`
-value rather than the human-readable `detail`; `plan compile` also supplies `phase: "push" | "publication"` when
-`request_outcome_unknown` requires phase-specific recovery:
+Every handled subcommand failure ends with exactly one JSON object on standard error. `plan compile` may first write
+progress lines; machine consumers can remove only lines beginning with the exact `First Draft: ` prefix and parse
+the remaining JSON document. Branch on its stable `error` value rather than the human-readable `detail`; `plan
+compile` also supplies `phase: "push" | "publication"` when `request_outcome_unknown` requires phase-specific
+recovery:
 
 - `phase: "push"` means the Plan mutation may have been accepted; stop and reconcile local Head state.
-- `phase: "publication"` means the singleton Publication mutation was not resolved; rerunning `plan compile` is a
-  safe replay.
+- `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
+  commands. After the prior invocation exits, wait and rerun `plan compile` with unchanged Plan bytes to safely
+  reconcile or resume the retained singleton.
 
 | Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | -------------------------------------------------------------------------------------------------------------- |

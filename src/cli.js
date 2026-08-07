@@ -62,6 +62,7 @@ import {
   readPlanStatus,
 } from "./commands/plan-status.js";
 import { isFileSystemError } from "./file-system.js";
+import { createPlanCompileProgressReporter } from "./plan-compile-progress.js";
 import { isUuidV7 } from "./plan-state.js";
 import { generateUuidV7 } from "./uuid-v7.js";
 import { VERSION } from "./version.js";
@@ -181,9 +182,9 @@ Environment:
   FIRSTDRAFT_API_URL    Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. It then conditionally creates
-or replays the internal GitHub Publication lifecycle and prints its complete
-validated Project, Compilation, and Publication projection.
+and proceeds only when that analysis is valid. It then conditionally creates or
+replays the internal GitHub Publication lifecycle. Progress is written to
+stderr. Success prints only the validated private GitHub repository URL.
 `;
 
 const COMPILATION_HELP = `First Draft CLI
@@ -318,17 +319,17 @@ const PLAN_PUBLISH_NOT_PUSHED_DETAIL =
 const PLAN_PUBLISH_LOCAL_PLAN_CHANGED_DETAIL =
   "The local Foundation Plan changed after validation. Run 'firstdraft plan compile' again to submit the current bytes.";
 const PLAN_PUBLISH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The Publication may have started, but its singleton status could not be verified. No mutation was retried. Running 'firstdraft plan compile' again is safe.";
+  "The Publication may have started, but its retained singleton status could not be verified. No mutation was retried. Do not run concurrent Compile commands. Wait, then rerun 'firstdraft plan compile' with unchanged Plan bytes to safely reconcile or resume the retained singleton.";
 const PLAN_PUBLISH_START_REJECTED_DETAIL =
   "First Draft rejected the publication request.";
 const PLAN_PUBLISH_STATUS_UNAVAILABLE_DETAIL =
-  "Could not read the pinned publication status. The command stopped without starting another Publication.";
+  "Could not read the retained Publication status. The command stopped without starting another Publication. Do not run concurrent Compile commands. Wait, then rerun 'firstdraft plan compile' with unchanged Plan bytes to safely resume the retained singleton.";
 const PLAN_PUBLISH_STATUS_INVALID_DETAIL =
   "First Draft returned an invalid publication status response. Retrying unchanged will not repair this protocol mismatch.";
 const PLAN_PUBLISH_CHANGED_DETAIL =
   "The pinned Publication changed while being polled. The command stopped without following a replacement.";
 const PLAN_PUBLISH_TIMEOUT_DETAIL =
-  "The pinned Publication is still processing after the bounded ten-minute wait.";
+  "The retained Publication is still processing after the bounded ten-minute wait. This invocation stopped waiting, but retained work may continue. Do not run concurrent Compile commands. Wait, then rerun 'firstdraft plan compile' with unchanged Plan bytes to safely resume the retained singleton.";
 const PLAN_PUBLISH_FAILED_DETAIL =
   "The pinned Publication failed. Its validated status identifies the failed phase.";
 const PLAN_PUBLISH_CANCELLED_DETAIL = "The pinned Publication was cancelled.";
@@ -1495,6 +1496,7 @@ async function runPlanCompile({
   }
 
   let result;
+  const reportProgress = createPlanCompileProgressReporter(stderr);
   try {
     result = await compilePlan({
       cwd,
@@ -1510,12 +1512,17 @@ async function runPlanCompile({
       push: planCompilePush,
       readStatus: planCompileReadStatus,
       publish: planCompilePublish,
+      onProgress: reportProgress,
     });
   } catch (error) {
     return writePlanCompileError(stderr, error);
   }
 
-  writeJson(stdout, result);
+  const repository =
+    /** @type {NonNullable<typeof result.publication.repository>} */ (
+      result.publication.repository
+    );
+  stdout.write(`${repository.html_url}\n`);
   return 0;
 }
 

@@ -69,11 +69,13 @@ const PUBLICATION_KEYS = [
   "created_at",
   "failure",
   "id",
+  "progress",
   "repository",
   "started_at",
   "status",
 ];
 const FAILURE_KEYS = ["code", "phase"];
+const PROGRESS_KEYS = ["phase", "reason_code", "retry_at", "retry_count"];
 const REPOSITORY_KEYS = [
   "commit_sha",
   "default_branch",
@@ -85,6 +87,41 @@ const REPOSITORY_KEYS = [
   "tree_sha",
 ];
 const OWNER_KEYS = ["id", "login", "type"];
+const PROGRESS_PHASES = new Set([
+  "compiling",
+  "preparing_repository",
+  "github_preflight",
+  "creating_repository",
+  "preparing_repository_reconciliation",
+  "reconciling_repository",
+  "preparing_artifact",
+  "publishing_artifact",
+  "preparing_publication_reconciliation",
+  "reconciling_publication",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+const PROGRESS_REASON_CODES = new Set([
+  "github.configuration_missing",
+  "github.oauth_unavailable",
+  "github.api_unavailable",
+  "github.reauthorization_required",
+  "github.account_mismatch",
+  "github.installation_unavailable",
+  "github.installation_not_ready",
+  "github.preflight_unavailable",
+  "github.preflight_unclassified",
+  "github.preflight_unavailable.configuration",
+  "github.preflight_unavailable.authorization",
+  "github.preflight_unavailable.repository_client",
+  "github.preflight_unavailable.artifact_preparation",
+  "github.preflight_unavailable.installation_token",
+  "github.preflight_unavailable.publication_preparation",
+  "github.preflight_unavailable.repository_ref_client",
+]);
+const MAX_PROGRESS_RETRY_COUNT = 7;
+const RETRY_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 
 /**
  * @typedef {object} PlanPublishFileSystem
@@ -183,7 +220,7 @@ export class PublicationCancelledError extends Error {
  * @typedef {object} PublicationResponse
  * @property {{id: string, graph_version: number, head_source_sha256: string}} project
  * @property {{id: string, analysis_run_id: string, graph_version: number, head_source_sha256: string, status: string, compiler_release: string, target: {id: string, profile: string}, artifact: null | {sha256: string, manifest_sha256: string, file_count: number}}} compilation
- * @property {{id: string, status: string, repository: null | {id: number, private: true, owner: {id: number, login: string, type: "User"}, full_name: string, default_branch: string, html_url: string, tree_sha: string | null, commit_sha: string | null}, failure: null | {phase: string, code: string}, created_at: string, started_at: string | null, completed_at: string | null}} publication
+ * @property {{id: string, status: string, repository: null | {id: number, private: true, owner: {id: number, login: string, type: "User"}, full_name: string, default_branch: string, html_url: string, tree_sha: string | null, commit_sha: string | null}, failure: null | {phase: string, code: string}, progress: {phase: string, retry_at: string | null, retry_count: number, reason_code: string | null}, created_at: string, started_at: string | null, completed_at: string | null}} publication
  */
 
 /**
@@ -195,6 +232,7 @@ export class PublicationCancelledError extends Error {
  * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
  * @property {(delayMs: number) => Promise<void>} [sleep]
  * @property {() => number} [now]
+ * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
  */
 
 /**
@@ -209,6 +247,7 @@ export async function publishPlan({
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
   sleep = sleepFor,
   now = Date.now,
+  onProgress = () => {},
 }) {
   const state = readPlanState({ cwd, fileSystem });
   if (state.api_url === undefined || state.foundation_plan_etag === undefined) {
@@ -251,6 +290,8 @@ export async function publishPlan({
   );
   const deadline = now() + WAIT_TIMEOUT_MS;
   let initial;
+
+  onProgress({ phase: "compilation", status: "waiting" });
 
   try {
     initial = await startPublication({
@@ -309,6 +350,7 @@ export async function publishPlan({
   }
 
   let current = initial;
+  reportProgress(onProgress, current);
   while (!TERMINAL_PUBLICATION_STATUSES.has(current.publication.status)) {
     const remaining = deadline - now();
     if (remaining <= 0) throw new PublicationTimeoutError(current);
@@ -331,6 +373,7 @@ export async function publishPlan({
       throw new PublicationChangedError(current, next);
     }
     current = next;
+    reportProgress(onProgress, current);
   }
 
   if (
@@ -502,6 +545,7 @@ function parsePublicationResponse(value, projectId, headSourceSha256) {
     !PUBLICATION_STATUSES.has(publication.status) ||
     !isNullableRepository(publication.repository) ||
     !isNullableFailure(publication.failure) ||
+    !isProgress(publication.progress, publication.status) ||
     !isTimestamp(publication.created_at) ||
     !isNullableTimestamp(publication.started_at) ||
     !isNullableTimestamp(publication.completed_at) ||
@@ -525,6 +569,10 @@ function parsePublicationResponse(value, projectId, headSourceSha256) {
   const failure = /** @type {null | {phase: string, code: string}} */ (
     publication.failure
   );
+  const progress =
+    /** @type {{phase: string, retry_at: string | null, retry_count: number, reason_code: string | null}} */ (
+      publication.progress
+    );
 
   return {
     project: {
@@ -571,6 +619,12 @@ function parsePublicationResponse(value, projectId, headSourceSha256) {
             },
       failure:
         failure === null ? null : { phase: failure.phase, code: failure.code },
+      progress: {
+        phase: progress.phase,
+        retry_at: progress.retry_at,
+        retry_count: progress.retry_count,
+        reason_code: progress.reason_code,
+      },
       created_at: /** @type {string} */ (publication.created_at),
       started_at: /** @type {string | null} */ (publication.started_at),
       completed_at: /** @type {string | null} */ (publication.completed_at),
@@ -667,6 +721,82 @@ function isNullableFailure(value) {
     (hasExactKeySet(value, FAILURE_KEYS) &&
       isRelease(value.phase) &&
       isFailureCode(value.code))
+  );
+}
+
+/** @param {unknown} value @param {unknown} publicationStatus */
+function isProgress(value, publicationStatus) {
+  if (
+    !hasExactKeySet(value, PROGRESS_KEYS) ||
+    typeof value.phase !== "string" ||
+    !PROGRESS_PHASES.has(value.phase) ||
+    !Number.isSafeInteger(value.retry_count) ||
+    Number(value.retry_count) < 0 ||
+    Number(value.retry_count) > MAX_PROGRESS_RETRY_COUNT ||
+    !isNullableRetryTimestamp(value.retry_at) ||
+    !(
+      value.reason_code === null ||
+      (typeof value.reason_code === "string" &&
+        PROGRESS_REASON_CODES.has(value.reason_code))
+    ) ||
+    !progressMatchesPublicationStatus(value.phase, publicationStatus)
+  ) {
+    return false;
+  }
+
+  if (value.phase !== "github_preflight") {
+    return (
+      value.retry_at === null &&
+      value.retry_count === 0 &&
+      value.reason_code === null
+    );
+  }
+
+  return value.retry_count === 0
+    ? value.retry_at === null && value.reason_code === null
+    : value.reason_code !== null;
+}
+
+/** @param {string} progressPhase @param {unknown} publicationStatus */
+function progressMatchesPublicationStatus(progressPhase, publicationStatus) {
+  if (progressPhase === "compiling") return publicationStatus === "compiling";
+  if (progressPhase === "completed") return publicationStatus === "succeeded";
+  if (progressPhase === "failed") {
+    return (
+      publicationStatus === "failed" ||
+      publicationStatus === "repository_conflict"
+    );
+  }
+  if (progressPhase === "cancelled") return publicationStatus === "cancelled";
+  if (progressPhase === "github_preflight") {
+    return [
+      "provisioning_repository",
+      "repository_unknown",
+      "publishing",
+      "publication_unknown",
+    ].includes(String(publicationStatus));
+  }
+
+  const expectedStatus = new Map([
+    ["preparing_repository", "provisioning_repository"],
+    ["creating_repository", "provisioning_repository"],
+    ["preparing_repository_reconciliation", "repository_unknown"],
+    ["reconciling_repository", "repository_unknown"],
+    ["preparing_artifact", "publishing"],
+    ["publishing_artifact", "publishing"],
+    ["preparing_publication_reconciliation", "publication_unknown"],
+    ["reconciling_publication", "publication_unknown"],
+  ]).get(progressPhase);
+  return publicationStatus === expectedStatus;
+}
+
+/** @param {unknown} value */
+function isNullableRetryTimestamp(value) {
+  return (
+    value === null ||
+    (typeof value === "string" &&
+      RETRY_TIMESTAMP_PATTERN.test(value) &&
+      isTimestamp(value))
   );
 }
 
@@ -815,6 +945,25 @@ function validRepositoryTransition(previous, current) {
     (before.tree_sha === null || after.tree_sha === before.tree_sha) &&
     (before.commit_sha === null || after.commit_sha === before.commit_sha)
   );
+}
+
+/**
+ * @param {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} onProgress
+ * @param {PublicationResponse} current
+ */
+function reportProgress(onProgress, current) {
+  const progress = current.publication.progress;
+  onProgress({
+    phase: "publication",
+    compilationStatus:
+      /** @type {"queued" | "running" | "succeeded" | "failed" | "cancelled"} */ (
+        current.compilation.status
+      ),
+    publicationPhase: progress.phase,
+    retryAt: progress.retry_at,
+    retryCount: progress.retry_count,
+    reasonCode: progress.reason_code,
+  });
 }
 
 /** @param {Response} response @param {unknown} body */

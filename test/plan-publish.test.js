@@ -23,6 +23,7 @@ const API_TOKEN = `fd_${"a".repeat(43)}`;
 const CREATED_AT = "2026-08-01T12:00:00.000Z";
 const STARTED_AT = "2026-08-01T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-01T12:00:02.000Z";
+const RETRY_AT = "2026-08-07T16:15:00.000000Z";
 const COMPILER_RELEASE = "foundation-plan-rails/compiler-2026-08";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const ARTIFACT = {
@@ -32,6 +33,24 @@ const ARTIFACT = {
 };
 const TREE_SHA = "3".repeat(40);
 const COMMIT_SHA = "4".repeat(40);
+const SAFE_PROGRESS_REASON_CODES = [
+  "github.configuration_missing",
+  "github.oauth_unavailable",
+  "github.api_unavailable",
+  "github.reauthorization_required",
+  "github.account_mismatch",
+  "github.installation_unavailable",
+  "github.installation_not_ready",
+  "github.preflight_unavailable",
+  "github.preflight_unclassified",
+  "github.preflight_unavailable.configuration",
+  "github.preflight_unavailable.authorization",
+  "github.preflight_unavailable.repository_client",
+  "github.preflight_unavailable.artifact_preparation",
+  "github.preflight_unavailable.installation_token",
+  "github.preflight_unavailable.publication_preparation",
+  "github.preflight_unavailable.repository_ref_client",
+];
 const REPOSITORY = {
   id: 1_234_567,
   private: true,
@@ -42,6 +61,23 @@ const REPOSITORY = {
   tree_sha: TREE_SHA,
   commit_sha: COMMIT_SHA,
 };
+const REPOSITORY_URL = REPOSITORY.html_url;
+const REPLAY_PROGRESS = `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+First Draft: GitHub publication complete.
+`;
+const LIFECYCLE_PROGRESS = `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+First Draft: Preparing private GitHub repository...
+First Draft: Preparing to verify GitHub repository creation...
+First Draft: Preparing compiled application...
+First Draft: Preparing to verify GitHub publication...
+First Draft: GitHub publication complete.
+`;
 const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
@@ -55,9 +91,9 @@ Environment:
   FIRSTDRAFT_API_URL    Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. It then conditionally creates
-or replays the internal GitHub Publication lifecycle and prints its complete
-validated Project, Compilation, and Publication projection.
+and proceeds only when that analysis is valid. It then conditionally creates or
+replays the internal GitHub Publication lifecycle. Progress is written to
+stderr. Success prints only the validated private GitHub repository URL.
 `;
 
 test("plan compile invokes Publication and one conditional singleton PUT and polls sequentially", async (context) => {
@@ -121,8 +157,8 @@ test("plan compile invokes Publication and one conditional singleton PUT and pol
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: jsonLine(publicationBody("succeeded")),
-    stderr: "",
+    stdout: `${REPOSITORY_URL}\n`,
+    stderr: LIFECYCLE_PROGRESS,
   });
   assert.deepEqual(delays, [1000, 1000, 1000, 1000, 1000, 1000]);
   assert.deepEqual(
@@ -162,6 +198,215 @@ test("plan compile invokes Publication and one conditional singleton PUT and pol
   assert.doesNotMatch(result.stdout, /canary-secret/);
 });
 
+test("progress reports each safe GitHub phase, scheduled retry, and parked retry once", async (context) => {
+  const cwd = remoteDirectory(context, "https://api.example.test");
+  const scheduled = {
+    phase: "github_preflight",
+    retry_at: RETRY_AT,
+    retry_count: 2,
+    reason_code: "github.api_unavailable",
+  };
+  const parked = {
+    phase: "github_preflight",
+    retry_at: null,
+    retry_count: 7,
+    reason_code: "github.installation_not_ready",
+  };
+  const responses = [
+    jsonResponse(publicationBody("compiling"), 201),
+    jsonResponse(
+      publicationBody("compiling", {
+        compilation: { status: "running" },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("compiling", {
+        compilation: { status: "running" },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("compiling", {
+        compilation: { status: "succeeded", artifact: ARTIFACT },
+      }),
+    ),
+    jsonResponse(publicationBody("provisioning_repository")),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: {
+          progress: {
+            phase: "github_preflight",
+            retry_at: null,
+            retry_count: 0,
+            reason_code: null,
+          },
+        },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: {
+          progress: {
+            phase: "github_preflight",
+            retry_at: null,
+            retry_count: 0,
+            reason_code: null,
+          },
+        },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: { progress: scheduled },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: { progress: scheduled },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: { progress: parked },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: {
+          progress: defaultProgress("provisioning_repository", {
+            phase: "creating_repository",
+          }),
+        },
+      }),
+    ),
+    jsonResponse(publicationBody("repository_unknown")),
+    jsonResponse(
+      publicationBody("repository_unknown", {
+        publication: {
+          progress: defaultProgress("repository_unknown", {
+            phase: "reconciling_repository",
+          }),
+        },
+      }),
+    ),
+    jsonResponse(publicationBody("publishing")),
+    jsonResponse(
+      publicationBody("publishing", {
+        publication: {
+          progress: {
+            phase: "github_preflight",
+            retry_at: null,
+            retry_count: 0,
+            reason_code: null,
+          },
+        },
+      }),
+    ),
+    jsonResponse(
+      publicationBody("publishing", {
+        publication: {
+          progress: defaultProgress("publishing", {
+            phase: "publishing_artifact",
+          }),
+        },
+      }),
+    ),
+    jsonResponse(publicationBody("publication_unknown")),
+    jsonResponse(
+      publicationBody("publication_unknown", {
+        publication: {
+          progress: defaultProgress("publication_unknown", {
+            phase: "reconciling_publication",
+          }),
+        },
+      }),
+    ),
+    jsonResponse(publicationBody("succeeded")),
+  ];
+
+  const result = await invoke(["plan", "compile"], {
+    cwd,
+    fetchFunction: sequenceFetch(responses),
+    planPublishSleep: async () => {},
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+First Draft: Preparing private GitHub repository...
+First Draft: Checking GitHub access...
+First Draft: Checking GitHub access (reason: github.api_unavailable; retry count: 2; next retry: ${RETRY_AT}).
+First Draft: Checking GitHub access (reason: github.installation_not_ready; retry count: 7; automatic retries paused; operator recovery required).
+First Draft: Creating private GitHub repository...
+First Draft: Preparing to verify GitHub repository creation...
+First Draft: Verifying GitHub repository creation...
+First Draft: Preparing compiled application...
+First Draft: Checking GitHub access...
+First Draft: Publishing compiled application to GitHub...
+First Draft: Preparing to verify GitHub publication...
+First Draft: Verifying GitHub publication...
+First Draft: GitHub publication complete.
+`,
+  );
+  for (const privateValue of [
+    PROJECT_ID,
+    COMPILATION_ID,
+    PUBLICATION_ID,
+    HEAD_SHA256,
+    TREE_SHA,
+    COMMIT_SHA,
+    REPOSITORY.full_name,
+    REPOSITORY_URL,
+  ]) {
+    assert.doesNotMatch(result.stderr, new RegExp(privateValue));
+  }
+});
+
+test("progress accepts every coordinated safe reason code", async (context) => {
+  const cwd = remoteDirectory(context, "https://api.example.test");
+  const responses = SAFE_PROGRESS_REASON_CODES.map((reasonCode) =>
+    jsonResponse(
+      publicationBody("provisioning_repository", {
+        publication: {
+          progress: {
+            phase: "github_preflight",
+            retry_at: RETRY_AT,
+            retry_count: 1,
+            reason_code: reasonCode,
+          },
+        },
+      }),
+    ),
+  );
+  responses.push(jsonResponse(publicationBody("succeeded")));
+
+  const result = await invoke(["plan", "compile"], {
+    cwd,
+    fetchFunction: sequenceFetch(responses),
+    planPublishSleep: async () => {},
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+${SAFE_PROGRESS_REASON_CODES.map(
+  (reasonCode) =>
+    `First Draft: Checking GitHub access (reason: ${reasonCode}; retry count: 1; next retry: ${RETRY_AT}).`,
+).join("\n")}
+First Draft: GitHub publication complete.
+`,
+  );
+});
+
 test("a repeated singleton PUT accepts provenance matching local Plan state", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
@@ -175,7 +420,8 @@ test("a repeated singleton PUT accepts provenance matching local Plan state", as
   });
 
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, jsonLine(publicationBody("succeeded")));
+  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
+  assert.equal(result.stderr, REPLAY_PROGRESS);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.init?.method, "PUT");
   assert.equal(new Headers(calls[0]?.init?.headers).get("if-match"), ETAG);
@@ -200,8 +446,8 @@ test("an ambiguous PUT is reconciled by one safe singleton GET", async (context)
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: jsonLine(publicationBody("succeeded")),
-    stderr: "",
+    stdout: `${REPOSITORY_URL}\n`,
+    stderr: REPLAY_PROGRESS,
   });
   assert.deepEqual(
     calls.map(({ init }) => init?.method),
@@ -240,10 +486,10 @@ test("an ambiguous PUT does not adopt a singleton from a different Plan Head", a
   });
 
   assertHandledFailure(result, "request_outcome_unknown");
-  assert.equal(JSON.parse(result.stderr).status, 200);
+  assert.equal(errorEnvelope(result.stderr).status, 200);
   assert.match(
-    JSON.parse(result.stderr).detail,
-    /Running 'firstdraft plan compile' again is safe/,
+    errorEnvelope(result.stderr).detail,
+    /Do not run concurrent Compile commands.*unchanged Plan bytes.*retained singleton/,
   );
   assert.deepEqual(
     calls.map(({ init }) => init?.method),
@@ -271,8 +517,8 @@ test("an invalid successful PUT response can reconcile to the exact singleton", 
 
   assert.deepEqual(result, {
     status: 0,
-    stdout: jsonLine(publicationBody("succeeded")),
-    stderr: "",
+    stdout: `${REPOSITORY_URL}\n`,
+    stderr: REPLAY_PROGRESS,
   });
   assert.deepEqual(
     calls.map(({ init }) => init?.method),
@@ -299,9 +545,9 @@ test("an unresolved ambiguous PUT remains outcome unknown without replaying the 
   });
 
   assertHandledFailure(result, "request_outcome_unknown");
-  assert.equal(JSON.parse(result.stderr).status, 404);
+  assert.equal(errorEnvelope(result.stderr).status, 404);
   assert.equal(
-    JSON.parse(result.stderr).response.code,
+    errorEnvelope(result.stderr).response.code,
     "publication_not_found",
   );
   assert.deepEqual(
@@ -438,7 +684,7 @@ test("missing and rejected credentials use the stable authentication error", asy
     ]),
   });
   assertHandledFailure(rejected, "authentication_required");
-  assert.equal(JSON.parse(rejected.stderr).status, 401);
+  assert.equal(errorEnvelope(rejected.stderr).status, 401);
 
   const reconciliation = await invoke(["plan", "compile"], {
     cwd,
@@ -454,7 +700,7 @@ test("missing and rejected credentials use the stable authentication error", asy
     ]),
   });
   assertHandledFailure(reconciliation, "authentication_required");
-  assert.equal(JSON.parse(reconciliation.stderr).status, 401);
+  assert.equal(errorEnvelope(reconciliation.stderr).status, 401);
 });
 
 test("validated start rejections are distinct from unknown mutation outcomes", async (context) => {
@@ -466,7 +712,7 @@ test("validated start rejections are distinct from unknown mutation outcomes", a
     ]),
   });
 
-  assert.deepEqual(JSON.parse(rejected.stderr), {
+  assert.deepEqual(errorEnvelope(rejected.stderr), {
     error: "publication_start_rejected",
     detail: "First Draft rejected the publication request.",
     status: 412,
@@ -508,8 +754,8 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
 
     assert.deepEqual(result, {
       status: 0,
-      stdout: jsonLine(publicationBody("succeeded")),
-      stderr: "",
+      stdout: `${REPOSITORY_URL}\n`,
+      stderr: REPLAY_PROGRESS,
     });
     assert.deepEqual(
       calls.map(({ init }) => init?.method),
@@ -527,8 +773,8 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
   });
 
   assertHandledFailure(unresolved, "request_outcome_unknown");
-  assert.equal(JSON.parse(unresolved.stderr).status, 503);
-  assert.deepEqual(JSON.parse(unresolved.stderr).response, {
+  assert.equal(errorEnvelope(unresolved.stderr).status, 503);
+  assert.deepEqual(errorEnvelope(unresolved.stderr).response, {
     type: "about:blank",
     title: "Service Unavailable",
     status: 503,
@@ -549,10 +795,21 @@ test("polling distinguishes unavailable and invalid status responses", async (co
     planPublishSleep: async () => {},
   });
   assertHandledFailure(unavailable, "publication_status_unavailable");
-  assert.equal(JSON.parse(unavailable.stderr).status, 503);
   assert.equal(
-    JSON.parse(unavailable.stderr).response.code,
+    progressOutput(unavailable.stderr),
+    `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+`,
+  );
+  assert.equal(errorEnvelope(unavailable.stderr).status, 503);
+  assert.equal(
+    errorEnvelope(unavailable.stderr).response.code,
     "publication_unavailable",
+  );
+  assert.match(
+    errorEnvelope(unavailable.stderr).detail,
+    /Do not run concurrent Compile commands.*unchanged Plan bytes.*retained singleton/,
   );
 
   const invalidCwd = remoteDirectory(context, "https://api.example.test");
@@ -622,7 +879,7 @@ test("polling rejects replacement identities, regressions, and repository mutati
     });
 
     assertHandledFailure(result, "publication_changed");
-    const envelope = JSON.parse(result.stderr);
+    const envelope = errorEnvelope(result.stderr);
     assert.deepEqual(envelope.current, initial);
     assert.deepEqual(envelope.rejected, changed);
   }
@@ -644,30 +901,78 @@ test("the bounded wait reports its last validated status", async (context) => {
 
   assertHandledFailure(result, "publication_wait_timed_out");
   assert.equal(
-    JSON.parse(result.stderr).current.publication.status,
+    errorEnvelope(result.stderr).current.publication.status,
     "compiling",
+  );
+  assert.match(
+    errorEnvelope(result.stderr).detail,
+    /stopped waiting.*Do not run concurrent Compile commands.*unchanged Plan bytes.*retained singleton/,
   );
 });
 
-test("failed, conflicted, and cancelled publications preserve terminal status", async (context) => {
-  /** @type {[string, string][]} */
+test("terminal progress distinguishes Compilation outcomes from later GitHub outcomes", async (context) => {
+  /** @type {[string, string, Parameters<typeof publicationBody>[1], string][]} */
   const cases = [
-    ["failed", "publication_failed"],
-    ["repository_conflict", "publication_failed"],
-    ["cancelled", "publication_cancelled"],
+    [
+      "failed",
+      "publication_failed",
+      { publication: { started_at: null } },
+      "Application compilation failed.",
+    ],
+    [
+      "cancelled",
+      "publication_cancelled",
+      { publication: { started_at: null } },
+      "Application compilation cancelled.",
+    ],
+    [
+      "failed",
+      "publication_failed",
+      {
+        compilation: { status: "succeeded", artifact: ARTIFACT },
+        publication: {
+          failure: { phase: "publish", code: "publication_failed" },
+        },
+      },
+      "GitHub publication failed.",
+    ],
+    [
+      "cancelled",
+      "publication_cancelled",
+      { compilation: { status: "succeeded", artifact: ARTIFACT } },
+      "GitHub publication cancelled.",
+    ],
+    [
+      "repository_conflict",
+      "publication_failed",
+      { compilation: { status: "succeeded", artifact: ARTIFACT } },
+      "GitHub publication failed.",
+    ],
   ];
 
-  for (const [status, expectedError] of cases) {
+  for (const [status, expectedError, changes, terminalProgress] of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
     const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
-        jsonResponse(publicationBody(status), 201),
+        jsonResponse(publicationBody(status, changes), 201),
       ]),
     });
 
     assertHandledFailure(result, expectedError);
-    assert.equal(JSON.parse(result.stderr).current.publication.status, status);
+    const compiled = changes?.compilation?.status === "succeeded";
+    assert.equal(
+      progressOutput(result.stderr),
+      `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+${compiled ? "First Draft: Application compiled.\n" : ""}First Draft: ${terminalProgress}
+`,
+    );
+    assert.equal(
+      errorEnvelope(result.stderr).current.publication.status,
+      status,
+    );
   }
 
   for (const status of ["failed", "cancelled"]) {
@@ -687,7 +992,7 @@ test("failed, conflicted, and cancelled publications preserve terminal status", 
       status === "failed" ? "publication_failed" : "publication_cancelled",
     );
     assert.equal(
-      JSON.parse(result.stderr).current.publication.started_at,
+      errorEnvelope(result.stderr).current.publication.started_at,
       null,
     );
   }
@@ -696,6 +1001,96 @@ test("failed, conflicted, and cancelled publications preserve terminal status", 
 test("exact response shapes and coherent terminal projections are required", async (context) => {
   const invalidBodies = [
     { ...publicationBody("succeeded"), canary: "canary-secret" },
+    withoutPublicationProgress(publicationBody("succeeded")),
+    publicationBody("succeeded", {
+      publication: {
+        progress: {
+          ...defaultProgress("succeeded"),
+          additive: "canary-secret",
+        },
+      },
+    }),
+    publicationBody("succeeded", {
+      publication: {
+        progress: defaultProgress("succeeded", {
+          phase: "canary-secret",
+        }),
+      },
+    }),
+    publicationBody("succeeded", {
+      publication: {
+        progress: defaultProgress("succeeded", {
+          phase: "preparing_repository",
+        }),
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: defaultProgress("provisioning_repository", {
+          retry_count: 1,
+        }),
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: null,
+          retry_count: 0,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: null,
+          retry_count: 1,
+          reason_code: null,
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: RETRY_AT,
+          retry_count: 8,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: "2026-08-07T16:15:00.000Z",
+          retry_count: 1,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: RETRY_AT,
+          retry_count: 1,
+          reason_code: "github.canary-secret",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: RETRY_AT,
+          retry_count: 1,
+          reason_code: "github.preflight_unavailable.canary-secret",
+        },
+      },
+    }),
     publicationBody("succeeded", {
       project: { head_source_sha256: "f".repeat(64) },
     }),
@@ -822,12 +1217,45 @@ function publicationBody(status, changes = {}) {
       status,
       repository,
       failure,
+      progress: defaultProgress(status),
       created_at: CREATED_AT,
       started_at: status === "compiling" ? null : STARTED_AT,
       completed_at: terminal ? COMPLETED_AT : null,
       ...changes.publication,
     },
   };
+}
+
+/** @param {string} status @param {Record<string, unknown>} [changes] */
+function defaultProgress(status, changes = {}) {
+  /** @type {Record<string, string>} */
+  const phases = {
+    compiling: "compiling",
+    provisioning_repository: "preparing_repository",
+    repository_unknown: "preparing_repository_reconciliation",
+    publishing: "preparing_artifact",
+    publication_unknown: "preparing_publication_reconciliation",
+    succeeded: "completed",
+    repository_conflict: "failed",
+    failed: "failed",
+    cancelled: "cancelled",
+  };
+  return {
+    phase: phases[status],
+    retry_at: null,
+    retry_count: 0,
+    reason_code: null,
+    ...changes,
+  };
+}
+
+/** @param {ReturnType<typeof publicationBody>} body */
+function withoutPublicationProgress(body) {
+  const publication = /** @type {Record<string, unknown>} */ ({
+    ...body.publication,
+  });
+  delete publication.progress;
+  return { ...body, publication };
 }
 
 function publicationPath() {
@@ -995,11 +1423,6 @@ function validAnalysis() {
   };
 }
 
-/** @param {unknown} value */
-function jsonLine(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
 /**
  * @param {{status: number, stdout: string, stderr: string}} result
  * @param {string} error
@@ -1008,10 +1431,27 @@ function jsonLine(value) {
 function assertHandledFailure(result, error, status = 1) {
   assert.equal(result.status, status);
   assert.equal(result.stdout, "");
-  assert.equal(JSON.parse(result.stderr).error, error);
+  assert.equal(errorEnvelope(result.stderr).error, error);
   if (error === "request_outcome_unknown") {
-    assert.equal(JSON.parse(result.stderr).phase, "publication");
+    assert.equal(errorEnvelope(result.stderr).phase, "publication");
   }
+}
+
+/** @param {string} stderr */
+function errorEnvelope(stderr) {
+  const structured = stderr
+    .split("\n")
+    .filter((line) => !line.startsWith("First Draft: "))
+    .join("\n");
+  return JSON.parse(structured);
+}
+
+/** @param {string} stderr */
+function progressOutput(stderr) {
+  const lines = stderr
+    .split("\n")
+    .filter((line) => line.startsWith("First Draft: "));
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 }
 
 function inaccessibleFetch() {

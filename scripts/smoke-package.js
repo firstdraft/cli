@@ -452,6 +452,12 @@ async function exercisePackedCompilation(projectDirectory) {
         commit_sha: "6".repeat(40),
       },
       failure: null,
+      progress: {
+        phase: "completed",
+        retry_at: null,
+        retry_count: 0,
+        reason_code: null,
+      },
       created_at: "2026-07-30T12:00:00.000Z",
       started_at: "2026-07-30T12:00:01.000Z",
       completed_at: "2026-07-30T12:00:02.000Z",
@@ -560,8 +566,13 @@ async function exercisePackedCompilation(projectDirectory) {
     );
     assert.deepEqual(compiled, {
       status: 0,
-      stdout: `${JSON.stringify(publication, null, 2)}\n`,
-      stderr: "",
+      stdout: `${publication.publication.repository.html_url}\n`,
+      stderr: `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+First Draft: GitHub publication complete.
+`,
     });
 
     const status = await spawnPackedCliAsync(

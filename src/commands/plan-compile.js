@@ -62,6 +62,7 @@ export class PlanCompileAnalysisInvalidError extends Error {
  * @property {() => number} [analysisNow]
  * @property {(delayMs: number) => Promise<void>} [publicationSleep]
  * @property {() => number} [publicationNow]
+ * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
  * @property {typeof pushPlan} [push]
  * @property {typeof readPlanStatus} [readStatus]
  * @property {typeof publishPlan} [publish]
@@ -85,6 +86,7 @@ export async function compilePlan({
   analysisNow,
   publicationSleep,
   publicationNow,
+  onProgress = () => {},
   push = pushPlan,
   readStatus = readPlanStatus,
   publish = publishPlan,
@@ -105,6 +107,7 @@ export async function compilePlan({
   ).graph_version;
 
   let status;
+  onProgress({ phase: "analysis", status: "waiting" });
   try {
     status = await readStatus({
       cwd,
@@ -137,6 +140,7 @@ export async function compilePlan({
   if (status.body.analysis.status !== "valid") {
     throw new PlanCompileAnalysisNotValidError(status.body);
   }
+  onProgress({ phase: "analysis", status: "valid" });
 
   return publish({
     cwd,
@@ -146,5 +150,6 @@ export async function compilePlan({
     sleep: publicationSleep,
     now: publicationNow,
     expectedEtag: pushed.etag,
+    onProgress,
   });
 }

@@ -5,6 +5,9 @@ import test from "node:test";
 const metadata = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
+const packageLock = JSON.parse(
+  await readFile(new URL("../package-lock.json", import.meta.url), "utf8"),
+);
 const publishWorkflow = await readFile(
   new URL("../.github/workflows/publish.yml", import.meta.url),
   "utf8",
@@ -63,7 +66,10 @@ test("package metadata preserves the audited runtime boundary", () => {
   }
 });
 
-test("package metadata preserves the public prerelease boundary", () => {
+test("ordinary pre-1.0 versions use the approval-gated distribution channel", () => {
+  assert.match(metadata.version, /^0\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/);
+  assert.equal(packageLock.version, metadata.version);
+  assert.equal(packageLock.packages[""].version, metadata.version);
   assert.deepEqual(metadata.repository, {
     type: "git",
     url: "git+https://github.com/firstdraft/cli.git",
@@ -91,8 +97,10 @@ test("privileged publication repeats every release source check", () => {
   const npmApprovalGates = publishChecks.filter(
     (line) => line === npmApprovalGate,
   );
-  const publishCommand = "npm publish";
+  const publishCommand =
+    "npm publish --access public --tag next --provenance --ignore-scripts";
   const publishCommandIndex = publishJob.indexOf(publishCommand);
+  const publishInvocation = "npm publish";
   const publishChecksEndIndex = publishJob.indexOf(
     "# release-source-checks:end",
   );
@@ -115,13 +123,30 @@ test("privileged publication repeats every release source check", () => {
   );
   assert.ok(publishCommandIndex >= 0, "publish command must exist");
   assert.equal(
+    publishJob.indexOf(publishInvocation),
+    publishCommandIndex,
+    "the only publish invocation must use the exact approved command",
+  );
+  assert.equal(
     publishJob.indexOf(
-      publishCommand,
-      publishCommandIndex + publishCommand.length,
+      publishInvocation,
+      publishCommandIndex + publishInvocation.length,
     ),
     -1,
-    "publish command must be unique",
+    "the publish job must contain only one npm publish invocation",
   );
+  assert.equal(
+    publishJob.includes("npm dist-tag"),
+    false,
+    "publication must not mutate a dist-tag separately",
+  );
+  if (metadata.version !== "0.1.0") {
+    assert.equal(
+      publishWorkflow.includes("NODE_AUTH_TOKEN"),
+      false,
+      "only v0.1.0 may use the bootstrap publication credential",
+    );
+  }
   assert.ok(
     publishChecksEndIndex < publishCommandIndex,
     "release checks must precede publication",

@@ -1,9 +1,9 @@
 {
   "format": "firstdraft.release-compatibility/1",
   "component": "cli",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0",
   "requires": {
-    "api_contract": [">= 0.1.0", "< 0.2.0"],
+    "api_contract": [">= 0.2.0", "< 0.3.0"],
     "foundation_plan_formats": ["firstdraft.foundation-plan.sketch/0.19"]
   }
 }

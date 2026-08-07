@@ -6,6 +6,9 @@ sensitive details in a public Issue.
 
 ## Supported versions
 
-No version is supported until the first public prerelease is published. During alpha, only the prerelease currently
-identified by npm's `next` tag receives security fixes. Earlier prereleases and unreleased source snapshots are not
-supported release lines. The alpha interface may change without backward compatibility between versions.
+During coordinated trials, only the release currently identified by npm's approval-gated `next` tag receives
+security fixes. That channel is independent of version syntax. Before `1.0.0`, increasing the minor version starts a
+breaking compatibility line; increasing the patch version is otherwise backward-compatible within that line. All
+other older ordinary versions, historical prereleases, and unreleased source snapshots are not supported unless a
+separate support policy says otherwise. Historical prereleases are outside the ordinary version compatibility
+guarantee even while one is the current `next` release.
