@@ -16,8 +16,6 @@ const PUBLICATION_MESSAGES = new Map([
   ],
   ["reconciling_publication", "Verifying GitHub publication..."],
   ["completed", "GitHub publication complete."],
-  ["failed", "GitHub publication failed."],
-  ["cancelled", "GitHub publication cancelled."],
 ]);
 
 /**
@@ -89,6 +87,22 @@ export function createPlanCompileProgressReporter(writer) {
     }
 
     if (progress.publicationPhase === "compiling") return;
+    if (progress.publicationPhase === "failed") {
+      write(
+        progress.compilationStatus === "failed"
+          ? "Application compilation failed."
+          : "GitHub publication failed.",
+      );
+      return;
+    }
+    if (progress.publicationPhase === "cancelled") {
+      write(
+        progress.compilationStatus === "cancelled"
+          ? "Application compilation cancelled."
+          : "GitHub publication cancelled.",
+      );
+      return;
+    }
     if (progress.publicationPhase === "github_preflight") {
       write(githubPreflightMessage(progress));
       return;

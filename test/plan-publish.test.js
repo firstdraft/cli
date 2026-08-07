@@ -851,24 +851,65 @@ test("the bounded wait reports its last validated status", async (context) => {
   );
 });
 
-test("failed, conflicted, and cancelled publications preserve terminal status", async (context) => {
-  /** @type {[string, string][]} */
+test("terminal progress distinguishes Compilation outcomes from later GitHub outcomes", async (context) => {
+  /** @type {[string, string, Parameters<typeof publicationBody>[1], string][]} */
   const cases = [
-    ["failed", "publication_failed"],
-    ["repository_conflict", "publication_failed"],
-    ["cancelled", "publication_cancelled"],
+    [
+      "failed",
+      "publication_failed",
+      { publication: { started_at: null } },
+      "Application compilation failed.",
+    ],
+    [
+      "cancelled",
+      "publication_cancelled",
+      { publication: { started_at: null } },
+      "Application compilation cancelled.",
+    ],
+    [
+      "failed",
+      "publication_failed",
+      {
+        compilation: { status: "succeeded", artifact: ARTIFACT },
+        publication: {
+          failure: { phase: "publish", code: "publication_failed" },
+        },
+      },
+      "GitHub publication failed.",
+    ],
+    [
+      "cancelled",
+      "publication_cancelled",
+      { compilation: { status: "succeeded", artifact: ARTIFACT } },
+      "GitHub publication cancelled.",
+    ],
+    [
+      "repository_conflict",
+      "publication_failed",
+      { compilation: { status: "succeeded", artifact: ARTIFACT } },
+      "GitHub publication failed.",
+    ],
   ];
 
-  for (const [status, expectedError] of cases) {
+  for (const [status, expectedError, changes, terminalProgress] of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
     const result = await invoke(["plan", "compile"], {
       cwd,
       fetchFunction: sequenceFetch([
-        jsonResponse(publicationBody(status), 201),
+        jsonResponse(publicationBody(status, changes), 201),
       ]),
     });
 
     assertHandledFailure(result, expectedError);
+    const compiled = changes?.compilation?.status === "succeeded";
+    assert.equal(
+      progressOutput(result.stderr),
+      `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+${compiled ? "First Draft: Application compiled.\n" : ""}First Draft: ${terminalProgress}
+`,
+    );
     assert.equal(
       errorEnvelope(result.stderr).current.publication.status,
       status,

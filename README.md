@@ -166,12 +166,12 @@ Plan and requires its exact bytes to match the accepted Head, so bytes changed a
 It extracts the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and then sends that
 complete ETag in `If-Match`.
 The command writes stable human-readable progress to stderr, with every line prefixed by `First Draft:`. It reports
-analysis, completed compilation, the current GitHub phase, and an allowlisted reason, retry count, and exact UTC
-retry time when a GitHub preflight check is delayed. A retained retry with no next time is reported as paused and
-requiring operator recovery. Progress never includes IDs, hashes, repository names or URLs, raw server projections,
-local paths, or environment values. Success writes exactly the validated private GitHub repository URL plus a
-newline to stdout. If the command fails after progress has begun, its existing structured JSON error envelope is the
-final stderr document after the progress lines.
+analysis, compilation completion or terminal failure or cancellation, the current GitHub phase, and an allowlisted
+reason, retry count, and exact UTC retry time when a GitHub preflight check is delayed. A retained retry with no next
+time is reported as paused and requiring operator recovery. Progress never includes IDs, hashes, repository names or
+URLs, raw server projections, local paths, or environment values. Success writes exactly the validated private
+GitHub repository URL plus a newline to stdout. If the command fails after progress has begun, its existing
+structured JSON error envelope is the final stderr document after the progress lines.
 
 The internal Publication is a Project singleton in this release. A repeat safely receives the same Publication
 instead of creating another. If the first conditional `PUT` has an ambiguous result, the CLI reconciles it with
