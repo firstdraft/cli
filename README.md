@@ -3,11 +3,13 @@
 `firstdraft` is the command-line client for [First Draft](https://github.com/firstdraft/firstdraft). It is being
 built for agents that author and review Foundation Plans with their users.
 
-Public alpha releases use npm's `next` tag. This release line contains the auditable command shell, local Foundation
-Plan initialization, local application-key and UUID generation, conditional whole-document push, whole-graph
-analysis status polling, compile-and-publish orchestration, and read-only retained-Compilation download.
-Interfaces may change between prereleases, and publishing the CLI does not make the wider First Draft service
-generally available.
+The current `0.1.x` line contains the auditable command shell, local Foundation Plan initialization, local
+application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling,
+compile-and-publish orchestration, and read-only retained-Compilation download. Before `1.0.0`, increasing the minor
+version starts a breaking compatibility line; increasing the patch version is otherwise backward-compatible within
+that line. This policy applies to ordinary versions; historical prereleases are outside those compatibility
+guarantees. `0.1.0` intentionally supersedes `0.1.0-alpha.2` and requires the service's `0.2.x` API contract.
+Publishing the CLI does not make the wider First Draft service generally available.
 
 ## Requirements
 
@@ -16,18 +18,22 @@ generally available.
 
 ## Installation
 
-Once npm reports a public alpha, install the current prerelease explicitly:
+Once npm reports an approved coordinated release, install it from the approval-gated `next` channel:
 
 ```sh
 npm install --global @firstdraft.com/cli@next
 firstdraft --version
 ```
 
-The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable.
+The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable. `next` is a distribution channel,
+not a claim that the selected version has SemVer prerelease syntax.
 
-There is intentionally no stable `latest` release yet. Pin an exact prerelease version instead of `next` when a
-repeatable installation matters. Remote Plan and Compilation commands require a
-compatible First Draft service and are currently intended for coordinated trials.
+Pin an exact compatible version, such as `@firstdraft.com/cli@0.1.0` after the registry reports it, instead of
+`next` when a repeatable installation matters. Moving npm's `latest` tag is a separate approval-gated promotion
+after qualification; the initial release workflow does not move it. As observed on August 7, 2026, `latest` still
+identifies `0.1.0-alpha.2`. After `0.1.0` is published under `next`, an untagged npm install will continue to select
+that historical alpha rather than `0.1.0` until the separate promotion occurs. Remote Plan and Compilation commands
+require a compatible First Draft service and are currently intended for coordinated trials.
 
 ## Authenticate API commands
 
