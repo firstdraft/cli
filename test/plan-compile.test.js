@@ -22,6 +22,13 @@ const ETAG = `"sha256:${HEAD_SHA256}"`;
 const CREATED_AT = "2026-08-04T12:00:00.000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000Z";
+const REPOSITORY_URL = "https://github.com/octocat/movie-catalog";
+const SUCCESS_PROGRESS = `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+First Draft: GitHub publication complete.
+`;
 
 test("plan compile submits exact bytes, waits for valid analysis, and publishes once", async (context) => {
   /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
@@ -54,8 +61,8 @@ test("plan compile submits exact bytes, waits for valid analysis, and publishes 
   const result = await invoke(["plan", "compile"], { cwd, apiUrl });
 
   assert.equal(result.status, 0);
-  assert.equal(result.stderr, "");
-  assert.deepEqual(result.stdoutWrites, [jsonLine(publicationBody())]);
+  assert.equal(result.stderr, SUCCESS_PROGRESS);
+  assert.deepEqual(result.stdoutWrites, [`${REPOSITORY_URL}\n`]);
   assert.deepEqual(
     requests.map(({ method, url }) => [method, url]),
     [
@@ -97,15 +104,27 @@ test("plan compile may push unchanged bytes before analysis and Publication", as
       order.push(["analysis", options.wait]);
       return { status: 200, body: analysisBody("valid") };
     },
-    planCompilePublish: async () => {
+    planCompilePublish: async (
+      /** @type {{onProgress: (progress: unknown) => void}} */ options,
+    ) => {
       order.push(["publication"]);
+      options.onProgress({ phase: "compilation", status: "waiting" });
+      options.onProgress({
+        phase: "publication",
+        compilationStatus: "succeeded",
+        publicationPhase: "completed",
+        retryAt: null,
+        retryCount: 0,
+        reasonCode: null,
+      });
       return expected;
     },
   });
 
   assert.equal(result.status, 0);
   assert.deepEqual(order, [["push", cwd], ["analysis", true], ["publication"]]);
-  assert.deepEqual(JSON.parse(result.stdout), expected);
+  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
+  assert.equal(result.stderr, SUCCESS_PROGRESS);
 });
 
 test("plan compile waits past a terminal analysis for the prior graph version", async (context) => {
@@ -170,7 +189,10 @@ test("invalid JSON and schema diagnostics stop before analysis or Publication", 
 
     assertHandledFailure(result, "server_rejected");
     assert.equal(calls.length, 1);
-    assert.equal(JSON.parse(result.stderr).response.diagnostics[0].code, code);
+    assert.equal(
+      errorEnvelope(result.stderr).response.diagnostics[0].code,
+      code,
+    );
   }
 });
 
@@ -193,7 +215,7 @@ test("semantic and failed analysis stop before Publication with structured statu
     });
 
     assertHandledFailure(result, "plan_not_valid");
-    assert.deepEqual(JSON.parse(result.stderr).current, current);
+    assert.deepEqual(errorEnvelope(result.stderr).current, current);
     assert.equal(publications, 0);
   }
 });
@@ -219,7 +241,7 @@ test("recurring diagnostics remain repairable and never trigger Publication", as
     const result = await invoke(["plan", "compile"], options);
     assertHandledFailure(result, "plan_not_valid");
     assert.equal(
-      JSON.parse(result.stderr).current.analysis.diagnostics[0].code,
+      errorEnvelope(result.stderr).current.analysis.diagnostics[0].code,
       "reference_missing",
     );
   }
@@ -275,7 +297,7 @@ test("push ambiguity, analysis failures, and rejected reads have distinct errors
     },
   });
   assertHandledFailure(push, "request_outcome_unknown");
-  assert.equal(JSON.parse(push.stderr).phase, "push");
+  assert.equal(errorEnvelope(push.stderr).phase, "push");
   assert.doesNotMatch(push.stderr, /canary/);
 
   /** @type {[Response | (() => Promise<Response>), string][]} */
@@ -407,11 +429,17 @@ function publicationBody() {
         owner: { id: 456, login: "octocat", type: "User" },
         full_name: "octocat/movie-catalog",
         default_branch: "main",
-        html_url: "https://github.com/octocat/movie-catalog",
+        html_url: REPOSITORY_URL,
         tree_sha: "3".repeat(40),
         commit_sha: "4".repeat(40),
       },
       failure: null,
+      progress: {
+        phase: "completed",
+        retry_at: null,
+        retry_count: 0,
+        reason_code: null,
+      },
       created_at: CREATED_AT,
       started_at: STARTED_AT,
       completed_at: COMPLETED_AT,
@@ -492,7 +520,16 @@ async function invoke(argv, options = {}) {
 function assertHandledFailure(result, error, status = 1) {
   assert.equal(result.status, status);
   assert.equal(result.stdout, "");
-  assert.equal(JSON.parse(result.stderr).error, error);
+  assert.equal(errorEnvelope(result.stderr).error, error);
+}
+
+/** @param {string} stderr */
+function errorEnvelope(stderr) {
+  const structured = stderr
+    .split("\n")
+    .filter((line) => !line.startsWith("First Draft: "))
+    .join("\n");
+  return JSON.parse(structured);
 }
 
 /** @param {(Response | (() => Promise<Response>))[]} responses @param {unknown[]} [calls] */
@@ -567,9 +604,4 @@ async function listen(context, server) {
 /** @param {Buffer} value */
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-/** @param {unknown} value */
-function jsonLine(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
 }

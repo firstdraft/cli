@@ -12,8 +12,9 @@ binds its Foundation Plan format to the implemented CLI constant.
 
 The `script/release_compatibility_check` evaluator in `firstdraft/firstdraft` reads this declaration with the matching
 declarations from exact, clean checkouts of `firstdraft/firstdraft` and `firstdraft/skills`. It implements SemVer 2.0
-precedence. The service API contract is currently the stable `0.1.0` contract line even though this CLI package is a
-prerelease. Comparator arrays form one conjunction, while `foundation_plan_formats` lists alternatives. A
+precedence. This CLI requires the service's `0.2.0` API contract because the always-present GitHub Publication
+progress projection is incompatible with the strict alpha.2 response shape. Comparator arrays form one conjunction,
+while `foundation_plan_formats` lists alternatives. A
 prerelease satisfies a comparator set only when a comparator explicitly names a prerelease with the same major,
 minor, and patch numbers; Skills therefore names this CLI alpha explicitly. `firstdraft.release-compatibility/1` is
 intentionally closed. The evaluator in `firstdraft/firstdraft` rejects an unrecognized format and unknown keys, so
@@ -122,7 +123,7 @@ Do not move or reuse that tag or version. The first organization-scoped candidat
 ## Publish
 
 The manual boundary is creation of the version tag. From an up-to-date, clean `main`, verify the intended commit and
-then create and push `v<package-version>`. For version `0.1.0-alpha.2`, the tag is `v0.1.0-alpha.2`.
+then create and push `v<package-version>`. For version `0.1.0-alpha.3`, the tag is `v0.1.0-alpha.3`.
 Push one release tag at a time; the workflow serializes publication, but GitHub retains at most one pending run in a
 concurrency group.
 
@@ -151,12 +152,12 @@ After publication, inspect the registry before retrying any reported failure; th
 the exact version, `next` dist-tag, integrity metadata, and provenance metadata:
 
 ```sh
-npm view '@firstdraft.com/cli@0.1.0-alpha.2' \
+npm view '@firstdraft.com/cli@0.1.0-alpha.3' \
   version dist.integrity dist.shasum repository.url engines bin --json
 npm dist-tag ls '@firstdraft.com/cli'
 ```
 
-Install `@firstdraft.com/cli@0.1.0-alpha.2` into a fresh temporary prefix, confirm `firstdraft --version`, compare the
+Install `@firstdraft.com/cli@0.1.0-alpha.3` into a fresh temporary prefix, confirm `firstdraft --version`, compare the
 packed file list with the release workflow, and run `npm audit signatures` after an exact installation.
 
 A published version cannot be overwritten or reused. For a bad release, move `next` to a known-good version,

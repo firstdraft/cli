@@ -165,22 +165,32 @@ authorization to request that lifecycle. Immediately before its conditional muta
 Plan and requires its exact bytes to match the accepted Head, so bytes changed after analysis cannot be published.
 It extracts the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and then sends that
 complete ETag in `If-Match`.
-The command writes no progress output to stdout. Success is exactly one validated JSON object containing the
-retained `project`, `compilation`, and `publication`, including the private GitHub repository URL.
+The command writes stable human-readable progress to stderr, with every line prefixed by `First Draft:`. It reports
+analysis, completed compilation, the current GitHub phase, and an allowlisted reason, retry count, and exact UTC
+retry time when a GitHub preflight check is delayed. A retained retry with no next time is reported as paused and
+requiring operator recovery. Progress never includes IDs, hashes, repository names or URLs, raw server projections,
+local paths, or environment values. Success writes exactly the validated private GitHub repository URL plus a
+newline to stdout. If the command fails after progress has begun, its existing structured JSON error envelope is the
+final stderr document after the progress lines.
 
 The internal Publication is a Project singleton in this release. A repeat safely receives the same Publication
 instead of creating another. If the first conditional `PUT` has an ambiguous result, the CLI reconciles it with
-one read-only singleton `GET` and never automatically repeats the mutation. Rerunning `plan compile` safely
-replays the singleton request. Publication polling is sequential, bounded to ten minutes, and pinned to the
-retained Project Head, Compilation input, Publication identity, and repository identity.
+one read-only singleton `GET` and never automatically repeats the mutation within that invocation. Do not run
+concurrent Compile commands. After an invocation exits because the initial outcome or a later status read is
+unavailable, wait and rerun `plan compile` with unchanged Plan bytes; its conditional request safely reconciles or
+resumes the same retained singleton without creating another Compilation, repository, or push. Publication polling
+is sequential, bounded to ten minutes, and pinned to the retained Project Head, Compilation input, Publication
+identity, and repository identity.
 
 This release cannot repoint a Project's Publication to a later accepted Head. The public CLI therefore has no
-`plan publish` command and no local-start `plan compile --output` mode. Use the standalone retained-Compilation
-commands below when local generated source is useful.
+`plan publish` command and no local-start `plan compile --output` mode. It retains lower-level Compilation commands
+for operational callers that acquire an ID separately, but they are intentionally not a continuation of the
+URL-only `plan compile` journey.
 
 ## Inspect a retained Compilation
 
-Read one Compilation ID returned by `plan compile`:
+These lower-level commands are for callers that already hold a retained Compilation ID from authenticated API
+metadata or operational tooling; `plan compile` prints only the final repository URL:
 
 ```sh
 firstdraft compilation status 01900000-0000-7000-8000-000000000001
@@ -216,13 +226,16 @@ structure, contents, and digests without claiming POSIX mode bits.
 
 ## Handled failures
 
-Every handled subcommand failure writes exactly one JSON object to standard error. Branch on its stable `error`
-value rather than the human-readable `detail`; `plan compile` also supplies `phase: "push" | "publication"` when
-`request_outcome_unknown` requires phase-specific recovery:
+Every handled subcommand failure ends with exactly one JSON object on standard error. `plan compile` may first write
+progress lines; machine consumers can remove only lines beginning with the exact `First Draft: ` prefix and parse
+the remaining JSON document. Branch on its stable `error` value rather than the human-readable `detail`; `plan
+compile` also supplies `phase: "push" | "publication"` when `request_outcome_unknown` requires phase-specific
+recovery:
 
 - `phase: "push"` means the Plan mutation may have been accepted; stop and reconcile local Head state.
-- `phase: "publication"` means the singleton Publication mutation was not resolved; rerunning `plan compile` is a
-  safe replay.
+- `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
+  commands. After the prior invocation exits, wait and rerun `plan compile` with unchanged Plan bytes to safely
+  reconcile or resume the retained singleton.
 
 | Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                                        |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | -------------------------------------------------------------------------------------------------------------- |

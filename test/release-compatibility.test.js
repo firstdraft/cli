@@ -35,8 +35,8 @@ test("release compatibility declares the coordinated CLI contract", () => {
     "foundation_plan_formats",
   ]);
   assert.deepEqual(compatibility.requires.api_contract, [
-    ">= 0.1.0",
-    "< 0.2.0",
+    ">= 0.2.0",
+    "< 0.3.0",
   ]);
   assert.deepEqual(compatibility.requires.foundation_plan_formats, [
     FOUNDATION_PLAN_FORMAT,

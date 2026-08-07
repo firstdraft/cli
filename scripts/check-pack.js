@@ -37,6 +37,7 @@ if (result.status !== 0) {
     "src/commands/plan-status.js",
     "src/compilation-artifact.js",
     "src/file-system.js",
+    "src/plan-compile-progress.js",
     "src/plan-state.js",
     "src/uuid-v7.js",
     "src/version.js",
