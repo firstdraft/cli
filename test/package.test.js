@@ -12,6 +12,15 @@ const publishWorkflow = await readFile(
   new URL("../.github/workflows/publish.yml", import.meta.url),
   "utf8",
 );
+const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+const releasingGuide = await readFile(
+  new URL("../RELEASING.md", import.meta.url),
+  "utf8",
+);
+const agentInstructions = await readFile(
+  new URL("../AGENTS.md", import.meta.url),
+  "utf8",
+);
 
 /**
  * @param {string} jobSource
@@ -80,6 +89,43 @@ test("ordinary pre-1.0 versions use the approval-gated distribution channel", ()
     registry: "https://registry.npmjs.org/",
     tag: "next",
   });
+});
+
+test("stable release completion requires qualified latest promotion", () => {
+  assert.match(
+    agentInstructions,
+    /publication under `next` as candidate availability, not a completed stable release[\s\S]*?explicitly named release-specific qualification[\s\S]*?separately approved[\s\S]*?npm's `latest`/,
+  );
+  assert.match(
+    releasingGuide,
+    /Release-specific qualification means the exact gate named for that candidate; it does not imply unrelated or full[\s\S]*?service qualification/,
+  );
+  assert.match(
+    releasingGuide,
+    /On August 7, 2026,[\s\S]*?`next` while `latest` continued to identify `0\.1\.0-alpha\.2`[\s\S]*?On August 12,[\s\S]*?selected bounded CLI 0\.1\.0[\s\S]*?user-journey smoke passed[\s\S]*?separate promotion approval[\s\S]*?both `next` and\s+`latest` then identified `0\.1\.0`[\s\S]*?Full v14 service qualification remained separate and incomplete/,
+  );
+  assert.match(
+    readme,
+    /`latest`-selected stable release[\s\S]*?As observed on\s+August 12, 2026, both `latest` and `next`[\s\S]*?identify ordinary version `0\.1\.0`[\s\S]*?alpha remains immutable[\s\S]*?registry history[\s\S]*?no longer selected by[\s\S]*?either channel/,
+  );
+  assert.match(
+    releasingGuide,
+    /Protected `v0\.1\.0` and package version `0\.1\.0` are already consumed[\s\S]*?prepare the next version required by the[\s\S]*?pre-1\.0 policy rather than moving or reusing either identity/,
+  );
+  assert.doesNotMatch(
+    `${readme}\n${releasingGuide}`,
+    /Before (?:creating )?the first ordinary `v0\.1\.0`/,
+  );
+  assert.doesNotMatch(
+    releasingGuide,
+    /npm trust github '@firstdraft\.com\/cli'/,
+    "routine release instructions must not recreate trusted publishing",
+  );
+  assert.doesNotMatch(
+    releasingGuide,
+    /npm access grant/,
+    "routine release instructions must not mutate package access",
+  );
 });
 
 test("OIDC publication repeats every release source check", () => {

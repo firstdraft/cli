@@ -19,7 +19,10 @@ The policy applies to ordinary versions. Historical prereleases do not establish
 Version semantics and npm distribution channels are independent. An approved candidate is published first under
 the approval-gated `next` tag even when it has an ordinary version such as `0.1.0`. The release workflow does not
 move `latest`. Moving `latest` requires a later, separate approval after the exact `next` candidate has completed
-qualification.
+its explicitly named release-specific qualification. Candidate publication is not stable release completion. A
+stable CLI release is complete only when that separately approved candidate is selected by npm's `latest` dist-tag.
+Release-specific qualification means the exact gate named for that candidate; it does not imply unrelated or full
+service qualification.
 
 ## Coordinated candidate eligibility
 
@@ -70,42 +73,41 @@ The published scoped package already exists. Before another release, a repositor
    npm view '@firstdraft.com/cli' name repository.url versions dist-tags --json
    ```
 
-5. Before creating the first ordinary `v0.1.0` tag, verify npm trusted publishing for the exact package, repository,
-   workflow, protected environment, and allowed publish operation. No persistent npm credential is permitted for
-   this or a later release workflow.
+5. Before creating any future `v<package-version>` tag, verify npm trusted publishing for the exact package,
+   repository, workflow, protected environment, and allowed publish operation. Protected `v0.1.0` and package
+   version `0.1.0` are already consumed and immutable. No persistent npm credential is permitted for a release
+   workflow.
 
 Use the repository-pinned Node.js 24.18.0 toolchain with npm 11.16.0 to verify the organization's durable read/write
-access. Grant it only if the package did not inherit access for the `developers` team:
+access:
 
 ```sh
 npm --version
 npm access list packages firstdraft.com:developers '@firstdraft.com/cli' --json
-npm access grant read-write firstdraft.com:developers '@firstdraft.com/cli'
 ```
 
-Using an interactive npm login backed by the account's 2FA, configure trusted publishing for the exact package,
-repository, workflow, protected environment, and allowed publish action:
+Require the package to report `read-write` access for the `developers` team. If access is missing or changed, stop:
+restoring it is a separate administrator and security mutation, not a routine release step.
+
+The first ordinary release established the trusted-publisher relationship. For every future release, inspect it
+read-only:
 
 ```sh
-npm trust github '@firstdraft.com/cli' \
-  --repository firstdraft/cli \
-  --file publish.yml \
-  --environment npm \
-  --allow-publish
 npm trust list '@firstdraft.com/cli'
 ```
 
 Confirm `npm trust list` reports type `github`, repository `firstdraft/cli`, file `publish.yml`, environment `npm`,
-and permission `createPackage`, which is npm's trust-list vocabulary for the allowed publish operation, before
-creating `v0.1.0`. npm does not validate the saved relationship by attempting an exchange, so each case-sensitive
-value must be inspected. The publish job must remain on a GitHub-hosted runner with `id-token: write` and must not
-read `NODE_AUTH_TOKEN`, an npm token, or any GitHub Actions secret. Confirm the repository and `npm` environment
-secret lists contain no npm automation secret. Trusted publishing's short-lived OIDC exchange is the sole workflow
+and permission `createPackage`, which is npm's trust-list vocabulary for the allowed publish operation. npm does not
+validate the saved relationship by attempting an exchange, so each case-sensitive value must be inspected. If the
+relationship is missing or changed, stop: restoring it is a separate administrator and security mutation, not a
+routine release step. The publish job must remain on a GitHub-hosted runner with `id-token: write` and must not read
+`NODE_AUTH_TOKEN`, an npm token, or any GitHub Actions secret. Confirm the repository and `npm` environment secret
+lists contain no npm automation secret. Trusted publishing's short-lived OIDC exchange is the sole workflow
 publication credential; an authentication failure stops the release and must never fall back to a persistent token.
 
 As optional defense-in-depth after trusted publication is operationally proven, an npm administrator may complete
 the separate security-key ceremony and set package **Publishing access** to **Require two-factor authentication and
-disallow tokens**. This package-level setting is not a `v0.1.0` release prerequisite and must not be reported as
+disallow tokens**. This package-level setting was not a `v0.1.0` release prerequisite and must not be reported as
 enabled until it is directly observed.
 
 ## Historical alpha publications
@@ -116,9 +118,12 @@ Do not move or reuse that tag or version. The immutable `v0.1.0-alpha.2` tag ide
 organization-scoped package, `@firstdraft.com/cli@0.1.0-alpha.2`, published on August 5, 2026. As observed on August
 7, 2026, that is the only published scoped version and both npm's `next` and `latest` tags identify it. Those are
 historical release and registry facts; they do not require prerelease syntax, aliases, or compatibility shims for
-the ordinary `0.1.0` candidate. Preparing this source does not mutate either dist-tag. A later approved publication
-under `next` will repoint `next` to `0.1.0`; `latest` will continue to identify `0.1.0-alpha.2` until a separate
-approved promotion.
+the ordinary `0.1.0` candidate. On August 7, 2026, protected tag `v0.1.0` published ordinary version `0.1.0` under
+`next` while `latest` continued to identify `0.1.0-alpha.2`. On August 12, after the selected bounded CLI 0.1.0
+user-journey smoke passed and under separate promotion approval, `latest` was promoted to `0.1.0`; both `next` and
+`latest` then identified `0.1.0`. Full v14 service qualification remained separate and incomplete. The alpha remains
+immutable version history, but neither distribution channel selects it. Preparing this source does not mutate either
+dist-tag.
 
 ## Prepare a release
 
@@ -146,8 +151,10 @@ approved promotion.
 
 ## Publish
 
-The manual boundary is creation of the version tag. From an up-to-date, clean `main`, verify the intended commit and
-then create and push `v<package-version>`. For version `0.1.0`, the tag is `v0.1.0`.
+The manual boundary is creation of the version tag. From an up-to-date, clean `main`, verify the intended commit,
+confirm that both the intended package version and `v<package-version>` tag are absent, then create and push that
+tag. Protected `v0.1.0` and package version `0.1.0` are already consumed; prepare the next version required by the
+pre-1.0 policy rather than moving or reusing either identity.
 Push one release tag at a time; the workflow serializes publication, but GitHub retains at most one pending run in a
 concurrency group.
 
@@ -175,16 +182,18 @@ change and prepare a new version rather than moving an already shared tag.
 
 ## Verify and recover
 
-After publication, inspect the registry before retrying any reported failure; the package may already exist. Verify
-the exact version, `next` dist-tag, unchanged `latest` dist-tag, integrity metadata, and provenance metadata:
+After publication, inspect the registry before retrying any reported failure; the package may already exist. From
+the tagged checkout, verify the exact version, `next` dist-tag, unchanged `latest` dist-tag, integrity metadata, and
+provenance metadata:
 
 ```sh
-npm view '@firstdraft.com/cli@0.1.0' \
+FD_CLI_RELEASE_VERSION="$(node -p "require('./package.json').version")"
+npm view "@firstdraft.com/cli@$FD_CLI_RELEASE_VERSION" \
   version dist.integrity dist.shasum repository.url engines bin --json
 npm dist-tag ls '@firstdraft.com/cli'
 ```
 
-Install `@firstdraft.com/cli@0.1.0` into a fresh temporary prefix, confirm `firstdraft --version`, compare the
+Install that exact version into a fresh temporary prefix, confirm `firstdraft --version`, compare the
 packed file list with the release workflow, and run `npm audit signatures` after an exact installation.
 
 If OIDC authentication fails, reconcile both the registry version and protected remote tag first. If only npm's
@@ -196,17 +205,20 @@ A published version cannot be overwritten or reused. For a bad release, move `ne
 version if one exists; otherwise deprecate the bad version and publish a corrected higher version. Treat
 unpublishing as an exceptional incident response, not a routine rollback.
 
-## Promote the qualified release
+## Promote the release-specific qualified candidate
 
 Publishing under `next` is not promotion to the default install channel. After the exact `next` version completes
-qualification and a human separately approves promotion, one operator may move `latest` to that exact version:
+its named release-specific qualification and a human separately approves promotion, one operator may move `latest`
+to that exact version from the tagged checkout:
 
 ```sh
-npm dist-tag add '@firstdraft.com/cli@0.1.0' latest
+FD_CLI_RELEASE_VERSION="$(node -p "require('./package.json').version")"
+npm dist-tag add "@firstdraft.com/cli@$FD_CLI_RELEASE_VERSION" latest
 npm dist-tag ls '@firstdraft.com/cli'
 ```
 
 Verify both tags after the mutation, then land a documentation change that replaces README's dated `latest`
-observation with the promoted version. Do not move `latest` merely because a release merged, published successfully,
-or passed candidate compatibility checks, and do not use a dist-tag change to repair or disguise a bad immutable
-version.
+observation with the promoted version. The stable CLI release is complete only after `next` and `latest` both name
+the exact release-specific qualified version. Do not call a candidate fully promoted before that equality is
+observed. Do not move `latest` merely because a release merged, published successfully, or passed candidate
+compatibility checks, and do not use a dist-tag change to repair or disguise a bad immutable version.
