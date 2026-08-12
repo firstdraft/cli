@@ -18,29 +18,31 @@ Publishing the CLI does not make the wider First Draft service generally availab
 
 ## Installation
 
-Once npm reports an approved coordinated release, install it from the approval-gated `next` channel:
+Install the `latest`-selected stable release from npm's default channel:
 
 ```sh
-npm install --global @firstdraft.com/cli@next
+npm install --global @firstdraft.com/cli
 firstdraft --version
 ```
 
-The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable. `next` is a distribution channel,
-not a claim that the selected version has SemVer prerelease syntax.
+The npm package is `@firstdraft.com/cli`; it installs the `firstdraft` executable. A versionless installation resolves
+npm's `latest` dist-tag. Pin an exact compatible version, such as `@firstdraft.com/cli@0.1.0`, when a repeatable
+installation matters.
 
-Pin an exact compatible version, such as `@firstdraft.com/cli@0.1.0` after the registry reports it, instead of
-`next` when a repeatable installation matters. Moving npm's `latest` tag is a separate approval-gated promotion
-after qualification; the initial release workflow does not move it. As observed on August 7, 2026, `latest` still
-identifies `0.1.0-alpha.2`. After `0.1.0` is published under `next`, an untagged npm install will continue to select
-that historical alpha rather than `0.1.0` until the separate promotion occurs. Remote Plan and Compilation commands
-require a compatible First Draft service and are currently intended for coordinated trials.
+The release workflow first publishes an approved candidate under `next`; that channel has no SemVer meaning and the
+workflow does not move `latest`. A stable release is complete only after the exact candidate passes its explicitly
+named release-specific qualification, receives separate promotion approval, and becomes `latest`. As observed on
+August 12, 2026, both `latest` and `next` identify ordinary version `0.1.0`. The earlier alpha remains immutable
+registry history but is no longer selected by either channel. Remote Plan and Compilation commands require a
+compatible First Draft service and are currently intended for coordinated trials.
 
-Before the first ordinary `v0.1.0` release tag is created, an operator must inspect npm's exact listed
+Before creating any future release tag, an operator must inspect npm's exact listed
 [GitHub Actions trusted-publisher](https://docs.npmjs.com/trusted-publishers/) relationship for
 `@firstdraft.com/cli`, type `github`, the `firstdraft/cli` repository, `publish.yml`, the protected `npm` environment,
 and permission `createPackage` (npm's trust-list vocabulary for the allowed publish operation). The release workflow
 authenticates only with a short-lived GitHub OIDC credential. A persistent npm token, `NODE_AUTH_TOKEN`, or GitHub
-Actions secret is not permitted as a publication fallback.
+Actions secret is not permitted as a publication fallback. Protected tag `v0.1.0` and package version `0.1.0` are
+already consumed and immutable; never move or reuse either identity.
 
 ## Authenticate API commands
 
