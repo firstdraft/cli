@@ -20,6 +20,12 @@ if (result.status !== 0) {
   assert(manifest, "npm pack did not return a manifest");
   const paths = manifest.files.map(({ path }) => path).sort();
 
+  assert.equal(
+    paths.some((filePath) => filePath.startsWith("docs/")),
+    false,
+    "repository documentation must stay outside the npm tarball",
+  );
+
   assert.deepEqual(paths, [
     "LICENSE",
     "README.md",
