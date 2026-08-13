@@ -17,6 +17,10 @@ const releasingGuide = await readFile(
   new URL("../RELEASING.md", import.meta.url),
   "utf8",
 );
+const securityGuide = await readFile(
+  new URL("../SECURITY.md", import.meta.url),
+  "utf8",
+);
 const releaseHistory = await readFile(
   new URL("../docs/release-history.md", import.meta.url),
   "utf8",
@@ -64,8 +68,13 @@ test("package metadata preserves the audited runtime boundary", () => {
   assert.equal(metadata.type, "module");
   assert.equal(metadata.engines.node, ">=22.0.0");
   assert.deepEqual(metadata.bin, { firstdraft: "bin/firstdraft.js" });
-  assert.deepEqual(metadata.files, ["bin", "src"]);
-  assert.equal(metadata.files.includes("docs"), false);
+  assert.deepEqual(metadata.files, [
+    "bin",
+    "docs",
+    "src",
+    "RELEASING.md",
+    "SECURITY.md",
+  ]);
   assert.equal(metadata.scripts.test, "node scripts/run-tests.js");
 
   for (const property of [
@@ -111,7 +120,15 @@ test("stable release completion requires qualified latest promotion", () => {
   );
   assert.match(
     readme,
-    /stable release selected by npm's `latest` dist-tag[\s\S]*?Candidate publication under `next` is not stable\s+release completion[\s\S]*?\[dated release history\]\(docs\/release-history\.md\)/,
+    /stable release selected by npm's `latest` dist-tag[\s\S]*?Candidate publication under `next` is not stable\s+release completion and does not displace the supported `latest` release before promotion[\s\S]*?\[dated release history\]\(docs\/release-history\.md\)/,
+  );
+  assert.match(
+    releasingGuide,
+    /Until promotion, `latest` remains the supported stable release; a distinct `next` candidate\s+is supported only for its named qualification\. When both tags identify one version, that version fills both roles\./,
+  );
+  assert.match(
+    securityGuide,
+    /stable release currently identified by npm's `latest` tag receives security fixes[\s\S]*?different version under the approval-gated `next` tag is supported only for its explicitly named release-specific[\s\S]*?does not displace the stable release before separate promotion approval[\s\S]*?When `next` and `latest`\s+identify the same version, that release fills both roles/,
   );
   assert.match(
     releaseHistory,

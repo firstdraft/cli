@@ -4,6 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import {
+  isExternalTarget,
+  markdownLinkTargets,
+  withoutFencedCode,
+} from "../scripts/markdown-documentation.js";
+
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const markdownFiles = [
   ...["AGENTS.md", "README.md", "RELEASING.md", "SECURITY.md"].map((file) =>
@@ -59,6 +65,61 @@ test("documentation routes commands, recovery, and release knowledge", () => {
   );
 });
 
+test("documentation entrypoints stay lean and route every public topic", () => {
+  const entrypointBudgets = new Map([
+    [path.join(repository, "AGENTS.md"), 2_048],
+    [path.join(repository, "README.md"), 6_144],
+    [path.join(repository, "docs/README.md"), 4_096],
+  ]);
+
+  for (const [file, budget] of entrypointBudgets) {
+    const source = sources.get(file);
+    assert(source);
+    assert.ok(
+      Buffer.byteLength(source) <= budget,
+      `${path.relative(repository, file)} exceeds its ${budget}-byte retrieval budget`,
+    );
+  }
+
+  const publicTopics = new Set(
+    markdownFiles.filter((file) => file !== path.join(repository, "AGENTS.md")),
+  );
+  const pending = [
+    path.join(repository, "README.md"),
+    path.join(repository, "docs/README.md"),
+  ];
+  const reachable = new Set();
+
+  while (pending.length > 0) {
+    const sourceFile = pending.pop();
+    assert(sourceFile);
+    if (reachable.has(sourceFile)) continue;
+    reachable.add(sourceFile);
+
+    const source = sources.get(sourceFile);
+    assert(source);
+    for (const target of markdownLinkTargets(source)) {
+      if (isExternalTarget(target)) continue;
+
+      const [rawPath] = target.split("#", 1);
+      if (rawPath === undefined || rawPath === "") continue;
+      const targetFile = path.resolve(
+        path.dirname(sourceFile),
+        decodeURIComponent(rawPath),
+      );
+      if (publicTopics.has(targetFile)) pending.push(targetFile);
+    }
+  }
+
+  for (const file of publicTopics) {
+    assert.equal(
+      reachable.has(file),
+      true,
+      `${path.relative(repository, file)} is not reachable from a documentation entrypoint`,
+    );
+  }
+});
+
 test("local documentation links and fragments resolve", () => {
   for (const [sourceFile, source] of sources) {
     for (const target of markdownLinkTargets(source)) {
@@ -101,25 +162,6 @@ function findMarkdownFiles(directory) {
     .sort();
 }
 
-/** @param {string} source @returns {string[]} */
-function markdownLinkTargets(source) {
-  const targets = [];
-  const linkPattern = /(?<!!)\[[^\]]+\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g;
-
-  for (const match of withoutFencedCode(source).matchAll(linkPattern)) {
-    const target = match[1];
-    assert(target);
-    targets.push(target.replace(/^<|>$/g, ""));
-  }
-
-  return targets;
-}
-
-/** @param {string} target */
-function isExternalTarget(target) {
-  return /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//");
-}
-
 /** @param {string} source @returns {Set<string>} */
 function markdownHeadingFragments(source) {
   const fragments = new Set();
@@ -144,31 +186,4 @@ function markdownHeadingFragments(source) {
   }
 
   return fragments;
-}
-
-/** @param {string} source */
-function withoutFencedCode(source) {
-  /** @type {string | undefined} */
-  let fence;
-
-  return source
-    .split("\n")
-    .filter((line) => {
-      const match = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-      if (match) {
-        const marker = match[1];
-        assert(marker);
-
-        if (fence === undefined) {
-          fence = marker[0];
-        } else if (marker[0] === fence) {
-          fence = undefined;
-        }
-
-        return false;
-      }
-
-      return fence === undefined;
-    })
-    .join("\n");
 }
