@@ -6,9 +6,13 @@ sensitive details in a public Issue.
 
 ## Supported versions
 
-During coordinated trials, only the release currently identified by npm's approval-gated `next` tag receives
-security fixes. That channel is independent of version syntax. Before `1.0.0`, increasing the minor version starts a
+During coordinated trials, the stable release currently identified by npm's `latest` tag receives security fixes. A
+different version under the approval-gated `next` tag is supported only for its explicitly named release-specific
+qualification; it does not displace the stable release before separate promotion approval. When `next` and `latest`
+identify the same version, that release fills both roles.
+
+Distribution channels are independent of version syntax. Before `1.0.0`, increasing the minor version starts a
 breaking compatibility line; increasing the patch version is otherwise backward-compatible within that line. All
 other older ordinary versions, historical prereleases, and unreleased source snapshots are not supported unless a
-separate support policy says otherwise. Historical prereleases are outside the ordinary version compatibility
-guarantee even while one is the current `next` release.
+separate support policy says otherwise. Historical prereleases remain outside the ordinary version compatibility
+guarantee.

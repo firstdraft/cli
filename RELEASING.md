@@ -24,7 +24,8 @@ move `latest`. Moving `latest` requires a later, separate approval after the exa
 its explicitly named release-specific qualification. Candidate publication is not stable release completion. A
 stable CLI release is complete only when that separately approved candidate is selected by npm's `latest` dist-tag.
 Release-specific qualification means the exact gate named for that candidate; it does not imply unrelated or full
-service qualification.
+service qualification. Until promotion, `latest` remains the supported stable release; a distinct `next` candidate
+is supported only for its named qualification. When both tags identify one version, that version fills both roles.
 
 ## Coordinated candidate eligibility
 

@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import {
+  isExternalTarget,
+  markdownLinkTargets,
+} from "./markdown-documentation.js";
 
 const npmCli = process.env.npm_execpath;
 assert(npmCli, "npm_execpath is required; run this check through npm");
@@ -20,16 +27,16 @@ if (result.status !== 0) {
   assert(manifest, "npm pack did not return a manifest");
   const paths = manifest.files.map(({ path }) => path).sort();
 
-  assert.equal(
-    paths.some((filePath) => filePath.startsWith("docs/")),
-    false,
-    "repository documentation must stay outside the npm tarball",
-  );
-
   assert.deepEqual(paths, [
     "LICENSE",
     "README.md",
+    "RELEASING.md",
+    "SECURITY.md",
     "bin/firstdraft.js",
+    "docs/README.md",
+    "docs/commands.md",
+    "docs/errors.md",
+    "docs/release-history.md",
     "package.json",
     "src/api-authentication.js",
     "src/api-response.js",
@@ -48,4 +55,31 @@ if (result.status !== 0) {
     "src/uuid-v7.js",
     "src/version.js",
   ]);
+
+  const packagePaths = new Set(paths);
+
+  for (const markdownPath of paths.filter((filePath) =>
+    filePath.endsWith(".md"),
+  )) {
+    const source = readFileSync(markdownPath, "utf8");
+
+    for (const target of markdownLinkTargets(source)) {
+      if (isExternalTarget(target)) continue;
+
+      const [rawPath] = target.split("#", 1);
+      if (rawPath === undefined || rawPath === "") continue;
+
+      const targetPath = path.posix.normalize(
+        path.posix.join(
+          path.posix.dirname(markdownPath),
+          decodeURIComponent(rawPath),
+        ),
+      );
+      assert.equal(
+        packagePaths.has(targetPath),
+        true,
+        `${markdownPath} links to unpackaged ${target}`,
+      );
+    }
+  }
 }

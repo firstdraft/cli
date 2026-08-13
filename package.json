@@ -9,7 +9,10 @@
   },
   "files": [
     "bin",
-    "src"
+    "docs",
+    "src",
+    "RELEASING.md",
+    "SECURITY.md"
   ],
   "engines": {
     "node": ">=22.0.0"

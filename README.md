@@ -20,7 +20,8 @@ firstdraft --version
 
 The package installs the `firstdraft` executable. Pin an exact compatible version, such as
 `@firstdraft.com/cli@0.1.0`, when a repeatable installation matters. Candidate publication under `next` is not stable
-release completion; see the [release policy](RELEASING.md) and [dated release history](docs/release-history.md).
+release completion and does not displace the supported `latest` release before promotion; see the
+[release policy](RELEASING.md) and [dated release history](docs/release-history.md).
 
 ## Shortest current journey
 
@@ -61,7 +62,8 @@ contracts, and retained-Compilation operations.
   invoked API command.
 - API tokens are read from `FIRSTDRAFT_API_TOKEN`, sent as Bearer credentials, and never saved in `.firstdraft` or
   printed. Revoke an exposed token in First Draft.
-- Package contents are allowlisted and checked before release; repository-only documentation is not packaged.
+- Package contents are allowlisted and checked before release. The public documentation graph is packaged with the
+  exact CLI version; agent instructions and source-only release metadata remain repository-only.
 - CI exercises the exact minimum Node.js version separately from current development tooling.
 - Public packages carry npm provenance linking registry bytes to the reviewed GitHub workflow and commit.
 

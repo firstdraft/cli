@@ -21,7 +21,19 @@ evidence for implemented behavior; if they contradict a document, surface the co
 - [RELEASING.md](../RELEASING.md) owns living release policy and the operator runbook.
 - [release-history.md](release-history.md) preserves dated release observations. Recheck live tags, package versions,
   dist-tags, access, and trusted-publisher state before relying on them operationally.
-- [AGENTS.md](../AGENTS.md) routes agent work; it should stay compact rather than duplicate these documents.
+- The source repository's `AGENTS.md` routes agent work; it should stay compact rather than duplicate these documents.
+
+## Retrieval quality
+
+Start here, then load the one owning document for the task. Follow a cross-link only when the task crosses an
+authority boundary, such as moving from successful command behavior to failure recovery. Prefer descriptive
+headings, short paragraphs, command maps, and checklists; create another page only when it has a distinct audience,
+task, or authority.
+
+The documentation tests keep `AGENTS.md` at or below 2 KiB, the root README at or below 6 KiB, and this map at or
+below 4 KiB. They also require every public topic to remain reachable from this map or the root README and verify
+repository-local links and fragments. The package check separately verifies that every relative link in the
+packaged Markdown resolves inside that exact package.
 
 ## Work on the repository
 
