@@ -1,5 +1,8 @@
 # Releasing First Draft CLI
 
+This document owns living release policy and the operator runbook. Dated tag, package, qualification, and dist-tag
+observations belong in [release history](docs/release-history.md) and must be rechecked before an operation.
+
 Publishing is a separate, explicit action after a release-preparation pull request has merged. npm registry bytes
 and package versions cannot be replaced, so do not create or push a release tag as a dry run.
 
@@ -12,9 +15,8 @@ reviewed digests identify it. Reconcile the registry and remote tags before deci
 Before `1.0.0`, First Draft CLI uses ordinary `0.MINOR.PATCH` versions. Increase `MINOR` for a breaking
 compatibility-line change. Increase `PATCH` for a change that is otherwise backward-compatible within the current
 minor line. Never reuse a published version to preserve compatibility; publish the next version required by this
-policy. Do not add aliases or shims solely to make a breaking compatibility line look patch-compatible.
-The policy applies to ordinary versions. Historical prereleases do not establish an ordinary compatibility line;
-`0.1.0` intentionally supersedes `0.1.0-alpha.2` and requires the service's `0.2.x` API contract.
+policy. Do not add aliases or shims solely to make a breaking compatibility line look patch-compatible. The policy
+applies to ordinary versions; historical prereleases do not establish an ordinary compatibility line.
 
 Version semantics and npm distribution channels are independent. An approved candidate is published first under
 the approval-gated `next` tag even when it has an ordinary version such as `0.1.0`. The release workflow does not
@@ -54,15 +56,15 @@ because the compatibility check passes.
 
 ## Repository and registry controls
 
-The published scoped package already exists. Before another release, a repository administrator must confirm:
+Before a release, a repository administrator must confirm:
 
 1. Confirm `firstdraft/cli` is public. The release workflow deliberately removes checkout credentials and re-fetches
    the public release refs anonymously.
-2. Protect `main` with pull-request and CI requirements, and add a `v*` tag ruleset that restricts tag creation,
-   update, and deletion.
-3. Create a GitHub environment named `npm`, restrict it to release tags, require an explicit reviewer, disable
-   administrator bypass, and add the environment variable `NPM_RELEASE_ENABLED=true`. The workflow fails before
-   publishing when this variable is absent.
+2. Confirm `main` has pull-request and CI requirements and a `v*` tag ruleset restricts tag creation, update, and
+   deletion.
+3. Confirm the GitHub environment named `npm` is restricted to release tags, requires an explicit reviewer, disables
+   administrator bypass, and defines `NPM_RELEASE_ENABLED=true`. The workflow fails before publishing when this
+   variable is absent.
 4. Confirm that the `firstdraft.com` npm organization and `@firstdraft.com/cli` package still identify the intended
    publisher and repository. The publisher account must have write-protecting 2FA enabled. Verify authenticated
    identity, organization membership, package identity, and current tags:
@@ -73,10 +75,9 @@ The published scoped package already exists. Before another release, a repositor
    npm view '@firstdraft.com/cli' name repository.url versions dist-tags --json
    ```
 
-5. Before creating any future `v<package-version>` tag, verify npm trusted publishing for the exact package,
-   repository, workflow, protected environment, and allowed publish operation. Protected `v0.1.0` and package
-   version `0.1.0` are already consumed and immutable. No persistent npm credential is permitted for a release
-   workflow.
+5. Before creating a `v<package-version>` tag, verify [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+   for the exact package, repository, workflow, protected environment, and allowed publish operation. No persistent
+   npm credential is permitted for a release workflow.
 
 Use the repository-pinned Node.js 24.18.0 toolchain with npm 11.16.0 to verify the organization's durable read/write
 access:
@@ -89,8 +90,7 @@ npm access list packages firstdraft.com:developers '@firstdraft.com/cli' --json
 Require the package to report `read-write` access for the `developers` team. If access is missing or changed, stop:
 restoring it is a separate administrator and security mutation, not a routine release step.
 
-The first ordinary release established the trusted-publisher relationship. For every future release, inspect it
-read-only:
+For every release, inspect the existing trusted-publisher relationship read-only:
 
 ```sh
 npm trust list '@firstdraft.com/cli'
@@ -107,23 +107,7 @@ publication credential; an authentication failure stops the release and must nev
 
 As optional defense-in-depth after trusted publication is operationally proven, an npm administrator may complete
 the separate security-key ceremony and set package **Publishing access** to **Require two-factor authentication and
-disallow tokens**. This package-level setting was not a `v0.1.0` release prerequisite and must not be reported as
-enabled until it is directly observed.
-
-## Historical alpha publications
-
-The immutable `v0.1.0-alpha.1` tag records the first reviewed release candidate. On July 31, 2026, npm rejected its
-unscoped `firstdraft` name as too similar to the existing `first-draft` package before creating a registry package.
-Do not move or reuse that tag or version. The immutable `v0.1.0-alpha.2` tag identifies the first
-organization-scoped package, `@firstdraft.com/cli@0.1.0-alpha.2`, published on August 5, 2026. As observed on August
-7, 2026, that is the only published scoped version and both npm's `next` and `latest` tags identify it. Those are
-historical release and registry facts; they do not require prerelease syntax, aliases, or compatibility shims for
-the ordinary `0.1.0` candidate. On August 7, 2026, protected tag `v0.1.0` published ordinary version `0.1.0` under
-`next` while `latest` continued to identify `0.1.0-alpha.2`. On August 12, after the selected bounded CLI 0.1.0
-user-journey smoke passed and under separate promotion approval, `latest` was promoted to `0.1.0`; both `next` and
-`latest` then identified `0.1.0`. Full v14 service qualification remained separate and incomplete. The alpha remains
-immutable version history, but neither distribution channel selects it. Preparing this source does not mutate either
-dist-tag.
+disallow tokens**. Do not report that setting as enabled until it is directly observed.
 
 ## Prepare a release
 
@@ -151,12 +135,11 @@ dist-tag.
 
 ## Publish
 
-The manual boundary is creation of the version tag. From an up-to-date, clean `main`, verify the intended commit,
-confirm that both the intended package version and `v<package-version>` tag are absent, then create and push that
-tag. Protected `v0.1.0` and package version `0.1.0` are already consumed; prepare the next version required by the
-pre-1.0 policy rather than moving or reusing either identity.
-Push one release tag at a time; the workflow serializes publication, but GitHub retains at most one pending run in a
-concurrency group.
+The manual boundary is creation of the version tag. From an up-to-date, clean `main`, verify the intended commit and
+confirm that both the intended package version and `v<package-version>` tag are absent. If either identity is already
+consumed, prepare the next version required by the pre-1.0 policy rather than moving or reusing it. Otherwise create
+and push the tag. Push one release tag at a time; the workflow serializes publication, but GitHub retains at most one
+pending run in a concurrency group.
 
 The workflow rejects accidental or stale inputs unless they use a protected `v*` tag in `firstdraft/cli`, the tag
 equals `v` plus the version in `package.json`, the remote tag still identifies the triggering commit, and that commit
@@ -217,8 +200,8 @@ npm dist-tag add "@firstdraft.com/cli@$FD_CLI_RELEASE_VERSION" latest
 npm dist-tag ls '@firstdraft.com/cli'
 ```
 
-Verify both tags after the mutation, then land a documentation change that replaces README's dated `latest`
-observation with the promoted version. The stable CLI release is complete only after `next` and `latest` both name
-the exact release-specific qualified version. Do not call a candidate fully promoted before that equality is
+Verify both tags after the mutation, then append the exact dated observation and qualification boundary to
+[release history](docs/release-history.md). The stable CLI release is complete only after `next` and `latest` both
+name the exact release-specific qualified version. Do not call a candidate fully promoted before that equality is
 observed. Do not move `latest` merely because a release merged, published successfully, or passed candidate
 compatibility checks, and do not use a dist-tag change to repair or disguise a bad immutable version.

@@ -17,6 +17,10 @@ const releasingGuide = await readFile(
   new URL("../RELEASING.md", import.meta.url),
   "utf8",
 );
+const releaseHistory = await readFile(
+  new URL("../docs/release-history.md", import.meta.url),
+  "utf8",
+);
 const agentInstructions = await readFile(
   new URL("../AGENTS.md", import.meta.url),
   "utf8",
@@ -61,6 +65,7 @@ test("package metadata preserves the audited runtime boundary", () => {
   assert.equal(metadata.engines.node, ">=22.0.0");
   assert.deepEqual(metadata.bin, { firstdraft: "bin/firstdraft.js" });
   assert.deepEqual(metadata.files, ["bin", "src"]);
+  assert.equal(metadata.files.includes("docs"), false);
   assert.equal(metadata.scripts.test, "node scripts/run-tests.js");
 
   for (const property of [
@@ -101,16 +106,20 @@ test("stable release completion requires qualified latest promotion", () => {
     /Release-specific qualification means the exact gate named for that candidate; it does not imply unrelated or full[\s\S]*?service qualification/,
   );
   assert.match(
-    releasingGuide,
-    /On August 7, 2026,[\s\S]*?`next` while `latest` continued to identify `0\.1\.0-alpha\.2`[\s\S]*?On August 12,[\s\S]*?selected bounded CLI 0\.1\.0[\s\S]*?user-journey smoke passed[\s\S]*?separate promotion approval[\s\S]*?both `next` and\s+`latest` then identified `0\.1\.0`[\s\S]*?Full v14 service qualification remained separate and incomplete/,
+    releaseHistory,
+    /Later on August 7, 2026,[\s\S]*?`next`, while `latest`[\s\S]*?continued to identify `0\.1\.0-alpha\.2`[\s\S]*?On August 12, 2026,[\s\S]*?selected bounded CLI `0\.1\.0` user-journey smoke passed[\s\S]*?separate promotion approval[\s\S]*?both `next` and `latest` then identified ordinary version `0\.1\.0`[\s\S]*?Full\s+v14 service qualification remained separate and incomplete/,
   );
   assert.match(
     readme,
-    /`latest`-selected stable release[\s\S]*?As observed on\s+August 12, 2026, both `latest` and `next`[\s\S]*?identify ordinary version `0\.1\.0`[\s\S]*?alpha remains immutable[\s\S]*?registry history[\s\S]*?no longer selected by[\s\S]*?either channel/,
+    /stable release selected by npm's `latest` dist-tag[\s\S]*?Candidate publication under `next` is not stable\s+release completion[\s\S]*?\[dated release history\]\(docs\/release-history\.md\)/,
+  );
+  assert.match(
+    releaseHistory,
+    /Protected tag `v0\.1\.0` and package version `0\.1\.0` were consumed and immutable/,
   );
   assert.match(
     releasingGuide,
-    /Protected `v0\.1\.0` and package version `0\.1\.0` are already consumed[\s\S]*?prepare the next version required by the[\s\S]*?pre-1\.0 policy rather than moving or reusing either identity/,
+    /If either identity is already[\s\S]*?consumed, prepare the next version required by the pre-1\.0 policy rather than moving or reusing it/,
   );
   assert.doesNotMatch(
     `${readme}\n${releasingGuide}`,
