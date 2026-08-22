@@ -3,10 +3,10 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.1.x` line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.2.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling,
-compile-and-publish orchestration, and read-only retained-Compilation download. The current `0.1.0` CLI requires the
-service's `0.2.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel semantics and
+compile-and-publish orchestration, and read-only retained-Compilation download. CLI `0.2.x` requires the service's
+`0.3.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel semantics and
 [release history](release-history.md) for the transition from prereleases.
 
 ## Command map
@@ -116,11 +116,19 @@ or `superseded`. Every validated analysis status is a successful read with exit 
 `analysis.status` value and inspect `analysis.diagnostics` rather than treating a completed analysis with issues as
 a transport failure.
 
+The projection includes the exact Head digest, Analyzer and Compiler releases, selected target, and
+`analysis.gap_set` plus `analysis.gap_set_sha256`. A `valid` run always returns the complete parsed canonical
+`firstdraft.foundation-gaps/2` object, including every ordered gap record and an empty `gaps` array when nothing is
+missing. Both GapSet fields are `null` for every other status. The CLI validates the GapSet's Head, Project,
+generation, releases, target, canonical digest, and complete record shapes, then prints the records without
+truncating or rewriting them.
+
 Status reads require the API origin pinned by a successful push. They never select an origin from the current
 environment, expose the private ETag, follow redirects, or modify local state. Each request has a bounded timeout,
-every response is byte-bounded and fully validated, and polling will not silently switch to a replacement analysis.
-The wait repeats only validated `processing` responses and stops on its first failed read. A network failure is safe
-to retry a bounded number of times because the command sends only `GET` requests. See
+ordinary response reads retain a 2 MiB bound, while this potentially gap-heavy response has a dedicated 128 MiB
+bound. Every response is fully validated, and polling will not silently switch to a replacement analysis. The wait
+repeats only validated `processing` responses and stops on its first failed read. A network failure is safe to retry
+a bounded number of times because the command sends only `GET` requests. See
 [read-only failures](errors.md#read-only-status-failures) if the problem persists.
 
 ## Compile and publish the current Plan
@@ -133,10 +141,10 @@ firstdraft plan compile
 
 `plan compile` is the single terminal action. It first pushes the exact current bytes in
 `.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and saves the accepted ETag using the same
-contract as `plan push`. It then waits up to two minutes for an analysis whose graph version exactly matches that
-accepted push, polling past a terminal result retained for an older Head. Invalid JSON, schema diagnostics, semantic
-diagnostics, a failed analysis, a superseded analysis, or a recurring diagnostic stop the command with structured
-output; no Compilation or Publication is requested.
+contract as `plan push`. It then waits up to two minutes for an analysis whose graph version and
+`head_source_sha256` exactly match that accepted push, polling past a terminal result retained for an older Head.
+Invalid JSON, schema diagnostics, semantic diagnostics, a failed analysis, a superseded analysis, or a recurring
+diagnostic stop the command with structured output; no Compilation or Publication is requested.
 
 Only a `valid` analysis proceeds to the internal GitHub Publication lifecycle. Invoking `plan compile` is the
 authorization to request that lifecycle. Immediately before its conditional mutation, the CLI re-reads the local
@@ -152,7 +160,7 @@ URLs, raw server projections, local paths, or environment values. Success writes
 GitHub repository URL plus a newline to stdout. If the command fails after progress has begun, its structured JSON
 error envelope is the final stderr document after the progress lines.
 
-The closed API `0.2.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.3.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -208,4 +216,5 @@ ETag, exact-byte SHA-256, canonical UTF-8 JSON envelope, provenance, metadata-on
 strict Base64 contents, file digests, modes, owners, and source-subject UUIDs. It writes only into a uniquely created
 sibling directory, verifies the complete tree, and atomically renames it into the still-absent destination. On
 POSIX, directories use mode `0755` and files use artifact-declared `0644` or `0755`; Windows verifies structure,
-contents, and digests without claiming POSIX mode bits.
+contents, and digests without claiming POSIX mode bits. The declared and streamed artifact envelope is bounded at
+128 MiB.

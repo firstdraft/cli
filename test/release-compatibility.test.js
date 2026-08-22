@@ -13,6 +13,10 @@ const compatibility = JSON.parse(
     "utf8",
   ),
 );
+const commandReference = await readFile(
+  new URL("../docs/commands.md", import.meta.url),
+  "utf8",
+);
 
 const semverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
@@ -35,9 +39,17 @@ test("release compatibility declares the coordinated CLI contract", () => {
     "foundation_plan_formats",
   ]);
   assert.deepEqual(compatibility.requires.api_contract, [
-    ">= 0.2.0",
-    "< 0.3.0",
+    ">= 0.3.0",
+    "< 0.4.0",
   ]);
+  assert.match(
+    commandReference,
+    /The closed API `0\.3\.x` progress-reason allowlist/,
+  );
+  assert.match(
+    commandReference,
+    /analysis whose graph version and\s+`head_source_sha256` exactly match that accepted push/,
+  );
   assert.deepEqual(compatibility.requires.foundation_plan_formats, [
     FOUNDATION_PLAN_FORMAT,
   ]);

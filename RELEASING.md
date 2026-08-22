@@ -36,14 +36,16 @@ binds its Foundation Plan format to the implemented CLI constant.
 
 The `script/release_compatibility_check` evaluator in `firstdraft/firstdraft` reads this declaration with the matching
 declarations from exact, clean checkouts of `firstdraft/firstdraft` and `firstdraft/skills`. It implements SemVer 2.0
-precedence. This CLI requires the service's `0.2.0` API contract because the always-present GitHub Publication
-progress projection is incompatible with the strict response shape accepted by the published
-`@firstdraft.com/cli@0.1.0-alpha.2`. Comparator arrays form one conjunction, while `foundation_plan_formats` lists
-alternatives. A prerelease satisfies a comparator set only when a comparator explicitly names a prerelease with the
-same major, minor, and patch numbers. Skills names the candidate CLI version explicitly, so a stale comparator makes
-the three-repository candidate ineligible. `firstdraft.release-compatibility/1` is intentionally closed. The
-evaluator in `firstdraft/firstdraft` rejects an unrecognized format and unknown keys, so adding a key requires a
-coordinated compatibility-format bump rather than silently changing version 1.
+precedence. CLI `0.2.x` requires the service's `0.3.x` API contract because Analysis now returns the complete reviewed
+GapSet and digest. The released CLI `0.1.0` accepts only API `0.2.x`, uses a generic 2 MiB response bound for Analysis,
+and cannot safely consume every schema-valid API `0.3.x` result. CLI `0.2.x` retains that generic bound but gives
+Analysis and Compilation artifacts dedicated 128 MiB bounds. Comparator arrays form one conjunction, while
+`foundation_plan_formats` lists alternatives. A prerelease satisfies a comparator set only when a comparator
+explicitly names a prerelease with the same major, minor, and patch numbers. Skills names the candidate CLI version
+explicitly, so a stale comparator makes the three-repository candidate ineligible.
+`firstdraft.release-compatibility/1` is intentionally closed. The evaluator in `firstdraft/firstdraft` rejects an
+unrecognized format and unknown keys, so adding a key requires a coordinated compatibility-format bump rather than
+silently changing version 1.
 
 A compatible result establishes candidate eligibility, not authorization or runtime proof. Exact Git SHAs identify
 the three-repository candidate. A merge to `main` is integration only: report the merged SHA and ask the user whether
