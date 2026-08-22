@@ -105,6 +105,9 @@ export async function compilePlan({
   const acceptedGraphVersion = /** @type {{graph_version: number}} */ (
     pushed.body.project
   ).graph_version;
+  const acceptedHeadSourceSha256 = /** @type {{source_sha256: string}} */ (
+    pushed.body.foundation_plan
+  ).source_sha256;
 
   let status;
   onProgress({ phase: "analysis", status: "waiting" });
@@ -133,7 +136,8 @@ export async function compilePlan({
   }
   if (
     status.body.project.graph_version !== acceptedGraphVersion ||
-    status.body.analysis.graph_version !== acceptedGraphVersion
+    status.body.analysis.graph_version !== acceptedGraphVersion ||
+    status.body.analysis.head_source_sha256 !== acceptedHeadSourceSha256
   ) {
     throw new PlanStatusChangedError(status.body);
   }

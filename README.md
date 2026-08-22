@@ -4,10 +4,11 @@
 Foundation Plans with their users, then submit a valid Plan for the current bounded compilation and private GitHub
 publication journey.
 
-The current `0.1.x` line includes local Plan initialization, application-key and UUID generation, conditional
+The current `0.2.x` source line includes local Plan initialization, application-key and UUID generation, conditional
 whole-document push, whole-graph analysis polling, compile-and-publish orchestration, and read-only retained
-Compilation download. Remote commands require a compatible First Draft service and are intended for coordinated
-trials; publishing this CLI does not make the wider service generally available.
+Compilation download. Analysis status exposes the complete reviewed GapSet before Compile. Remote commands require
+a compatible First Draft service and are intended for coordinated trials; publishing this CLI does not make the
+wider service generally available.
 
 ## Install
 

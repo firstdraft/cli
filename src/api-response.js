@@ -36,9 +36,9 @@ export async function sendRequest(fetchFunction, endpoint, request) {
   }
 }
 
-/** @param {Response} response */
-export async function readResponseBody(response) {
-  const bytes = await readResponseBytes(response);
+/** @param {Response} response @param {number} [maximumBytes] */
+export async function readResponseBody(response, maximumBytes) {
+  const bytes = await readResponseBytes(response, maximumBytes);
 
   let text;
   try {

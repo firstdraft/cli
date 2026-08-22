@@ -42,7 +42,7 @@ const EXPECTED = {
 };
 
 test("parses canonical binary-safe artifact bytes and materializes an exact tree", (context) => {
-  assert.equal(MAX_ARTIFACT_BYTES, 16 * 1024 * 1024);
+  assert.equal(MAX_ARTIFACT_BYTES, 128 * 1024 * 1024);
   const fixture = artifactFixture();
   const artifact = parseCompilationArtifact(fixture.source, EXPECTED);
   assert.equal(artifact.provenance.head_source_sha256, HEAD_SHA256);

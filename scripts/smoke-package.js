@@ -332,6 +332,7 @@ async function exercisePackedCompilation(projectDirectory) {
   );
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
+  const analyzerRelease = "foundation-plan-rails/application-2026-08";
   const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
   const target = { id: "rails", profile: "rails-sketch/2026-08" };
   const contents = Buffer.from("class Movie < ApplicationRecord\nend\n");
@@ -406,14 +407,30 @@ async function exercisePackedCompilation(projectDirectory) {
       completed_at: "2026-07-30T12:00:02.000000Z",
     },
   };
+  const gapSet = {
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: headSha256 },
+    project: { id: projectId, graph_version: 1 },
+    analysis: { release: analyzerRelease },
+    compiler_release: compilerRelease,
+    target,
+    gaps: [],
+  };
   const analysis = {
     project: { id: projectId, graph_version: 1 },
     analysis: {
       id: analysisId,
       graph_version: 1,
-      analyzer_release: "foundation-plan-analyzer/2026-08",
+      head_source_sha256: headSha256,
+      analyzer_release: analyzerRelease,
+      compiler_release: compilerRelease,
+      target,
       status: "valid",
       diagnostics: [],
+      gap_set: gapSet,
+      gap_set_sha256: sha256(
+        Buffer.from(`${JSON.stringify(gapSet, null, 2)}\n`),
+      ),
       started_at: "2026-07-30T12:00:00.000Z",
       completed_at: "2026-07-30T12:00:01.000Z",
     },

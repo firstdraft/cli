@@ -16,6 +16,7 @@ import { run } from "../src/cli.js";
 import {
   ARTIFACT_MEDIA_TYPE,
   FOUNDATION_PLAN_FORMAT,
+  MAX_ARTIFACT_BYTES,
 } from "../src/compilation-artifact.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000003001";
@@ -235,6 +236,84 @@ test("download requires succeeded status and validates historical Head provenanc
   );
   assertHandledFailure(invalidTransport, "invalid_artifact");
   assert.equal(existsSync(transportOutput), false);
+});
+
+test("artifact downloads enforce the 128 MiB declared and streamed bound", async (context) => {
+  assert.equal(MAX_ARTIFACT_BYTES, 128 * 1024 * 1024);
+  const cwd = remoteDirectory(context);
+  const fixture = artifactFixture();
+  const metadata = {
+    path: ARTIFACT_PATH,
+    sha256: fixture.sha256,
+    media_type: ARTIFACT_MEDIA_TYPE,
+    byte_size: MAX_ARTIFACT_BYTES,
+  };
+  const status = compilationBody("succeeded", {
+    artifact: fixture,
+    compilation: { artifact: metadata },
+  });
+
+  let declaredCancelled = false;
+  const declaredBody = new ReadableStream({
+    cancel() {
+      declaredCancelled = true;
+    },
+  });
+  const declared = await invoke(
+    [
+      "compilation",
+      "download",
+      COMPILATION_ID,
+      "--output",
+      path.join(cwd, "declared-overflow"),
+    ],
+    {
+      cwd,
+      fetchFunction: sequenceFetch([
+        jsonResponse(status),
+        new Response(declaredBody, {
+          status: 200,
+          headers: {
+            "Content-Type": ARTIFACT_MEDIA_TYPE,
+            "Content-Length": String(MAX_ARTIFACT_BYTES + 1),
+          },
+        }),
+      ]),
+    },
+  );
+  assertHandledFailure(declared, "invalid_artifact");
+  assert.equal(declaredCancelled, true);
+
+  let streamedCancelled = false;
+  const streamedBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue({ byteLength: MAX_ARTIFACT_BYTES + 1 });
+    },
+    cancel() {
+      streamedCancelled = true;
+    },
+  });
+  const streamed = await invoke(
+    [
+      "compilation",
+      "download",
+      COMPILATION_ID,
+      "--output",
+      path.join(cwd, "streamed-overflow"),
+    ],
+    {
+      cwd,
+      fetchFunction: sequenceFetch([
+        jsonResponse(status),
+        new Response(streamedBody, {
+          status: 200,
+          headers: { "Content-Type": ARTIFACT_MEDIA_TYPE },
+        }),
+      ]),
+    },
+  );
+  assertHandledFailure(streamed, "invalid_artifact");
+  assert.equal(streamedCancelled, true);
 });
 
 test("compilation syntax and output preflight fail before network access", async (context) => {
