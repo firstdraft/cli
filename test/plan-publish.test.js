@@ -24,6 +24,7 @@ const CREATED_AT = "2026-08-01T12:00:00.000Z";
 const STARTED_AT = "2026-08-01T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-01T12:00:02.000Z";
 const RETRY_AT = "2026-08-07T16:15:00.000000Z";
+const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-08";
 const COMPILER_RELEASE = "foundation-plan-rails/compiler-2026-08";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const ARTIFACT = {
@@ -633,7 +634,10 @@ test("local prerequisites reject before publication network access", async (cont
         status: 200,
         etag: '"opaque"',
         outcome: "updated",
-        body: { project: { graph_version: 11 } },
+        body: {
+          project: { graph_version: 11 },
+          foundation_plan: { source_sha256: HEAD_SHA256 },
+        },
       }),
     }),
     "invalid_configuration",
@@ -1397,7 +1401,10 @@ async function invoke(argv, options = {}) {
       status: 200,
       etag: ETAG,
       outcome: "updated",
-      body: { project: { graph_version: 11 } },
+      body: {
+        project: { graph_version: 11 },
+        foundation_plan: { source_sha256: HEAD_SHA256 },
+      },
     }),
     planCompileReadStatus: async () => ({
       status: 200,
@@ -1409,14 +1416,30 @@ async function invoke(argv, options = {}) {
 }
 
 function validAnalysis() {
+  const gapSet = {
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: HEAD_SHA256 },
+    project: { id: PROJECT_ID, graph_version: 11 },
+    analysis: { release: ANALYZER_RELEASE },
+    compiler_release: COMPILER_RELEASE,
+    target: TARGET,
+    gaps: [],
+  };
   return {
     project: { id: PROJECT_ID, graph_version: 11 },
     analysis: {
       id: ANALYSIS_ID,
       graph_version: 11,
-      analyzer_release: "foundation-plan-analyzer/2026-08",
+      head_source_sha256: HEAD_SHA256,
+      analyzer_release: ANALYZER_RELEASE,
+      compiler_release: COMPILER_RELEASE,
+      target: TARGET,
       status: "valid",
       diagnostics: [],
+      gap_set: gapSet,
+      gap_set_sha256: sha256(
+        Buffer.from(`${JSON.stringify(gapSet, null, 2)}\n`),
+      ),
       started_at: STARTED_AT,
       completed_at: COMPLETED_AT,
     },

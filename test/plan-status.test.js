@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
   mkdtempSync,
@@ -15,6 +16,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { run } from "../src/cli.js";
+import { MAX_PLAN_STATUS_RESPONSE_BYTES } from "../src/commands/plan-status.js";
 
 /** @typedef {{input: string | URL | Request, init: RequestInit | undefined}} FetchCall */
 
@@ -28,6 +30,10 @@ const API_TOKEN = `fd_${"a".repeat(43)}`;
 const ETAG = '"opaque:plan-validator"';
 const STARTED_AT = "2026-07-30T12:00:00.123Z";
 const COMPLETED_AT = "2026-07-30T12:00:01.456Z";
+const HEAD_SOURCE_SHA256 = "1".repeat(64);
+const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-08";
+const COMPILER_RELEASE = "foundation-plan-rails/compiler-application-2026-08";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const PLAN_STATUS_HELP = `First Draft CLI
 
 Usage:
@@ -216,6 +222,39 @@ test("diagnostics preserve each supported optional subject shape", async (contex
       stderr: "",
     });
   }
+});
+
+test("plan status exposes the complete canonical GapSet and digest", async (context) => {
+  const cwd = remoteDirectory(context);
+  const body = analysisBody("valid");
+  const result = await invoke(["plan", "status"], {
+    cwd,
+    fetchFunction: recordingFetch([jsonResponse(body)], []),
+  });
+
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.analysis.gap_set, body.analysis.gap_set);
+  assert.equal(output.analysis.gap_set_sha256, body.analysis.gap_set_sha256);
+  assert.deepEqual(output.analysis.gap_set.gaps, body.analysis.gap_set.gaps);
+});
+
+test("plan status accepts the pinned Service zero-gap canonical digest", async (context) => {
+  const cwd = remoteDirectory(context);
+  const body = analysisBody("valid");
+  body.analysis.gap_set.gaps = [];
+  body.analysis.gap_set_sha256 =
+    "1fae5c215a5d9cf7a244ac5bd7c121d6da12497d5af2bf2e97073f41ac2dff7f";
+  const result = await invoke(["plan", "status"], {
+    cwd,
+    fetchFunction: recordingFetch([jsonResponse(body)], []),
+  });
+
+  assert.deepEqual(result, {
+    status: 0,
+    stdout: jsonOutput(body),
+    stderr: "",
+  });
 });
 
 test("all validated analysis states are command results rather than transport failures", async (context) => {
@@ -733,6 +772,20 @@ test("network, redirect, and response-stream failures advise bounded retries", a
 
 test("success responses are rejected unless every contract field is valid", async (context) => {
   const valid = analysisBody("valid");
+  const wrongGapIdentity = structuredClone(valid);
+  wrongGapIdentity.analysis.gap_set.source.sha256 = "2".repeat(64);
+  wrongGapIdentity.analysis.gap_set_sha256 = sha256(
+    Buffer.from(
+      `${JSON.stringify(wrongGapIdentity.analysis.gap_set, null, 2)}\n`,
+    ),
+  );
+  const noncanonicalGapOrder = structuredClone(valid);
+  noncanonicalGapOrder.analysis.gap_set.gaps.reverse();
+  noncanonicalGapOrder.analysis.gap_set_sha256 = sha256(
+    Buffer.from(
+      `${JSON.stringify(noncanonicalGapOrder.analysis.gap_set, null, 2)}\n`,
+    ),
+  );
   const cases = [
     { name: "wrong media type", response: textResponse(JSON.stringify(valid)) },
     { name: "invalid UTF-8", response: byteResponse(Uint8Array.of(0xff)) },
@@ -761,6 +814,41 @@ test("success responses are rejected unless every contract field is valid", asyn
     {
       name: "empty analyzer release",
       body: analysisBody("valid", { analysis: { analyzer_release: "" } }),
+    },
+    {
+      name: "invalid Compiler release",
+      body: analysisBody("valid", {
+        analysis: { compiler_release: "contains spaces" },
+      }),
+    },
+    {
+      name: "wrong GapSet source identity",
+      body: wrongGapIdentity,
+    },
+    {
+      name: "noncanonical GapSet order",
+      body: noncanonicalGapOrder,
+    },
+    {
+      name: "mismatched GapSet digest",
+      body: analysisBody("valid", {
+        analysis: { gap_set_sha256: "f".repeat(64) },
+      }),
+    },
+    {
+      name: "valid without a GapSet",
+      body: analysisBody("valid", {
+        analysis: { gap_set: null, gap_set_sha256: null },
+      }),
+    },
+    {
+      name: "nonvalid with a GapSet",
+      body: analysisBody("analysis_failed", {
+        analysis: {
+          gap_set: valid.analysis.gap_set,
+          gap_set_sha256: valid.analysis.gap_set_sha256,
+        },
+      }),
     },
     {
       name: "unknown status",
@@ -901,7 +989,8 @@ test("valid timestamps include offsets, lowercase RFC 3339 markers, and leap sec
   });
 });
 
-test("declared and streamed response sizes are bounded", async (context) => {
+test("plan status has a dedicated 128 MiB declared and streamed response bound", async (context) => {
+  assert.equal(MAX_PLAN_STATUS_RESPONSE_BYTES, 128 * 1024 * 1024);
   const cwd = remoteDirectory(context);
   let declaredCancelled = false;
   const declaredStream = new ReadableStream({
@@ -917,7 +1006,7 @@ test("declared and streamed response sizes are bounded", async (context) => {
           status: 200,
           headers: {
             "Content-Type": "application/json",
-            "Content-Length": String(2 * 1024 * 1024 + 1),
+            "Content-Length": String(MAX_PLAN_STATUS_RESPONSE_BYTES + 1),
           },
         }),
       ],
@@ -930,7 +1019,7 @@ test("declared and streamed response sizes are bounded", async (context) => {
   let streamedCancelled = false;
   const streamedBody = new ReadableStream({
     start(controller) {
-      controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1));
+      controller.enqueue({ byteLength: MAX_PLAN_STATUS_RESPONSE_BYTES + 1 });
     },
     cancel() {
       streamedCancelled = true;
@@ -1065,27 +1154,113 @@ function localDirectory(context, state) {
 /**
  * @param {string} status
  * @param {{project?: Record<string, unknown>, analysis?: Record<string, unknown>}} [overrides]
+ * @returns {{project: Record<string, unknown>, analysis: Record<string, any>}}
  */
 function analysisBody(status, overrides = {}) {
-  const terminal = status !== "processing";
-  const diagnostics = status === "issues_found" ? [diagnostic("error")] : [];
-  return {
-    project: {
-      id: PROJECT_ID,
-      graph_version: 1,
-      ...overrides.project,
-    },
-    analysis: {
-      id: ANALYSIS_ID,
-      graph_version: 1,
-      analyzer_release: "scalar-rails/1",
-      status,
-      diagnostics,
-      started_at: terminal ? STARTED_AT : null,
-      completed_at: terminal ? COMPLETED_AT : null,
-      ...overrides.analysis,
-    },
+  const project = {
+    id: PROJECT_ID,
+    graph_version: 1,
+    ...overrides.project,
   };
+  const preliminaryAnalysis = {
+    id: ANALYSIS_ID,
+    graph_version: 1,
+    head_source_sha256: HEAD_SOURCE_SHA256,
+    analyzer_release: ANALYZER_RELEASE,
+    compiler_release: COMPILER_RELEASE,
+    target: TARGET,
+    status,
+    ...overrides.analysis,
+  };
+  const finalStatus = preliminaryAnalysis.status;
+  const terminal = finalStatus !== "processing";
+  const diagnostics = Object.hasOwn(overrides.analysis ?? {}, "diagnostics")
+    ? overrides.analysis?.diagnostics
+    : finalStatus === "issues_found"
+      ? [diagnostic("error")]
+      : [];
+  const startedAt = Object.hasOwn(overrides.analysis ?? {}, "started_at")
+    ? overrides.analysis?.started_at
+    : terminal
+      ? STARTED_AT
+      : null;
+  const completedAt = Object.hasOwn(overrides.analysis ?? {}, "completed_at")
+    ? overrides.analysis?.completed_at
+    : terminal
+      ? COMPLETED_AT
+      : null;
+  const selectedGapSet = Object.hasOwn(overrides.analysis ?? {}, "gap_set")
+    ? overrides.analysis?.gap_set
+    : finalStatus === "valid"
+      ? gapSet(project, preliminaryAnalysis)
+      : null;
+  const selectedGapSetSha256 = Object.hasOwn(
+    overrides.analysis ?? {},
+    "gap_set_sha256",
+  )
+    ? overrides.analysis?.gap_set_sha256
+    : selectedGapSet === null
+      ? null
+      : sha256(Buffer.from(`${JSON.stringify(selectedGapSet, null, 2)}\n`));
+  const analysis = {
+    id: preliminaryAnalysis.id,
+    graph_version: preliminaryAnalysis.graph_version,
+    head_source_sha256: preliminaryAnalysis.head_source_sha256,
+    analyzer_release: preliminaryAnalysis.analyzer_release,
+    compiler_release: preliminaryAnalysis.compiler_release,
+    target: preliminaryAnalysis.target,
+    status: preliminaryAnalysis.status,
+    diagnostics,
+    gap_set: selectedGapSet,
+    gap_set_sha256: selectedGapSetSha256,
+    started_at: startedAt,
+    completed_at: completedAt,
+  };
+
+  return {
+    project,
+    analysis,
+  };
+}
+
+/** @param {Record<string, unknown>} project @param {Record<string, unknown>} analysis */
+function gapSet(project, analysis) {
+  return {
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: analysis.head_source_sha256 },
+    project: { id: project.id, graph_version: project.graph_version },
+    analysis: { release: analysis.analyzer_release },
+    compiler_release: analysis.compiler_release,
+    target: analysis.target,
+    gaps: [
+      {
+        classification: "service_support_gap",
+        code: "foundation_plan.import.unsupported_field",
+        kind: "field",
+        status: "skipped_at_import",
+        pointer: "/application/entities/0/fields/0",
+        readable_path: "movie.poster",
+        reason: "Attachment Fields are not imported yet.",
+        consequence: "The generated application omits this Field.",
+        cause: "The importer has no attachment-field writer.",
+      },
+      {
+        classification: "target_support_gap",
+        code: "foundation_plan.rails.not_generated",
+        kind: "scaffold",
+        status: "not_generated",
+        pointer: "/application/scaffolds/0",
+        readable_path: "movies",
+        reason: "This Scaffold is not generated yet.",
+        consequence: "The generated application has no Scaffold route.",
+      },
+    ],
+  };
+}
+
+/** @param {Buffer} source */
+function sha256(source) {
+  return createHash("sha256").update(source).digest("hex");
 }
 
 /**

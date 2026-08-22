@@ -23,6 +23,9 @@ const CREATED_AT = "2026-08-04T12:00:00.000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000Z";
 const REPOSITORY_URL = "https://github.com/octocat/movie-catalog";
+const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-08";
+const COMPILER_RELEASE = "foundation-plan-rails/compiler-2026-08";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const SUCCESS_PROGRESS = `First Draft: Analyzing Foundation Plan...
 First Draft: Foundation Plan analysis valid.
 First Draft: Compiling application...
@@ -160,6 +163,33 @@ test("plan compile waits past a terminal analysis for the prior graph version", 
   assert.equal(result.status, 0);
   assert.equal(calls.length, 2);
   assert.equal(publications, 1);
+});
+
+test("plan compile rejects an older Head at the accepted graph version", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  const olderHead = "0".repeat(64);
+  let publications = 0;
+  const result = await invoke(["plan", "compile"], {
+    cwd,
+    planCompilePush: successfulPush,
+    fetchFunction: sequenceFetch([
+      jsonResponse(analysisBody("valid", 1, ANALYSIS_ID, olderHead)),
+    ]),
+    planCompilePublish: async () => {
+      publications += 1;
+      return publicationBody();
+    },
+  });
+
+  assertHandledFailure(result, "analysis_changed");
+  assert.equal(
+    errorEnvelope(result.stderr).current.analysis.head_source_sha256,
+    olderHead,
+  );
+  assert.equal(publications, 0);
 });
 
 test("invalid JSON and schema diagnostics stop before analysis or Publication", async (context) => {
@@ -378,14 +408,24 @@ function acceptedPlanBody(graphVersion = 1) {
   };
 }
 
-/** @param {string} status @param {number} [graphVersion] @param {string} [analysisId] */
-function analysisBody(status, graphVersion = 1, analysisId = ANALYSIS_ID) {
+/** @param {string} status @param {number} [graphVersion] @param {string} [analysisId] @param {string} [headSourceSha256] */
+function analysisBody(
+  status,
+  graphVersion = 1,
+  analysisId = ANALYSIS_ID,
+  headSourceSha256 = HEAD_SHA256,
+) {
+  const gapSet =
+    status === "valid" ? emptyGapSet({ graphVersion, headSourceSha256 }) : null;
   return {
     project: { id: PROJECT_ID, graph_version: graphVersion },
     analysis: {
       id: analysisId,
       graph_version: graphVersion,
-      analyzer_release: "foundation-plan-analyzer/2026-08",
+      head_source_sha256: headSourceSha256,
+      analyzer_release: ANALYZER_RELEASE,
+      compiler_release: COMPILER_RELEASE,
+      target: TARGET,
       status,
       diagnostics:
         status === "issues_found"
@@ -393,9 +433,27 @@ function analysisBody(status, graphVersion = 1, analysisId = ANALYSIS_ID) {
           : status === "analysis_failed"
             ? [structuredDiagnostic("analysis_failed")]
             : [],
+      gap_set: gapSet,
+      gap_set_sha256:
+        gapSet === null
+          ? null
+          : sha256(Buffer.from(`${JSON.stringify(gapSet, null, 2)}\n`)),
       started_at: STARTED_AT,
       completed_at: COMPLETED_AT,
     },
+  };
+}
+
+/** @param {{graphVersion: number, headSourceSha256: string}} identity */
+function emptyGapSet({ graphVersion, headSourceSha256 }) {
+  return {
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: headSourceSha256 },
+    project: { id: PROJECT_ID, graph_version: graphVersion },
+    analysis: { release: ANALYZER_RELEASE },
+    compiler_release: COMPILER_RELEASE,
+    target: TARGET,
+    gaps: [],
   };
 }
 
@@ -412,8 +470,8 @@ function publicationBody() {
       graph_version: 1,
       head_source_sha256: HEAD_SHA256,
       status: "succeeded",
-      compiler_release: "foundation-plan-rails/compiler-2026-08",
-      target: { id: "rails", profile: "rails-sketch/2026-08" },
+      compiler_release: COMPILER_RELEASE,
+      target: TARGET,
       artifact: {
         sha256: "1".repeat(64),
         manifest_sha256: "2".repeat(64),
