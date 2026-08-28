@@ -616,6 +616,51 @@ test("post-start failures retain one recoverable Compilation identity", async (c
   }
 });
 
+test("direct Compilation timeout names read-only retained-ID recovery", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  const queued = directCompilationBody("queued");
+  /** @type {unknown[]} */
+  const calls = [];
+  let now = 0;
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      planCompilePush: successfulPush,
+      planCompileReadStatus: async () => ({
+        status: 200,
+        body: analysisBody("valid"),
+      }),
+      fetchFunction: sequenceFetch(
+        [
+          jsonResponse(queued, 202, {
+            Location: directCompilationPath(),
+          }),
+        ],
+        calls,
+      ),
+      compilationNow: () => now,
+      compilationSleep: async () => {
+        now = 600_000;
+      },
+    },
+  );
+
+  assertHandledFailure(result, "compilation_wait_timed_out");
+  const envelope = errorEnvelope(result.stderr);
+  assert.equal(envelope.current.compilation.id, COMPILATION_ID);
+  assert.equal(envelope.current.compilation.status, "queued");
+  assert.match(envelope.detail, /firstdraft compilation status/);
+  assert.match(
+    envelope.detail,
+    /do not rerun 'firstdraft plan compile --output'/,
+  );
+  assert.equal(calls.length, 1);
+});
+
 test("plan compile waits past a terminal analysis for the prior graph version", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",

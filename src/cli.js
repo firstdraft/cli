@@ -337,7 +337,7 @@ const PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL =
 const PLAN_COMPILE_DIRECT_CHANGED_DETAIL =
   "The pinned Compilation changed while being polled. The command stopped without downloading an artifact.";
 const PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL =
-  "The pinned Compilation is still processing after the bounded ten-minute wait.";
+  "The retained Compilation is still processing after the bounded ten-minute wait. Use current.compilation.id with 'firstdraft compilation status'; do not rerun 'firstdraft plan compile --output' or start another Compilation.";
 const PLAN_COMPILE_DIRECT_FAILED_DETAIL =
   "The pinned Compilation failed. No artifact was downloaded or materialized.";
 const PLAN_COMPILE_DIRECT_CANCELLED_DETAIL =

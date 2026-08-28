@@ -70,8 +70,10 @@ materialization failure envelopes include that last validated projection as `cur
 - after `materialization_failed`, repair the destination condition, then use the same lower-level download command
   with a new absent path.
 
-`compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry
-the validated `current` projection appropriate to their terminal boundary. Authentication recovery may refresh the
+After `compilation_wait_timed_out`, retained work may still continue. Use
+`firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun
+`plan compile --output`. `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry the
+validated `current` projection appropriate to their stopping boundary. Authentication recovery may refresh the
 credential, but it must continue from the retained ID rather than starting another Compilation.
 
 ## Publication recovery
