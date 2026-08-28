@@ -70,10 +70,26 @@ export class CompilationLocalStateError extends Error {}
 export class CompilationLocalPlanChangedError extends Error {}
 
 export class CompilationRequestOutcomeUnknownError extends Error {
-  /** @param {number | undefined} status */
-  constructor(status) {
+  /**
+   * @param {number | undefined} status
+   * @param {Record<string, unknown> | null} [response]
+   */
+  constructor(status, response = null) {
     super("The compilation start request outcome is unknown.");
     this.status = status;
+    this.response = response;
+  }
+}
+
+export class CompilationRetainedError extends Error {
+  /**
+   * @param {Error} error
+   * @param {CompilationResponse} current
+   */
+  constructor(error, current) {
+    super("The retained Compilation requires recovery.", { cause: error });
+    this.error = error;
+    this.current = current;
   }
 }
 
@@ -396,64 +412,72 @@ export async function compileAndDownload({
   });
   let current = initial;
 
-  while (!TERMINAL_STATUSES.has(current.compilation.status)) {
-    const remaining = deadline - now();
-    if (remaining <= 0) throw new CompilationTimeoutError(current);
+  try {
+    while (!TERMINAL_STATUSES.has(current.compilation.status)) {
+      const remaining = deadline - now();
+      if (remaining <= 0) throw new CompilationTimeoutError(current);
 
-    await sleep(Math.min(POLL_INTERVAL_MS, remaining));
-    if (now() >= deadline) throw new CompilationTimeoutError(current);
+      await sleep(Math.min(POLL_INTERVAL_MS, remaining));
+      if (now() >= deadline) throw new CompilationTimeoutError(current);
 
-    const next = await readCompilationStatus({
+      const next = await readCompilationStatus({
+        apiUrl: context.apiUrl,
+        projectId: context.projectId,
+        compilationId: initial.compilation.id,
+        fetchFunction,
+        createRequestSignal,
+        requestTimeout: Math.max(
+          1,
+          Math.min(REQUEST_TIMEOUT_MS, deadline - now()),
+        ),
+      });
+      if (!sameCompilation(initial, next) || !validTransition(current, next)) {
+        throw new CompilationChangedError(next);
+      }
+      current = next;
+    }
+
+    if (current.compilation.status === "failed") {
+      throw new CompilationFailedError(current);
+    }
+    if (current.compilation.status === "cancelled") {
+      throw new CompilationCancelledError(current);
+    }
+
+    onProgress({ phase: "compilation", status: "succeeded" });
+    const metadata =
+      /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
+        current.compilation.artifact
+      );
+    const source = await downloadArtifact({
       apiUrl: context.apiUrl,
-      projectId: context.projectId,
-      compilationId: initial.compilation.id,
+      metadata,
       fetchFunction,
       createRequestSignal,
-      requestTimeout: Math.max(
-        1,
-        Math.min(REQUEST_TIMEOUT_MS, deadline - now()),
-      ),
     });
-    if (!sameCompilation(initial, next) || !validTransition(current, next)) {
-      throw new CompilationChangedError(next);
+    const artifact = parseCompilationArtifact(source, {
+      projectId: context.projectId,
+      compilationId: current.compilation.id,
+      graphVersion: current.compilation.graph_version,
+      headSourceSha256: current.compilation.head_source_sha256,
+      analysisRunId: current.compilation.analysis_run_id,
+      compilerRelease: current.compilation.compiler_release,
+      target: current.compilation.target,
+    });
+    const materialized = materializeCompilationArtifact(artifact, outputTarget);
+
+    return {
+      project: current.project,
+      compilation: current.compilation,
+      output: materialized,
+    };
+  } catch (error) {
+    if (requiresRetainedRecovery(error)) {
+      throw new CompilationRetainedError(error, current);
     }
-    current = next;
-  }
 
-  if (current.compilation.status === "failed") {
-    throw new CompilationFailedError(current);
+    throw error;
   }
-  if (current.compilation.status === "cancelled") {
-    throw new CompilationCancelledError(current);
-  }
-
-  onProgress({ phase: "compilation", status: "succeeded" });
-  const metadata =
-    /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
-      current.compilation.artifact
-    );
-  const source = await downloadArtifact({
-    apiUrl: context.apiUrl,
-    metadata,
-    fetchFunction,
-    createRequestSignal,
-  });
-  const artifact = parseCompilationArtifact(source, {
-    projectId: context.projectId,
-    compilationId: current.compilation.id,
-    graphVersion: current.compilation.graph_version,
-    headSourceSha256: current.compilation.head_source_sha256,
-    analysisRunId: current.compilation.analysis_run_id,
-    compilerRelease: current.compilation.compiler_release,
-    target: current.compilation.target,
-  });
-  const materialized = materializeCompilationArtifact(artifact, outputTarget);
-
-  return {
-    project: current.project,
-    compilation: current.compilation,
-    output: materialized,
-  };
 }
 
 /**
@@ -578,6 +602,9 @@ async function startCompilation({
     const problem = safeProblem(response, body);
     if (response.ok || problem === null) {
       throw new CompilationRequestOutcomeUnknownError(response.status);
+    }
+    if (response.status === 408 || response.status >= 500) {
+      throw new CompilationRequestOutcomeUnknownError(response.status, problem);
     }
 
     throw new CompilationStartRejectedError(response.status, problem);
@@ -1012,6 +1039,18 @@ function validTransition(previous, current) {
     from === "running" &&
     (to === "succeeded" || to === "failed" || to === "cancelled") &&
     current.compilation.started_at === previous.compilation.started_at
+  );
+}
+
+/** @param {unknown} error */
+function requiresRetainedRecovery(error) {
+  return (
+    error instanceof CompilationStatusUnavailableError ||
+    error instanceof CompilationStatusInvalidError ||
+    error instanceof CompilationArtifactUnavailableError ||
+    error instanceof CompilationArtifactResponseInvalidError ||
+    error instanceof CompilationArtifactInvalidError ||
+    error instanceof CompilationMaterializationError
   );
 }
 

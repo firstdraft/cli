@@ -42,9 +42,37 @@ A network failure from `plan status` is safe to retry a bounded number of times 
 `invalid_server_response` instead means the response violated the CLI/server contract; retrying the unchanged read
 will not repair it.
 
-The lower-level `compilation status` command is also read-only. `compilation_status_unavailable` is safe to retry;
+Only the lower-level `compilation status <compilation-id>` command is read-only. Its
+`compilation_status_unavailable` result is safe to retry a bounded number of times;
 `invalid_compilation_status` requires contract reconciliation. A wait stops rather than following a changed
-analysis or Compilation identity.
+analysis or Compilation identity. This read-only retry guidance does not apply to `plan compile --output`, which
+starts a new Compilation after analysis.
+
+## Direct Compilation recovery
+
+Do not blindly rerun `plan compile --output` after its Compilation start was accepted or may have been accepted.
+That command creates new work; it is not a retained-Compilation reconciliation command.
+
+If `request_outcome_unknown` reports `phase: "compilation"`, the start request did not yield a validated retained
+ID. The CLI sent exactly one `POST` and did not retry it. Stop until First Draft or an operator can reconcile the
+Project and identify whether work was retained.
+
+Once the start response has yielded a validated retained Compilation, later status, artifact, authentication, and
+materialization failure envelopes include that last validated projection as `current`. Preserve
+`current.compilation.id` and recover without creating duplicate work:
+
+- after `compilation_status_unavailable`, use
+  `firstdraft compilation status <current.compilation.id>`; this lower-level read is safe to retry boundedly;
+- after `invalid_compilation_status` or `invalid_artifact`, preserve the retained ID and reconcile the CLI/Service
+  contract instead of retrying the unchanged invalid read;
+- after `artifact_unavailable`, wait if appropriate and use
+  `firstdraft compilation download <current.compilation.id> --output <new-absent-path>`; and
+- after `materialization_failed`, repair the destination condition, then use the same lower-level download command
+  with a new absent path.
+
+`compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry
+the validated `current` projection appropriate to their terminal boundary. Authentication recovery may refresh the
+credential, but it must continue from the retained ID rather than starting another Compilation.
 
 ## Publication recovery
 
@@ -63,30 +91,30 @@ stopped without following the replacement.
 
 ## Error index
 
-| Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                            |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | -------------------------------------------------------------------------------------------------- |
-| Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                           |
-| `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                        |
-| `plan push`, `plan compile`                  | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                    |
-| Network commands                             | `authentication_required`                                                                          |    1 | The token is missing or First Draft returned a validated authentication problem.                   |
-| Plan commands, `compilation *`               | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                            |
-| Status, Compile, Compilation commands        | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                     |
-| `plan push`, `plan compile`                  | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.    |
-| `plan push`, `plan compile`                  | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`. |
-| `plan push`, `plan compile`                  | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.  |
-| `plan status`                                | `server_rejected`                                                                                  |    1 | First Draft rejected the analysis status request with a validated non-authentication problem.      |
-| `plan status`                                | `status_unavailable`, `invalid_server_response`                                                    |    1 | The analysis read failed or violated its protocol.                                                 |
-| `plan compile`                               | `analysis_status_unavailable`, `invalid_analysis_status`, `analysis_status_rejected`               |    1 | The bounded analysis read failed, was invalid, or was rejected.                                    |
-| Analysis waits                               | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                |
-| `plan compile`                               | `plan_not_valid`                                                                                   |    1 | Analysis completed without `valid`; `current` contains diagnostics and status.                     |
-| `plan compile`                               | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                 |
-| `plan compile --output`                      | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct Compilation start or status failed its validated transport contract.                        |
-| `plan compile --output`                      | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                        |
-| `plan compile`                               | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                               |
-| `plan compile`                               | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                |
-| `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                              |
-| `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                            |
-| `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                          |
-| Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed before materialization.                          |
-| Download commands                            | `invalid_output_path`                                                                              |    2 | The destination was not an absent path beneath an existing real directory.                         |
-| Download commands                            | `materialization_failed`                                                                           |    1 | The output raced or the verified tree could not be atomically installed.                           |
+| Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                                |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | ------------------------------------------------------------------------------------------------------ |
+| Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                               |
+| `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                            |
+| `plan push`, `plan compile`                  | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                        |
+| Network commands                             | `authentication_required`                                                                          |    1 | The token is missing or First Draft returned a validated authentication problem.                       |
+| Plan commands, `compilation *`               | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                                |
+| Status, Compile, Compilation commands        | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                         |
+| `plan push`, `plan compile`                  | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.        |
+| `plan push`, `plan compile`                  | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`.     |
+| `plan push`, `plan compile`                  | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.      |
+| `plan status`                                | `server_rejected`                                                                                  |    1 | First Draft rejected the analysis status request with a validated non-authentication problem.          |
+| `plan status`                                | `status_unavailable`, `invalid_server_response`                                                    |    1 | The analysis read failed or violated its protocol.                                                     |
+| `plan compile`                               | `analysis_status_unavailable`, `invalid_analysis_status`, `analysis_status_rejected`               |    1 | The bounded analysis read failed, was invalid, or was rejected.                                        |
+| Analysis waits                               | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                    |
+| `plan compile`                               | `plan_not_valid`                                                                                   |    1 | Analysis completed without `valid`; `current` contains diagnostics and status.                         |
+| `plan compile`                               | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                     |
+| `plan compile --output`                      | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.              |
+| `plan compile --output`                      | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                            |
+| `plan compile`                               | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                   |
+| `plan compile`                               | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                    |
+| `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                  |
+| `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                |
+| `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                              |
+| Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`. |
+| Download commands                            | `invalid_output_path`                                                                              |    2 | The destination was not an absent path beneath an existing real directory.                             |
+| Download commands                            | `materialization_failed`                                                                           |    1 | The output raced or installation failed; direct Compile post-start errors include `current`.           |
