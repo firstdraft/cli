@@ -1,8 +1,8 @@
 # First Draft CLI
 
 firstdraft is the command-line client shared by First Draft agents and automation. It manages local Foundation Plan
-files, calls the versioned Service API, exposes reviewed analysis and GapSets, and coordinates Compilation plus
-private GitHub publication.
+files, calls the versioned Service API, exposes reviewed analysis and GapSets, materializes verified Compilations,
+and coordinates private GitHub publication.
 
 Trying First Draft as a tester? Start with the
 [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft), which installs a
@@ -13,7 +13,7 @@ compatible CLI and Skill together.
 - local Plan initialization, UUIDs, application keys, and source hashing;
 - conditional whole-document push and conflict reporting;
 - analysis polling and complete GapSet output;
-- Compile-and-publish orchestration;
+- direct Compile-and-materialize and private publish orchestration;
 - retained Compilation inspection and artifact download;
 - terminal output, exit status, and recovery contracts;
 - the dependency-free npm package; and

@@ -14,11 +14,17 @@ import {
   CompilationArtifactInvalidError,
   CompilationArtifactResponseInvalidError,
   CompilationArtifactUnavailableError,
+  CompilationCancelledError,
   CompilationChangedError,
+  CompilationFailedError,
+  CompilationLocalPlanChangedError,
+  CompilationLocalStateError,
   CompilationMaterializationError,
   CompilationNotSucceededError,
   CompilationNotPushedError,
   CompilationOutputPathError,
+  CompilationRequestOutcomeUnknownError,
+  CompilationStartRejectedError,
   CompilationStatusInvalidError,
   CompilationStatusUnavailableError,
   CompilationTimeoutError,
@@ -32,6 +38,7 @@ import {
   PlanCompileAnalysisUnavailableError,
   PlanCompilePushRejectedError,
   compilePlan,
+  compilePlanToDirectory,
 } from "./commands/plan-compile.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
@@ -92,7 +99,7 @@ Commands:
   init     Create a local empty Foundation Plan
   push     Send the local Foundation Plan to First Draft
   status   Read the current whole-graph analysis status
-  compile  Compile and publish the current Foundation Plan
+  compile  Compile the current Foundation Plan
 
 Options:
   -h, --help  Show help
@@ -173,18 +180,22 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
   firstdraft plan compile
+  firstdraft plan compile --output <absent-directory>
 
 Options:
-  -h, --help  Show help
+      --output <absent-directory>  Materialize the generated application here
+  -h, --help                       Show help
 
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
   FIRSTDRAFT_API_URL    Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. It then conditionally creates or
-replays the internal GitHub Publication lifecycle. Progress is written to
-stderr. Success prints only the validated private GitHub repository URL.
+and proceeds only when that analysis is valid. Without --output, it conditionally
+creates or replays the internal GitHub Publication lifecycle and prints the
+private repository URL. With --output, it starts one direct Compilation and
+atomically materializes the verified artifact into an absent directory without
+starting GitHub Publication. Progress is written to stderr.
 `;
 
 const COMPILATION_HELP = `First Draft CLI
@@ -312,6 +323,24 @@ const PLAN_COMPILE_ANALYSIS_REJECTED_DETAIL =
   "First Draft rejected the current analysis status request.";
 const PLAN_COMPILE_ANALYSIS_NOT_VALID_DETAIL =
   "The current Foundation Plan analysis is not valid. Inspect its status and diagnostics before compiling again.";
+const PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL =
+  "The local Foundation Plan changed after validation. Run 'firstdraft plan compile' again to submit the current bytes.";
+const PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL =
+  "A Compilation may have started, but its response could not be verified. Do not start another Compilation until the current Project is reconciled.";
+const PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL =
+  "First Draft rejected the direct Compilation request.";
+const PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL =
+  "Could not read the pinned Compilation status. The command stopped without following or starting another Compilation.";
+const PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL =
+  "First Draft returned an invalid Compilation status response. Retrying unchanged will not repair this protocol mismatch.";
+const PLAN_COMPILE_DIRECT_CHANGED_DETAIL =
+  "The pinned Compilation changed while being polled. The command stopped without downloading an artifact.";
+const PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL =
+  "The pinned Compilation is still processing after the bounded ten-minute wait.";
+const PLAN_COMPILE_DIRECT_FAILED_DETAIL =
+  "The pinned Compilation failed. No artifact was downloaded or materialized.";
+const PLAN_COMPILE_DIRECT_CANCELLED_DETAIL =
+  "The pinned Compilation was cancelled. No artifact was downloaded or materialized.";
 const PLAN_PUBLISH_INCOMPATIBLE_STATE_DETAIL =
   "The saved Foundation Plan ETag is incompatible with publication. No network request was made; reconcile the CLI and server contract.";
 const PLAN_PUBLISH_NOT_PUSHED_DETAIL =
@@ -394,6 +423,7 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof pushPlan} [planCompilePush]
  * @property {typeof readPlanStatus} [planCompileReadStatus]
  * @property {typeof import("./commands/plan-publish.js").publishPlan} [planCompilePublish]
+ * @property {typeof import("./commands/compilation.js").compileAndDownload} [planCompileDownload]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
  */
@@ -422,6 +452,7 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof pushPlan} [planCompilePush]
  * @property {typeof readPlanStatus} [planCompileReadStatus]
  * @property {typeof import("./commands/plan-publish.js").publishPlan} [planCompilePublish]
+ * @property {typeof import("./commands/compilation.js").compileAndDownload} [planCompileDownload]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
  */
@@ -435,7 +466,7 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  */
 
 /**
- * @typedef {Omit<CommandOptions, "cwd" | "createProjectId" | "createUuid" | "fileSystem" | "createTemporaryId" | "planStatusSleep" | "planStatusNow" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "apiUrl" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish"> & {cwd?: string, getCwd: () => string}} CompilationCommandOptions
+ * @typedef {Omit<CommandOptions, "cwd" | "createProjectId" | "createUuid" | "fileSystem" | "createTemporaryId" | "planStatusSleep" | "planStatusNow" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "apiUrl" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload"> & {cwd?: string, getCwd: () => string}} CompilationCommandOptions
  */
 
 /** @param {RunOptions} options */
@@ -463,6 +494,7 @@ export async function run({
   planCompilePush,
   planCompileReadStatus,
   planCompilePublish,
+  planCompileDownload,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
   apiToken = process.env.FIRSTDRAFT_API_TOKEN,
 }) {
@@ -494,9 +526,12 @@ export async function run({
       planCompileNow,
       planPublishSleep,
       planPublishNow,
+      compilationSleep,
+      compilationNow,
       planCompilePush,
       planCompileReadStatus,
       planCompilePublish,
+      planCompileDownload,
       apiUrl,
       apiToken,
     });
@@ -583,9 +618,12 @@ async function runPlan({
   planCompileNow,
   planPublishSleep,
   planPublishNow,
+  compilationSleep,
+  compilationNow,
   planCompilePush,
   planCompileReadStatus,
   planCompilePublish,
+  planCompileDownload,
   apiUrl,
   apiToken,
 }) {
@@ -644,9 +682,12 @@ async function runPlan({
       planCompileNow,
       planPublishSleep,
       planPublishNow,
+      compilationSleep,
+      compilationNow,
       planCompilePush,
       planCompileReadStatus,
       planCompilePublish,
+      planCompileDownload,
       apiUrl,
       apiToken,
     });
@@ -1445,7 +1486,7 @@ async function runPlanStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "apiUrl" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken">} options
  */
 async function runPlanCompile({
   argv,
@@ -1460,16 +1501,22 @@ async function runPlanCompile({
   planCompileNow,
   planPublishSleep,
   planPublishNow,
+  compilationSleep,
+  compilationNow,
   planCompilePush,
   planCompileReadStatus,
   planCompilePublish,
+  planCompileDownload,
   apiUrl,
   apiToken,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
-      options: { help: { type: "boolean", short: "h" } },
+      options: {
+        output: { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
       allowPositionals: false,
       strict: true,
       tokens: true,
@@ -1489,41 +1536,67 @@ async function runPlanCompile({
     return 0;
   }
 
+  const output = parsed.values.output;
+  if (output !== undefined && output.length === 0) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
   const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
   if (authorizedFetch === null) {
     writeAuthenticationRequired(stderr);
     return 1;
   }
 
-  let result;
   const reportProgress = createPlanCompileProgressReporter(stderr);
+  const shared = {
+    cwd,
+    apiUrl,
+    fetchFunction: authorizedFetch,
+    fileSystem: planPushFileSystem,
+    createTemporaryId,
+    createRequestSignal,
+    analysisSleep: planCompileSleep,
+    analysisNow: planCompileNow,
+    push: planCompilePush,
+    readStatus: planCompileReadStatus,
+    onProgress: reportProgress,
+  };
+  if (output !== undefined) {
+    try {
+      const result = await compilePlanToDirectory({
+        ...shared,
+        output,
+        compilationSleep,
+        compilationNow,
+        compile: planCompileDownload,
+      });
+      writeJson(stdout, result);
+      return 0;
+    } catch (error) {
+      return writePlanCompileError(stderr, error);
+    }
+  }
+
   try {
-    result = await compilePlan({
-      cwd,
-      apiUrl,
-      fetchFunction: authorizedFetch,
-      fileSystem: planPushFileSystem,
-      createTemporaryId,
-      createRequestSignal,
-      analysisSleep: planCompileSleep,
-      analysisNow: planCompileNow,
+    const result = await compilePlan({
+      ...shared,
       publicationSleep: planPublishSleep,
       publicationNow: planPublishNow,
-      push: planCompilePush,
-      readStatus: planCompileReadStatus,
       publish: planCompilePublish,
-      onProgress: reportProgress,
     });
+    const repository =
+      /** @type {NonNullable<typeof result.publication.repository>} */ (
+        result.publication.repository
+      );
+    stdout.write(`${repository.html_url}\n`);
+    return 0;
   } catch (error) {
     return writePlanCompileError(stderr, error);
   }
-
-  const repository =
-    /** @type {NonNullable<typeof result.publication.repository>} */ (
-      result.publication.repository
-    );
-  stdout.write(`${repository.html_url}\n`);
-  return 0;
 }
 
 /** @param {Writer} writer @param {unknown} error */
@@ -1667,6 +1740,166 @@ function writePlanCompileError(writer, error) {
       error: "plan_not_valid",
       detail: PLAN_COMPILE_ANALYSIS_NOT_VALID_DETAIL,
       current: error.current,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationLocalStateError) {
+    writeJson(writer, {
+      error: "invalid_configuration",
+      detail: PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL,
+    });
+    return 2;
+  }
+
+  if (error instanceof CompilationNotPushedError) {
+    writeJson(writer, {
+      error: "project_not_pushed",
+      detail: PLAN_COMPILE_NOT_PUSHED_DETAIL,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationLocalPlanChangedError) {
+    writeJson(writer, {
+      error: "local_plan_changed",
+      detail: PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationRequestOutcomeUnknownError) {
+    writeJson(writer, {
+      error: "request_outcome_unknown",
+      phase: "compilation",
+      detail: PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+    });
+    return 1;
+  }
+
+  if (
+    (error instanceof CompilationStartRejectedError ||
+      error instanceof CompilationStatusUnavailableError) &&
+    isAuthenticationProblem(error.status, error.response)
+  ) {
+    writeAuthenticationRequired(
+      writer,
+      error.status,
+      /** @type {Record<string, unknown>} */ (error.response),
+    );
+    return 1;
+  }
+
+  if (error instanceof CompilationStartRejectedError) {
+    writeJson(writer, {
+      error: "compilation_start_rejected",
+      detail: PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL,
+      status: error.status,
+      response: error.response,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationStatusUnavailableError) {
+    writeJson(writer, {
+      error: "compilation_status_unavailable",
+      detail: PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+      ...(error.response ? { response: error.response } : {}),
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationStatusInvalidError) {
+    writeJson(writer, {
+      error: "invalid_compilation_status",
+      detail: PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL,
+      status: error.status,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationChangedError) {
+    writeJson(writer, {
+      error: "compilation_changed",
+      detail: PLAN_COMPILE_DIRECT_CHANGED_DETAIL,
+      current: error.current,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationTimeoutError) {
+    writeJson(writer, {
+      error: "compilation_wait_timed_out",
+      detail: PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL,
+      current: error.current,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationFailedError) {
+    writeJson(writer, {
+      error: "compilation_failed",
+      detail: PLAN_COMPILE_DIRECT_FAILED_DETAIL,
+      current: error.current,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationCancelledError) {
+    writeJson(writer, {
+      error: "compilation_cancelled",
+      detail: PLAN_COMPILE_DIRECT_CANCELLED_DETAIL,
+      current: error.current,
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationArtifactUnavailableError) {
+    if (isAuthenticationProblem(error.status, error.response)) {
+      writeAuthenticationRequired(
+        writer,
+        error.status,
+        /** @type {Record<string, unknown>} */ (error.response),
+      );
+      return 1;
+    }
+    writeJson(writer, {
+      error: "artifact_unavailable",
+      detail: COMPILATION_ARTIFACT_UNAVAILABLE_DETAIL,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+      ...(error.response ? { response: error.response } : {}),
+    });
+    return 1;
+  }
+
+  if (
+    error instanceof CompilationArtifactResponseInvalidError ||
+    error instanceof CompilationArtifactInvalidError
+  ) {
+    writeJson(writer, {
+      error: "invalid_artifact",
+      detail: COMPILATION_ARTIFACT_INVALID_DETAIL,
+      ...(error instanceof CompilationArtifactResponseInvalidError
+        ? { status: error.status }
+        : {}),
+    });
+    return 1;
+  }
+
+  if (error instanceof CompilationOutputPathError) {
+    writeJson(writer, {
+      error: "invalid_output_path",
+      detail: COMPILATION_INVALID_OUTPUT_PATH_DETAIL,
+    });
+    return 2;
+  }
+
+  if (error instanceof CompilationMaterializationError) {
+    writeJson(writer, {
+      error: "materialization_failed",
+      detail: COMPILATION_MATERIALIZATION_FAILED_DETAIL,
     });
     return 1;
   }

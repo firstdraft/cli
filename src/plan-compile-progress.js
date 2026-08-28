@@ -27,7 +27,7 @@ const PUBLICATION_MESSAGES = new Map([
 /**
  * @typedef {object} CompilationProgress
  * @property {"compilation"} phase
- * @property {"waiting"} status
+ * @property {"waiting" | "succeeded"} status
  */
 
 /**
@@ -77,7 +77,11 @@ export function createPlanCompileProgressReporter(writer) {
     }
 
     if (progress.phase === "compilation") {
-      write("Compiling application...");
+      write(
+        progress.status === "waiting"
+          ? "Compiling application..."
+          : "Application compiled.",
+      );
       return;
     }
 

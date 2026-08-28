@@ -29,7 +29,7 @@ Commands:
   init     Create a local empty Foundation Plan
   push     Send the local Foundation Plan to First Draft
   status   Read the current whole-graph analysis status
-  compile  Compile and publish the current Foundation Plan
+  compile  Compile the current Foundation Plan
 
 Options:
   -h, --help  Show help

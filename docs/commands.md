@@ -4,10 +4,10 @@ This page owns the detailed public semantics of the current command surface. Run
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
 The current `0.2.x` source line contains the auditable command shell, local Foundation Plan initialization, local
-application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling,
-compile-and-publish orchestration, and read-only retained-Compilation download. CLI `0.2.x` requires the service's
-`0.3.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel semantics and
-[release history](release-history.md) for the transition from prereleases.
+application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.2.x`
+requires the service's `0.3.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
+semantics and [release history](release-history.md) for the transition from prereleases.
 
 ## Command map
 
@@ -18,7 +18,7 @@ compile-and-publish orchestration, and read-only retained-Compilation download. 
 | `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities    |
 | `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                  |
 | `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis          |
-| `firstdraft plan compile`             | Yes     | Push, analyze, compile, and publish the current Plan       |
+| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize or publish              |
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                       |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation   |
 
@@ -131,34 +131,60 @@ repeats only validated `processing` responses and stops on its first failed read
 a bounded number of times because the command sends only `GET` requests. See
 [read-only failures](errors.md#read-only-status-failures) if the problem persists.
 
-## Compile and publish the current Plan
+## Compile the current Plan
 
-When the candidate is ready, run:
+To compile into a local application directory, run:
 
 ```sh
-firstdraft plan compile
+firstdraft plan compile --output ./application
 ```
 
-`plan compile` is the single terminal action. It first pushes the exact current bytes in
+Both `plan compile` modes first push the exact current bytes in
 `.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and saves the accepted ETag using the same
 contract as `plan push`. It then waits up to two minutes for an analysis whose graph version and
 `head_source_sha256` exactly match that accepted push, polling past a terminal result retained for an older Head.
 Invalid JSON, schema diagnostics, semantic diagnostics, a failed analysis, a superseded analysis, or a recurring
 diagnostic stop the command with structured output; no Compilation or Publication is requested.
 
-Only a `valid` analysis proceeds to the internal GitHub Publication lifecycle. Invoking `plan compile` is the
-authorization to request that lifecycle. Immediately before its conditional mutation, the CLI re-reads the local
-Plan and requires its exact bytes to match the accepted Head, so bytes changed after analysis cannot be published.
-It extracts the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and sends that complete
-ETag in `If-Match`.
+Only a `valid` analysis proceeds to the selected completion mode. Immediately before either conditional mutation,
+the CLI re-reads the local Plan and requires its exact bytes and saved state to match the accepted Head. It extracts
+the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and sends that complete ETag in
+`If-Match`.
 
-The command writes stable human-readable progress to stderr, with every line prefixed by `First Draft:`. It reports
-analysis, compilation completion or terminal failure or cancellation, the current GitHub phase, and an allowlisted
-reason, retry count, and exact UTC retry time when a GitHub preflight check is delayed. A retained retry with no next
-time is reported as paused and requiring operator recovery. Progress never includes IDs, hashes, repository names or
-URLs, raw server projections, local paths, or environment values. Success writes exactly the validated private
-GitHub repository URL plus a newline to stdout. If the command fails after progress has begun, its structured JSON
-error envelope is the final stderr document after the progress lines.
+### Materialize a direct Compilation
+
+With `--output`, the CLI requires an explicit absent destination beneath an existing real directory. It validates
+that destination before pushing the Plan, checks it again after analysis, and never overwrites, merges into, or
+repairs an existing path.
+
+After valid analysis, the CLI requests one Compilation for that exact reviewed Head and never starts GitHub
+Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
+Compiler release, and target; polls only that retained Compilation for up to ten minutes; downloads its exact
+artifact; and applies the same integrity and atomic materialization contract as `compilation download`. An ambiguous
+Compilation start is not retried automatically.
+
+Success writes one JSON object to stdout containing the validated Project, Compilation, and absolute output path.
+The installed directory contains exactly the artifact files and modes; the CLI does not add a Git repository, run a
+formatter, or repair generated source. When the output is nested inside another Git worktree, initialize the
+application as its own repository before running generated checks that inspect Git; otherwise Git resolves to the
+parent worktree. Progress on stderr reports analysis and Compilation only.
+
+### Publish through GitHub
+
+Without `--output`, the existing GitHub Publication journey remains unchanged:
+
+```sh
+firstdraft plan compile
+```
+
+Invoking this form authorizes the internal GitHub Publication lifecycle. The command writes stable human-readable
+progress to stderr, with every line prefixed by `First Draft:`. It reports analysis, Compilation completion or
+terminal failure or cancellation, the current GitHub phase, and an allowlisted reason, retry count, and exact UTC
+retry time when a GitHub preflight check is delayed. A retained retry with no next time is reported as paused and
+requiring operator recovery. Progress never includes IDs, hashes, repository names or URLs, raw server projections,
+local paths, or environment values. Success writes exactly the validated private GitHub repository URL plus a
+newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
+stderr document after the progress lines.
 
 The closed API `0.3.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
@@ -177,14 +203,14 @@ identity, and repository identity. Do not run concurrent Compile commands; use t
 [publication recovery procedure](errors.md#publication-recovery) after an invocation exits.
 
 This release cannot repoint a Project's Publication to a later accepted Head. The public CLI therefore has no
-`plan publish` command and no local-start `plan compile --output` mode. It retains lower-level Compilation commands
-for operational callers that acquire an ID separately, but they are intentionally not a continuation of the
-URL-only `plan compile` journey.
+`plan publish` command. Direct local Compilation and GitHub Publication are separate completion modes after the same
+exact Plan push and valid Analysis.
 
 ## Inspect a retained Compilation
 
 These lower-level commands are for callers that already hold a retained Compilation ID from authenticated API
-metadata or operational tooling; `plan compile` prints only the final repository URL:
+metadata or operational tooling. The no-output `plan compile` form prints only the final repository URL, while
+`plan compile --output` waits for and downloads its own direct Compilation:
 
 ```sh
 firstdraft compilation status 01900000-0000-7000-8000-000000000001

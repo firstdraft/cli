@@ -483,18 +483,16 @@ async function exercisePackedCompilation(projectDirectory) {
   const seen = {
     plan: false,
     analysis: false,
-    publication: false,
+    publication: 0,
+    compilationStarts: 0,
     status: false,
     artifact: false,
-    post: false,
   };
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const requestBody = Buffer.concat(chunks);
     assert.equal(request.headers.authorization, `Bearer ${apiToken}`);
-    if (request.method === "POST") seen.post = true;
-
     if (
       request.method === "PUT" &&
       request.url === `/v1/projects/${projectId}/foundation-plan`
@@ -531,8 +529,18 @@ async function exercisePackedCompilation(projectDirectory) {
     ) {
       assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
       assert.equal(requestBody.byteLength, 0);
-      seen.publication = true;
+      seen.publication += 1;
       respondJson(response, 201, publication);
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      request.url === `/v1/projects/${projectId}/compilations`
+    ) {
+      assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
+      assert.equal(requestBody.byteLength, 0);
+      seen.compilationStarts += 1;
+      respondJson(response, 202, compilation, { Location: statusPath });
       return;
     }
     if (request.method === "GET" && request.url === statusPath) {
@@ -591,6 +599,30 @@ First Draft: Application compiled.
 First Draft: GitHub publication complete.
 `,
     });
+    assert.equal(seen.publication, 1);
+    assert.equal(seen.compilationStarts, 0);
+
+    const directOutput = path.join(projectDirectory, "application");
+    const direct = await spawnPackedCliAsync(
+      ["plan", "compile", "--output", directOutput],
+      projectDirectory,
+    );
+    assert.equal(direct.status, 0);
+    assert.equal(
+      direct.stderr,
+      `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+`,
+    );
+    assert.equal(JSON.parse(direct.stdout).output.path, directOutput);
+    assert.equal(seen.publication, 1);
+    assert.equal(seen.compilationStarts, 1);
+    assert.equal(
+      readFileSync(path.join(directOutput, "app/models/movie.rb"), "utf8"),
+      contents.toString("utf8"),
+    );
 
     const status = await spawnPackedCliAsync(
       ["compilation", "status", compilationId],
@@ -623,10 +655,10 @@ First Draft: GitHub publication complete.
     assert.deepEqual(seen, {
       plan: true,
       analysis: true,
-      publication: true,
+      publication: 1,
+      compilationStarts: 1,
       status: true,
       artifact: true,
-      post: false,
     });
   } finally {
     await new Promise(
