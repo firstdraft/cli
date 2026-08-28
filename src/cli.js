@@ -23,6 +23,7 @@ import {
   CompilationNotSucceededError,
   CompilationNotPushedError,
   CompilationOutputPathError,
+  CompilationRetainedError,
   CompilationRequestOutcomeUnknownError,
   CompilationStartRejectedError,
   CompilationStatusInvalidError,
@@ -326,13 +327,13 @@ const PLAN_COMPILE_ANALYSIS_NOT_VALID_DETAIL =
 const PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL =
   "The local Foundation Plan changed after validation. Run 'firstdraft plan compile' again to submit the current bytes.";
 const PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "A Compilation may have started, but its response could not be verified. Do not start another Compilation until the current Project is reconciled.";
+  "A Compilation may have started, but its response could not be verified. Do not rerun 'firstdraft plan compile --output' or start another Compilation until the current Project is reconciled.";
 const PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL =
   "First Draft rejected the direct Compilation request.";
 const PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL =
-  "Could not read the pinned Compilation status. The command stopped without following or starting another Compilation.";
+  "Could not read the retained Compilation status. Use current.compilation.id with 'firstdraft compilation status'; do not start another Compilation.";
 const PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL =
-  "First Draft returned an invalid Compilation status response. Retrying unchanged will not repair this protocol mismatch.";
+  "First Draft returned an invalid status for the retained Compilation. Preserve current.compilation.id for contract reconciliation; do not start another Compilation.";
 const PLAN_COMPILE_DIRECT_CHANGED_DETAIL =
   "The pinned Compilation changed while being polled. The command stopped without downloading an artifact.";
 const PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL =
@@ -386,6 +387,12 @@ const COMPILATION_ARTIFACT_INVALID_DETAIL =
   "The downloaded Compilation artifact did not satisfy the integrity contract. No files were materialized.";
 const COMPILATION_MATERIALIZATION_FAILED_DETAIL =
   "The validated Compilation artifact could not be materialized at the requested absent output path.";
+const PLAN_COMPILE_DIRECT_ARTIFACT_UNAVAILABLE_DETAIL =
+  "Could not download the retained Compilation artifact. Use current.compilation.id with 'firstdraft compilation download'; do not start another Compilation.";
+const PLAN_COMPILE_DIRECT_ARTIFACT_INVALID_DETAIL =
+  "The retained Compilation artifact did not satisfy the integrity contract. Preserve current.compilation.id for reconciliation; do not start another Compilation.";
+const PLAN_COMPILE_DIRECT_MATERIALIZATION_FAILED_DETAIL =
+  "The retained Compilation artifact was validated but could not be materialized. Use current.compilation.id with 'firstdraft compilation download' after repairing the output path; do not start another Compilation.";
 const COMPILATION_INVALID_OUTPUT_PATH_DETAIL =
   "The compilation output path must be absent beneath an existing real directory. No network request was made.";
 const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
@@ -1744,7 +1751,12 @@ function writePlanCompileError(writer, error) {
     return 1;
   }
 
-  if (error instanceof CompilationLocalStateError) {
+  const retainedError =
+    error instanceof CompilationRetainedError ? error : null;
+  const compilationError = retainedError?.error ?? error;
+  const retainedCompilation = retainedError?.current;
+
+  if (compilationError instanceof CompilationLocalStateError) {
     writeJson(writer, {
       error: "invalid_configuration",
       detail: PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL,
@@ -1752,7 +1764,7 @@ function writePlanCompileError(writer, error) {
     return 2;
   }
 
-  if (error instanceof CompilationNotPushedError) {
+  if (compilationError instanceof CompilationNotPushedError) {
     writeJson(writer, {
       error: "project_not_pushed",
       detail: PLAN_COMPILE_NOT_PUSHED_DETAIL,
@@ -1760,7 +1772,7 @@ function writePlanCompileError(writer, error) {
     return 1;
   }
 
-  if (error instanceof CompilationLocalPlanChangedError) {
+  if (compilationError instanceof CompilationLocalPlanChangedError) {
     writeJson(writer, {
       error: "local_plan_changed",
       detail: PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL,
@@ -1768,127 +1780,151 @@ function writePlanCompileError(writer, error) {
     return 1;
   }
 
-  if (error instanceof CompilationRequestOutcomeUnknownError) {
+  if (compilationError instanceof CompilationRequestOutcomeUnknownError) {
     writeJson(writer, {
       error: "request_outcome_unknown",
       phase: "compilation",
       detail: PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL,
-      ...(typeof error.status === "number" ? { status: error.status } : {}),
-    });
-    return 1;
-  }
-
-  if (
-    (error instanceof CompilationStartRejectedError ||
-      error instanceof CompilationStatusUnavailableError) &&
-    isAuthenticationProblem(error.status, error.response)
-  ) {
-    writeAuthenticationRequired(
-      writer,
-      error.status,
-      /** @type {Record<string, unknown>} */ (error.response),
-    );
-    return 1;
-  }
-
-  if (error instanceof CompilationStartRejectedError) {
-    writeJson(writer, {
-      error: "compilation_start_rejected",
-      detail: PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL,
-      status: error.status,
-      response: error.response,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationStatusUnavailableError) {
-    writeJson(writer, {
-      error: "compilation_status_unavailable",
-      detail: PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL,
-      ...(typeof error.status === "number" ? { status: error.status } : {}),
-      ...(error.response ? { response: error.response } : {}),
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationStatusInvalidError) {
-    writeJson(writer, {
-      error: "invalid_compilation_status",
-      detail: PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL,
-      status: error.status,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationChangedError) {
-    writeJson(writer, {
-      error: "compilation_changed",
-      detail: PLAN_COMPILE_DIRECT_CHANGED_DETAIL,
-      current: error.current,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationTimeoutError) {
-    writeJson(writer, {
-      error: "compilation_wait_timed_out",
-      detail: PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL,
-      current: error.current,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationFailedError) {
-    writeJson(writer, {
-      error: "compilation_failed",
-      detail: PLAN_COMPILE_DIRECT_FAILED_DETAIL,
-      current: error.current,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationCancelledError) {
-    writeJson(writer, {
-      error: "compilation_cancelled",
-      detail: PLAN_COMPILE_DIRECT_CANCELLED_DETAIL,
-      current: error.current,
-    });
-    return 1;
-  }
-
-  if (error instanceof CompilationArtifactUnavailableError) {
-    if (isAuthenticationProblem(error.status, error.response)) {
-      writeAuthenticationRequired(
-        writer,
-        error.status,
-        /** @type {Record<string, unknown>} */ (error.response),
-      );
-      return 1;
-    }
-    writeJson(writer, {
-      error: "artifact_unavailable",
-      detail: COMPILATION_ARTIFACT_UNAVAILABLE_DETAIL,
-      ...(typeof error.status === "number" ? { status: error.status } : {}),
-      ...(error.response ? { response: error.response } : {}),
-    });
-    return 1;
-  }
-
-  if (
-    error instanceof CompilationArtifactResponseInvalidError ||
-    error instanceof CompilationArtifactInvalidError
-  ) {
-    writeJson(writer, {
-      error: "invalid_artifact",
-      detail: COMPILATION_ARTIFACT_INVALID_DETAIL,
-      ...(error instanceof CompilationArtifactResponseInvalidError
-        ? { status: error.status }
+      ...(typeof compilationError.status === "number"
+        ? { status: compilationError.status }
+        : {}),
+      ...(compilationError.response
+        ? { response: compilationError.response }
         : {}),
     });
     return 1;
   }
 
-  if (error instanceof CompilationOutputPathError) {
+  if (
+    (compilationError instanceof CompilationStartRejectedError ||
+      compilationError instanceof CompilationStatusUnavailableError) &&
+    isAuthenticationProblem(compilationError.status, compilationError.response)
+  ) {
+    writeAuthenticationRequired(
+      writer,
+      compilationError.status,
+      /** @type {Record<string, unknown>} */ (compilationError.response),
+      retainedCompilation,
+    );
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationStartRejectedError) {
+    writeJson(writer, {
+      error: "compilation_start_rejected",
+      detail: PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL,
+      status: compilationError.status,
+      response: compilationError.response,
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationStatusUnavailableError) {
+    writeJson(writer, {
+      error: "compilation_status_unavailable",
+      detail: PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL,
+      ...(typeof compilationError.status === "number"
+        ? { status: compilationError.status }
+        : {}),
+      ...(compilationError.response
+        ? { response: compilationError.response }
+        : {}),
+      ...(retainedCompilation ? { current: retainedCompilation } : {}),
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationStatusInvalidError) {
+    writeJson(writer, {
+      error: "invalid_compilation_status",
+      detail: PLAN_COMPILE_DIRECT_STATUS_INVALID_DETAIL,
+      status: compilationError.status,
+      ...(retainedCompilation ? { current: retainedCompilation } : {}),
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationChangedError) {
+    writeJson(writer, {
+      error: "compilation_changed",
+      detail: PLAN_COMPILE_DIRECT_CHANGED_DETAIL,
+      current: compilationError.current,
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationTimeoutError) {
+    writeJson(writer, {
+      error: "compilation_wait_timed_out",
+      detail: PLAN_COMPILE_DIRECT_TIMEOUT_DETAIL,
+      current: compilationError.current,
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationFailedError) {
+    writeJson(writer, {
+      error: "compilation_failed",
+      detail: PLAN_COMPILE_DIRECT_FAILED_DETAIL,
+      current: compilationError.current,
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationCancelledError) {
+    writeJson(writer, {
+      error: "compilation_cancelled",
+      detail: PLAN_COMPILE_DIRECT_CANCELLED_DETAIL,
+      current: compilationError.current,
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationArtifactUnavailableError) {
+    if (
+      isAuthenticationProblem(
+        compilationError.status,
+        compilationError.response,
+      )
+    ) {
+      writeAuthenticationRequired(
+        writer,
+        compilationError.status,
+        /** @type {Record<string, unknown>} */ (compilationError.response),
+        retainedCompilation,
+      );
+      return 1;
+    }
+    writeJson(writer, {
+      error: "artifact_unavailable",
+      detail: PLAN_COMPILE_DIRECT_ARTIFACT_UNAVAILABLE_DETAIL,
+      ...(typeof compilationError.status === "number"
+        ? { status: compilationError.status }
+        : {}),
+      ...(compilationError.response
+        ? { response: compilationError.response }
+        : {}),
+      ...(retainedCompilation ? { current: retainedCompilation } : {}),
+    });
+    return 1;
+  }
+
+  if (
+    compilationError instanceof CompilationArtifactResponseInvalidError ||
+    compilationError instanceof CompilationArtifactInvalidError
+  ) {
+    writeJson(writer, {
+      error: "invalid_artifact",
+      detail: PLAN_COMPILE_DIRECT_ARTIFACT_INVALID_DETAIL,
+      ...(compilationError instanceof CompilationArtifactResponseInvalidError
+        ? { status: compilationError.status }
+        : {}),
+      ...(retainedCompilation ? { current: retainedCompilation } : {}),
+    });
+    return 1;
+  }
+
+  if (compilationError instanceof CompilationOutputPathError) {
     writeJson(writer, {
       error: "invalid_output_path",
       detail: COMPILATION_INVALID_OUTPUT_PATH_DETAIL,
@@ -1896,10 +1932,11 @@ function writePlanCompileError(writer, error) {
     return 2;
   }
 
-  if (error instanceof CompilationMaterializationError) {
+  if (compilationError instanceof CompilationMaterializationError) {
     writeJson(writer, {
       error: "materialization_failed",
-      detail: COMPILATION_MATERIALIZATION_FAILED_DETAIL,
+      detail: PLAN_COMPILE_DIRECT_MATERIALIZATION_FAILED_DETAIL,
+      ...(retainedCompilation ? { current: retainedCompilation } : {}),
     });
     return 1;
   }
@@ -2168,13 +2205,15 @@ function writeJson(writer, value) {
  * @param {Writer} writer
  * @param {number} [status]
  * @param {Record<string, unknown>} [response]
+ * @param {import("./commands/compilation.js").CompilationResponse} [current]
  */
-function writeAuthenticationRequired(writer, status, response) {
+function writeAuthenticationRequired(writer, status, response, current) {
   writeJson(writer, {
     error: "authentication_required",
     detail: AUTHENTICATION_REQUIRED_DETAIL,
     ...(status === undefined ? {} : { status }),
     ...(response === undefined ? {} : { response }),
+    ...(current === undefined ? {} : { current }),
   });
 }
 

@@ -385,6 +385,237 @@ test("plan compile --output never retries an ambiguous Compilation start", async
   assert.equal(existsSync(path.join(cwd, "application")), false);
 });
 
+test("direct Compilation start maps rejection and ambiguity without retrying", async (context) => {
+  const cases = [
+    {
+      name: "validated 408 problem",
+      response: problemResponse(408, "request_timeout", "Try later."),
+      error: "request_outcome_unknown",
+      status: 408,
+      responseCode: "request_timeout",
+    },
+    {
+      name: "validated 503 problem",
+      response: problemResponse(503, "service_unavailable", "Try later."),
+      error: "request_outcome_unknown",
+      status: 503,
+      responseCode: "service_unavailable",
+    },
+    {
+      name: "unvalidated 503 body",
+      response: jsonResponse({ secret: "start-response-canary" }, 503),
+      error: "request_outcome_unknown",
+      status: 503,
+    },
+    {
+      name: "authentication rejection",
+      response: problemResponse(
+        401,
+        "authentication_required",
+        "Provide a token.",
+      ),
+      error: "authentication_required",
+      status: 401,
+      responseCode: "authentication_required",
+    },
+    {
+      name: "validated client rejection",
+      response: problemResponse(422, "compilation_rejected", "Fix the Plan."),
+      error: "compilation_start_rejected",
+      status: 422,
+      responseCode: "compilation_rejected",
+    },
+  ];
+
+  for (const example of cases) {
+    const cwd = localDirectory(context, PLAN_SOURCE, {
+      api_url: "https://api.example.test",
+      foundation_plan_etag: ETAG,
+    });
+    /** @type {unknown[]} */
+    const calls = [];
+    const result = await invoke(
+      ["plan", "compile", "--output", "./application"],
+      {
+        cwd,
+        planCompilePush: successfulPush,
+        planCompileReadStatus: async () => ({
+          status: 200,
+          body: analysisBody("valid"),
+        }),
+        fetchFunction: sequenceFetch([example.response], calls),
+      },
+    );
+
+    const envelope = errorEnvelope(result.stderr);
+    assert.equal(result.status, 1, example.name);
+    assert.equal(result.stdout, "", example.name);
+    assert.equal(
+      envelope.error,
+      example.error,
+      `${example.name}: ${JSON.stringify(envelope)}`,
+    );
+    assert.equal(envelope.status, example.status, example.name);
+    assert.equal(calls.length, 1, example.name);
+    if (example.error === "request_outcome_unknown") {
+      assert.equal(envelope.phase, "compilation", example.name);
+    }
+    if (example.responseCode === undefined) {
+      assert.equal("response" in envelope, false, example.name);
+    } else {
+      assert.equal(envelope.response.code, example.responseCode, example.name);
+    }
+    assert.doesNotMatch(
+      result.stderr,
+      /start-response-canary|fd_[a-z]+/,
+      example.name,
+    );
+    assert.equal(existsSync(path.join(cwd, "application")), false);
+  }
+});
+
+test("post-start failures retain one recoverable Compilation identity", async (context) => {
+  const artifact = directArtifactFixture();
+  const queued = directCompilationBody("queued");
+  const succeeded = directCompilationBody("succeeded", artifact);
+  /** @type {{name: string, initial: ReturnType<typeof directCompilationBody>, response: (output: string) => Promise<Response>, error: string, command?: string, status: string}[]} */
+  const cases = [
+    {
+      name: "status unavailable",
+      initial: queued,
+      response: async () =>
+        problemResponse(503, "status_unavailable", "Try later."),
+      error: "compilation_status_unavailable",
+      command: "compilation status",
+      status: "queued",
+    },
+    {
+      name: "status invalid",
+      initial: queued,
+      response: async () => jsonResponse({ secret: "status-response-canary" }),
+      error: "invalid_compilation_status",
+      command: "current.compilation.id",
+      status: "queued",
+    },
+    {
+      name: "status authentication",
+      initial: queued,
+      response: async () =>
+        problemResponse(401, "authentication_required", "Provide a token."),
+      error: "authentication_required",
+      status: "queued",
+    },
+    {
+      name: "artifact unavailable",
+      initial: succeeded,
+      response: async () =>
+        problemResponse(503, "artifact_unavailable", "Try later."),
+      error: "artifact_unavailable",
+      command: "compilation download",
+      status: "succeeded",
+    },
+    {
+      name: "artifact authentication",
+      initial: succeeded,
+      response: async () =>
+        problemResponse(401, "authentication_required", "Provide a token."),
+      error: "authentication_required",
+      status: "succeeded",
+    },
+    {
+      name: "artifact invalid",
+      initial: succeeded,
+      response: async () =>
+        new Response(artifact.source, {
+          status: 200,
+          headers: {
+            "Content-Type": ARTIFACT_MEDIA_TYPE,
+            "Content-Length": String(artifact.source.byteLength),
+            ETag: `"sha256:${artifact.sha256}"`,
+          },
+        }),
+      error: "invalid_artifact",
+      command: "current.compilation.id",
+      status: "succeeded",
+    },
+    {
+      name: "materialization failure",
+      initial: succeeded,
+      response: async (output) => {
+        mkdirSync(output);
+        return new Response(artifact.source, {
+          status: 200,
+          headers: {
+            "Content-Type": ARTIFACT_MEDIA_TYPE,
+            "Content-Length": String(artifact.source.byteLength),
+            "Cache-Control": "no-store, no-transform",
+            ETag: `"sha256:${artifact.sha256}"`,
+          },
+        });
+      },
+      error: "materialization_failed",
+      command: "compilation download",
+      status: "succeeded",
+    },
+  ];
+
+  for (const example of cases) {
+    const cwd = localDirectory(context, PLAN_SOURCE, {
+      api_url: "https://api.example.test",
+      foundation_plan_etag: ETAG,
+    });
+    const output = path.join(cwd, "application");
+    /** @type {unknown[]} */
+    const calls = [];
+    const next = () => example.response(output);
+    const result = await invoke(
+      ["plan", "compile", "--output", "./application"],
+      {
+        cwd,
+        planCompilePush: successfulPush,
+        planCompileReadStatus: async () => ({
+          status: 200,
+          body: analysisBody("valid"),
+        }),
+        fetchFunction: sequenceFetch(
+          [
+            jsonResponse(example.initial, 202, {
+              Location: directCompilationPath(),
+            }),
+            next,
+          ],
+          calls,
+        ),
+        compilationSleep: async () => {},
+      },
+    );
+
+    const envelope = errorEnvelope(result.stderr);
+    assert.equal(result.status, 1, example.name);
+    assert.equal(result.stdout, "", example.name);
+    assert.equal(
+      envelope.error,
+      example.error,
+      `${example.name}: ${JSON.stringify(envelope)}`,
+    );
+    assert.equal(envelope.current.compilation.id, COMPILATION_ID, example.name);
+    assert.equal(
+      envelope.current.compilation.status,
+      example.status,
+      example.name,
+    );
+    assert.equal(calls.length, 2, example.name);
+    if (example.command !== undefined) {
+      assert.match(envelope.detail, new RegExp(example.command), example.name);
+    }
+    assert.doesNotMatch(
+      result.stderr,
+      /status-response-canary|fd_[a-z]+/,
+      example.name,
+    );
+  }
+});
+
 test("plan compile waits past a terminal analysis for the prior graph version", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",

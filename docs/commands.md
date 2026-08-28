@@ -161,7 +161,9 @@ After valid analysis, the CLI requests one Compilation for that exact reviewed H
 Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
 Compiler release, and target; polls only that retained Compilation for up to ten minutes; downloads its exact
 artifact; and applies the same integrity and atomic materialization contract as `compilation download`. An ambiguous
-Compilation start is not retried automatically.
+Compilation start is not retried automatically. After a validated `202`, later status, artifact, authentication,
+and materialization failures retain the last validated Compilation projection so the caller can recover by ID
+without starting duplicate work. Follow the [direct Compilation recovery procedure](errors.md#direct-compilation-recovery).
 
 Success writes one JSON object to stdout containing the validated Project, Compilation, and absolute output path.
 The installed directory contains exactly the artifact files and modes; the CLI does not add a Git repository, run a

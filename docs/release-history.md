@@ -30,3 +30,11 @@ the living [release policy and runbook](../RELEASING.md).
 The alpha versions remain immutable registry history but, as of the August 12 observation, neither distribution
 channel selected them. Protected tag `v0.1.0` and package version `0.1.0` were consumed and immutable. Preparing
 source or documentation does not mutate either dist-tag.
+
+## 0.2.0 candidate publication
+
+- On August 27, 2026, protected tag `v0.2.0` published ordinary version `0.2.0` under `next`; `latest` remained
+  `0.1.0`. The candidate established compatibility with API contract `0.3.x` but did not displace the separately
+  promoted stable release.
+- Package version `0.2.0` and protected tag `v0.2.0` are consumed and immutable. A backward-compatible addition to
+  the `0.2.x` line therefore requires a higher patch version rather than reusing those identities.
