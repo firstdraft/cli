@@ -1,84 +1,106 @@
 # First Draft CLI
 
-`firstdraft` is the command-line client for First Draft. It helps agents author and review
-Foundation Plans with their users, then submit a valid Plan for the current bounded compilation and private GitHub
-publication journey.
+firstdraft is the command-line client shared by First Draft agents and automation. It manages local Foundation Plan
+files, calls the versioned Service API, exposes reviewed analysis and GapSets, and coordinates Compilation plus
+private GitHub publication.
 
-The current `0.2.x` source line includes local Plan initialization, application-key and UUID generation, conditional
-whole-document push, whole-graph analysis polling, compile-and-publish orchestration, and read-only retained
-Compilation download. Analysis status exposes the complete reviewed GapSet before Compile. Remote commands require
-a compatible First Draft service and are intended for coordinated trials; publishing this CLI does not make the
-wider service generally available.
+Trying First Draft as a tester? Start with the
+[Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft), which installs a
+compatible CLI and Skill together.
 
-## Install
+## What this repository owns
 
-Running the CLI requires Node.js 22.0.0 or newer. Install the stable release selected by npm's `latest` dist-tag:
+- local Plan initialization, UUIDs, application keys, and source hashing;
+- conditional whole-document push and conflict reporting;
+- analysis polling and complete GapSet output;
+- Compile-and-publish orchestration;
+- retained Compilation inspection and artifact download;
+- terminal output, exit status, and recovery contracts;
+- the dependency-free npm package; and
+- package provenance and release promotion.
+
+The Service owns Foundation Plan meaning and server-side lifecycle. Skills own the agent conversation. This
+repository owns the exact command and transport behavior between them.
+
+## Start with the right document
+
+| Task                                 | Read first                                                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Change the CLI                       | [Agent instructions](https://github.com/firstdraft/cli/blob/main/AGENTS.md), then [documentation map](docs/README.md) |
+| Find a command or output contract    | [Command reference](docs/commands.md)                                                                                 |
+| Interpret an error or recover safely | [Errors and recovery](docs/errors.md)                                                                                 |
+| Prepare or promote a package         | [Release runbook](RELEASING.md)                                                                                       |
+| Inspect dated package observations   | [Release history](docs/release-history.md)                                                                            |
+| Report a vulnerability               | [Security policy](SECURITY.md)                                                                                        |
+
+Run firstdraft --help or a command group's --help for concise terminal syntax.
+
+## Repository layout
+
+| Path     | Responsibility                                                |
+| -------- | ------------------------------------------------------------- |
+| bin/     | Published executable entrypoint                               |
+| src/     | Commands, API client, local Plan state, and output contracts  |
+| test/    | Command, protocol, recovery, and package tests                |
+| scripts/ | Test runner and package allowlist/smoke checks                |
+| docs/    | Command, error, release-history, and maintainer documentation |
+
+## Development
+
+Development uses the Node.js and npm versions pinned in `.tool-versions`. Follow
+[Work on the repository](docs/README.md#work-on-the-repository) for the complete install, audit, and check sequence.
+
+```sh
+npm run check
+```
+
+The complete check runs type checking, ESLint, Prettier verification, tests, package allowlist validation, and a
+smoke installation of the packed tarball. Use the narrower scripts while iterating:
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run pack:check
+npm run pack:smoke
+```
+
+To exercise the checkout directly:
+
+```sh
+node bin/firstdraft.js --help
+```
+
+Remote commands read FIRSTDRAFT_API_TOKEN from the environment. See
+[Push a Foundation Plan](docs/commands.md#push-a-foundation-plan) for FIRSTDRAFT_API_URL and origin pinning. Keep
+tokens out of arguments, shell history, fixtures, snapshots, and logs.
+
+## Package contract
+
+The published CLI supports Node.js 22 or newer. Direct automation callers can install the stable package with:
 
 ```sh
 npm install --global @firstdraft.com/cli
-firstdraft --version
 ```
 
-The package installs the `firstdraft` executable. Pin an exact compatible version, such as
-`@firstdraft.com/cli@0.1.0`, when a repeatable installation matters. Candidate publication under `next` is not stable
-release completion and does not displace the supported `latest` release before promotion; see the
-[release policy](RELEASING.md) and [dated release history](docs/release-history.md).
+Pin an exact compatible version when a repeatable installation matters; [RELEASING.md](RELEASING.md) owns channel
+and promotion meaning.
 
-## Shortest current journey
+The published package:
 
-From the project that the Foundation Plan describes:
+- installs the firstdraft executable;
+- runs reviewed JavaScript source directly;
+- has no runtime dependencies or install scripts;
+- performs no telemetry, update check, or network request unless the caller invokes an API command;
+- reads Bearer credentials only from the environment; and
+- carries npm provenance linking registry bytes to its GitHub workflow and commit.
 
-```sh
-firstdraft plan init --name "Oscar Party"
-```
+Inspect the packed file list whenever a source or documentation path moves. The public documentation graph,
+including the release runbook and dated release history, ships with the package. `AGENTS.md` and the source-only
+`release/compatibility.json` do not.
 
-Edit `.firstdraft/foundation-plan.json`, preserving each authored subject's UUID across renames and moves that do not
-replace the concept. Generate new subject identities locally as needed:
+## Release boundary
 
-```sh
-firstdraft generate uuid
-```
-
-Provide an API token only through the environment, then submit, analyze, compile, and publish the exact current Plan:
-
-```sh
-export FIRSTDRAFT_API_TOKEN="your-token"
-firstdraft plan compile
-```
-
-Invoking `plan compile` authorizes the internal GitHub Publication lifecycle. It proceeds only after the accepted
-Plan's analysis is valid, writes allowlisted progress to standard error, and on success writes only the validated
-private GitHub repository URL to standard output. The current Publication is a Project singleton and cannot be
-repointed to a later accepted Head. Read the [complete command contract](docs/commands.md#compile-and-publish-the-current-plan)
-before using it and follow [phase-specific recovery](docs/errors.md#ambiguous-mutations) after an ambiguous mutation.
-
-To review analysis before that terminal action, use `firstdraft plan push` followed by
-`firstdraft plan status --wait`. See [Command reference](docs/commands.md) for all supported commands, flags, output
-contracts, and retained-Compilation operations.
-
-## Trust model
-
-- The published CLI runs the reviewed JavaScript source directly, without generated or bundled code.
-- It has no runtime dependencies, install scripts, telemetry, update checks, or network activity except an explicitly
-  invoked API command.
-- API tokens are read from `FIRSTDRAFT_API_TOKEN`, sent as Bearer credentials, and never saved in `.firstdraft` or
-  printed. Revoke an exposed token in First Draft.
-- Package contents are allowlisted and checked before release. The public documentation graph is packaged with the
-  exact CLI version; agent instructions and source-only release metadata remain repository-only.
-- CI exercises the exact minimum Node.js version separately from current development tooling.
-- Public packages carry npm provenance linking registry bytes to the reviewed GitHub workflow and commit.
-
-## Find the right documentation
-
-| Task                                                    | Read                                       |
-| ------------------------------------------------------- | ------------------------------------------ |
-| Install and complete the shortest current journey       | This README                                |
-| Choose a command or inspect its exact behavior          | [Command reference](docs/commands.md)      |
-| Interpret an error or recover safely                    | [Errors and recovery](docs/errors.md)      |
-| Contribute to this repository                           | [Documentation map](docs/README.md)        |
-| Prepare, publish, verify, recover, or promote a release | [Release policy and runbook](RELEASING.md) |
-| Check dated package, tag, or channel observations       | [Release history](docs/release-history.md) |
-| Report a vulnerability                                  | [Security policy](SECURITY.md)             |
-
-Run `firstdraft --help` or a command group's `--help` for concise terminal syntax. The documentation map explains
-which source owns each longer-lived contract.
+Merging source is not package publication. Publishing a candidate, moving npm dist-tags, coordinating the Skills
+package, and promoting a stable release are distinct steps in [RELEASING.md](RELEASING.md). Verify the exact packed
+digest and Service compatibility before any promotion.

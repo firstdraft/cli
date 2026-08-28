@@ -3,18 +3,19 @@
 Use this page to find the narrowest authoritative document for a task. Runtime source and tests remain the final
 evidence for implemented behavior; if they contradict a document, surface the contradiction instead of guessing.
 
-| If the task concerns...                                                                | Read first                                    |
-| -------------------------------------------------------------------------------------- | --------------------------------------------- |
-| Public installation, trust, or the shortest current journey                            | [Root README](../README.md)                   |
-| Commands, options, environment variables, API behavior, output, or materialization     | [Command reference](commands.md)              |
-| Stable errors, exit codes, retry safety, ambiguous outcomes, or local recovery         | [Errors and recovery](errors.md)              |
-| Version policy, release preparation, publication, verification, rollback, or promotion | [Release policy and runbook](../RELEASING.md) |
-| What was observed for an earlier tag, package, or dist-tag                             | [Release history](release-history.md)         |
-| Vulnerability reporting                                                                | [Security policy](../SECURITY.md)             |
+| If the task concerns...                                                                | Read first                                                                                       |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Beginner tester journey                                                                | [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft) |
+| Direct CLI installation, repository orientation, or package contract                   | [Root README](../README.md)                                                                      |
+| Commands, options, environment variables, API behavior, output, or materialization     | [Command reference](commands.md)                                                                 |
+| Stable errors, exit codes, retry safety, ambiguous outcomes, or local recovery         | [Errors and recovery](errors.md)                                                                 |
+| Version policy, release preparation, publication, verification, rollback, or promotion | [Release policy and runbook](../RELEASING.md)                                                    |
+| What was observed for an earlier tag, package, or dist-tag                             | [Release history](release-history.md)                                                            |
+| Vulnerability reporting                                                                | [Security policy](../SECURITY.md)                                                                |
 
 ## Authority boundaries
 
-- [README.md](../README.md) owns public onboarding, the shortest supported journey, current trust claims, and routes.
+- [README.md](../README.md) owns repository orientation, direct installation, package boundaries, and routes.
 - [commands.md](commands.md) owns detailed command semantics. Built-in `--help`, runtime source, and tests own exact
   executable syntax and behavior.
 - [errors.md](errors.md) owns handled-error interpretation and recovery guidance.
@@ -26,9 +27,7 @@ evidence for implemented behavior; if they contradict a document, surface the co
 ## Retrieval quality
 
 Start here, then load the one owning document for the task. Follow a cross-link only when the task crosses an
-authority boundary, such as moving from successful command behavior to failure recovery. Prefer descriptive
-headings, short paragraphs, command maps, and checklists; create another page only when it has a distinct audience,
-task, or authority.
+authority boundary. Create another page only for a distinct audience, task, or authority.
 
 The documentation tests keep `AGENTS.md` at or below 2 KiB, the root README at or below 6 KiB, and this map at or
 below 4 KiB. They also require every public topic to remain reachable from this map or the root README and verify

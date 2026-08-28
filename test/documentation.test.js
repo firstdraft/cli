@@ -35,10 +35,6 @@ test("documentation routes commands, recovery, and release knowledge", () => {
   assert(releasing);
   assert(history);
 
-  assert.match(
-    readme,
-    /`firstdraft` is the command-line client for First Draft\./,
-  );
   assert.doesNotMatch(
     readme,
     /\[First Draft\]\(https:\/\/firstdraft\.com\)/,
@@ -47,6 +43,7 @@ test("documentation routes commands, recovery, and release knowledge", () => {
   assert.match(readme, /\[Command reference\]\(docs\/commands\.md\)/);
   assert.match(readme, /\[Errors and recovery\]\(docs\/errors\.md\)/);
   assert.match(readme, /\[Release history\]\(docs\/release-history\.md\)/);
+  assert.match(readme, /\[Release runbook\]\(RELEASING\.md\)/);
   assert.match(index, /\[Command reference\]\(commands\.md\)/);
   assert.match(index, /\[Errors and recovery\]\(errors\.md\)/);
   assert.match(index, /\[Release policy and runbook\]\(\.\.\/RELEASING\.md\)/);
