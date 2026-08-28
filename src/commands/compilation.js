@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 import {
   ARTIFACT_MEDIA_TYPE,
@@ -19,8 +21,9 @@ import {
   responseMediaType,
   sendRequest,
 } from "../api-response.js";
-import { isUuidV7, readPlanState } from "../plan-state.js";
+import { isUuidV7, readLocalFile, readPlanState } from "../plan-state.js";
 
+const MAX_PLAN_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
 const WAIT_TIMEOUT_MS = 10 * 60_000;
 const POLL_INTERVAL_MS = 1_000;
@@ -57,8 +60,34 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const RELEASE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const MAX_IDENTIFIER_BYTES = 256;
 const MAX_FAILURE_MESSAGE_BYTES = 4_096;
+const HEAD_ETAG_PATTERN = /^"sha256:([0-9a-f]{64})"$/;
+
+/** @type {import("../plan-state.js").PlanStateFileSystem} */
+const DEFAULT_FILE_SYSTEM = { lstatSync, readFileSync };
 
 export class CompilationNotPushedError extends Error {}
+export class CompilationLocalStateError extends Error {}
+export class CompilationLocalPlanChangedError extends Error {}
+
+export class CompilationRequestOutcomeUnknownError extends Error {
+  /** @param {number | undefined} status */
+  constructor(status) {
+    super("The compilation start request outcome is unknown.");
+    this.status = status;
+  }
+}
+
+export class CompilationStartRejectedError extends Error {
+  /**
+   * @param {number} status
+   * @param {Record<string, unknown>} response
+   */
+  constructor(status, response) {
+    super("First Draft rejected the compilation start request.");
+    this.status = status;
+    this.response = response;
+  }
+}
 
 export class CompilationStatusUnavailableError extends Error {
   /**
@@ -102,6 +131,22 @@ export class CompilationNotSucceededError extends Error {
   /** @param {CompilationResponse} current */
   constructor(current) {
     super("The compilation has not succeeded.");
+    this.current = current;
+  }
+}
+
+export class CompilationFailedError extends Error {
+  /** @param {CompilationResponse} current */
+  constructor(current) {
+    super("The compilation failed.");
+    this.current = current;
+  }
+}
+
+export class CompilationCancelledError extends Error {
+  /** @param {CompilationResponse} current */
+  constructor(current) {
+    super("The compilation was cancelled.");
     this.current = current;
   }
 }
@@ -291,6 +336,178 @@ export async function downloadCompilation({
 }
 
 /**
+ * @typedef {object} CurrentCompilationIdentity
+ * @property {string} projectId
+ * @property {number} graphVersion
+ * @property {string} headSourceSha256
+ * @property {string} analysisRunId
+ * @property {string} compilerRelease
+ * @property {{id: string, profile: string}} target
+ */
+
+/**
+ * @typedef {object} CompileAndDownloadOptions
+ * @property {string} cwd
+ * @property {string} expectedEtag
+ * @property {CurrentCompilationIdentity} expected
+ * @property {string} output
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
+ * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
+ * @property {(delayMs: number) => Promise<void>} [sleep]
+ * @property {() => number} [now]
+ * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
+ */
+
+/**
+ * Start one Compilation for the exact Plan and reviewed Analysis accepted by
+ * the current command, wait for that retained Compilation, and materialize its
+ * authenticated artifact into an absent destination.
+ *
+ * @param {CompileAndDownloadOptions} options
+ */
+export async function compileAndDownload({
+  cwd,
+  expectedEtag,
+  expected,
+  output,
+  fetchFunction = globalThis.fetch,
+  fileSystem = DEFAULT_FILE_SYSTEM,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
+  sleep = sleepFor,
+  now = Date.now,
+  onProgress = () => {},
+}) {
+  const outputTarget = resolveOutputTarget({ cwd, output });
+  const context = readStartContext({
+    cwd,
+    expectedEtag,
+    expected,
+    fileSystem,
+  });
+  const deadline = now() + WAIT_TIMEOUT_MS;
+
+  onProgress({ phase: "compilation", status: "waiting" });
+  const initial = await startCompilation({
+    ...context,
+    expected,
+    fetchFunction,
+    createRequestSignal,
+  });
+  let current = initial;
+
+  while (!TERMINAL_STATUSES.has(current.compilation.status)) {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new CompilationTimeoutError(current);
+
+    await sleep(Math.min(POLL_INTERVAL_MS, remaining));
+    if (now() >= deadline) throw new CompilationTimeoutError(current);
+
+    const next = await readCompilationStatus({
+      apiUrl: context.apiUrl,
+      projectId: context.projectId,
+      compilationId: initial.compilation.id,
+      fetchFunction,
+      createRequestSignal,
+      requestTimeout: Math.max(
+        1,
+        Math.min(REQUEST_TIMEOUT_MS, deadline - now()),
+      ),
+    });
+    if (!sameCompilation(initial, next) || !validTransition(current, next)) {
+      throw new CompilationChangedError(next);
+    }
+    current = next;
+  }
+
+  if (current.compilation.status === "failed") {
+    throw new CompilationFailedError(current);
+  }
+  if (current.compilation.status === "cancelled") {
+    throw new CompilationCancelledError(current);
+  }
+
+  onProgress({ phase: "compilation", status: "succeeded" });
+  const metadata =
+    /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
+      current.compilation.artifact
+    );
+  const source = await downloadArtifact({
+    apiUrl: context.apiUrl,
+    metadata,
+    fetchFunction,
+    createRequestSignal,
+  });
+  const artifact = parseCompilationArtifact(source, {
+    projectId: context.projectId,
+    compilationId: current.compilation.id,
+    graphVersion: current.compilation.graph_version,
+    headSourceSha256: current.compilation.head_source_sha256,
+    analysisRunId: current.compilation.analysis_run_id,
+    compilerRelease: current.compilation.compiler_release,
+    target: current.compilation.target,
+  });
+  const materialized = materializeCompilationArtifact(artifact, outputTarget);
+
+  return {
+    project: current.project,
+    compilation: current.compilation,
+    output: materialized,
+  };
+}
+
+/**
+ * @param {object} options
+ * @param {string} options.cwd
+ * @param {string} options.expectedEtag
+ * @param {CurrentCompilationIdentity} options.expected
+ * @param {import("../plan-state.js").PlanStateFileSystem} options.fileSystem
+ */
+function readStartContext({ cwd, expectedEtag, expected, fileSystem }) {
+  const state = readPlanState({ cwd, fileSystem });
+  if (state.api_url === undefined || state.foundation_plan_etag === undefined) {
+    throw new CompilationNotPushedError(
+      "The local Foundation Plan has not been pushed.",
+    );
+  }
+  if (
+    state.project_id !== expected.projectId ||
+    state.foundation_plan_etag !== expectedEtag
+  ) {
+    throw new CompilationLocalPlanChangedError(
+      "Local Plan state changed after this command accepted its Plan.",
+    );
+  }
+
+  const match = HEAD_ETAG_PATTERN.exec(expectedEtag);
+  if (match === null) {
+    throw new CompilationLocalStateError(
+      "The saved Foundation Plan ETag cannot identify its accepted source.",
+    );
+  }
+  const headSourceSha256 = match[1] ?? "";
+  const planSource = readLocalFile(
+    path.join(cwd, ".firstdraft", "foundation-plan.json"),
+    MAX_PLAN_BYTES,
+    fileSystem,
+  );
+  if (
+    headSourceSha256 !== expected.headSourceSha256 ||
+    sha256(planSource) !== headSourceSha256
+  ) {
+    throw new CompilationLocalPlanChangedError(
+      "The local Foundation Plan differs from the accepted Plan.",
+    );
+  }
+
+  return {
+    apiUrl: state.api_url,
+    projectId: state.project_id,
+    etag: expectedEtag,
+  };
+}
+
+/**
  * @param {object} options
  * @param {string} options.cwd
  * @param {string} options.compilationId
@@ -313,6 +530,70 @@ function readContext({ cwd, compilationId, fileSystem }) {
     projectId: state.project_id,
     compilationId,
   };
+}
+
+/**
+ * @param {object} options
+ * @param {string} options.apiUrl
+ * @param {string} options.projectId
+ * @param {string} options.etag
+ * @param {CurrentCompilationIdentity} options.expected
+ * @param {typeof globalThis.fetch} options.fetchFunction
+ * @param {(timeoutMs: number) => AbortSignal} options.createRequestSignal
+ */
+async function startCompilation({
+  apiUrl,
+  projectId,
+  etag,
+  expected,
+  fetchFunction,
+  createRequestSignal,
+}) {
+  const endpoint = new URL(`/v1/projects/${projectId}/compilations`, apiUrl);
+  let response;
+  let body;
+  try {
+    response = await sendRequest(fetchFunction, endpoint, {
+      method: "POST",
+      headers: {
+        Accept: "application/json, application/problem+json",
+        "If-Match": etag,
+      },
+      redirect: "error",
+      signal: createRequestSignal(REQUEST_TIMEOUT_MS),
+    });
+    body = await readResponseBody(response);
+  } catch (error) {
+    if (
+      error instanceof FirstDraftNetworkError ||
+      error instanceof FirstDraftProtocolError
+    ) {
+      throw new CompilationRequestOutcomeUnknownError(error.status);
+    }
+
+    throw error;
+  }
+
+  if (response.status !== 202) {
+    const problem = safeProblem(response, body);
+    if (response.ok || problem === null) {
+      throw new CompilationRequestOutcomeUnknownError(response.status);
+    }
+
+    throw new CompilationStartRejectedError(response.status, problem);
+  }
+
+  const parsed = parseStartedCompilationResponse(body, projectId);
+  if (
+    responseMediaType(response) !== "application/json" ||
+    parsed === null ||
+    response.headers.get("location") !== parsed.compilation.status_path ||
+    !matchesExpectedCompilation(parsed, expected)
+  ) {
+    throw new CompilationRequestOutcomeUnknownError(response.status);
+  }
+
+  return parsed;
 }
 
 /**
@@ -375,6 +656,40 @@ async function readCompilationStatus({
   }
 
   return parsed;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} projectId
+ * @returns {CompilationResponse | null}
+ */
+function parseStartedCompilationResponse(value, projectId) {
+  if (
+    !hasExactKeySet(value, RESPONSE_KEYS) ||
+    !hasExactKeySet(value.compilation, COMPILATION_KEYS) ||
+    !isUuidV7(value.compilation.id)
+  ) {
+    return null;
+  }
+
+  return parseCompilationResponse(value, projectId, value.compilation.id);
+}
+
+/**
+ * @param {CompilationResponse} current
+ * @param {CurrentCompilationIdentity} expected
+ */
+function matchesExpectedCompilation(current, expected) {
+  return (
+    current.project.id === expected.projectId &&
+    current.project.graph_version === expected.graphVersion &&
+    current.compilation.graph_version === expected.graphVersion &&
+    current.compilation.head_source_sha256 === expected.headSourceSha256 &&
+    current.compilation.analysis_run_id === expected.analysisRunId &&
+    current.compilation.compiler_release === expected.compilerRelease &&
+    current.compilation.target.id === expected.target.id &&
+    current.compilation.target.profile === expected.target.profile
+  );
 }
 
 /**

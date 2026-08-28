@@ -13,6 +13,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { run } from "../src/cli.js";
+import { compileAndDownload } from "../src/commands/compilation.js";
 import {
   ARTIFACT_MEDIA_TYPE,
   FOUNDATION_PLAN_FORMAT,
@@ -33,6 +34,74 @@ const COMPILER_RELEASE = "foundation-plan-rails/compiler-2026-08";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
 const STATUS_PATH = `/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}`;
 const ARTIFACT_PATH = `${STATUS_PATH}/artifact`;
+
+test("direct Compilation pins the reviewed Plan and materializes one retained artifact", async (context) => {
+  const planSource = Buffer.from(
+    '{"format":"firstdraft.foundation-plan.sketch/0.19"}\n',
+  );
+  const headSourceSha256 = sha256(planSource);
+  const etag = `"sha256:${headSourceSha256}"`;
+  const cwd = directDirectory(context, planSource, etag);
+  const fixture = artifactFixture({ headSourceSha256 });
+  const queued = compilationBody("queued", {
+    compilation: { head_source_sha256: headSourceSha256 },
+  });
+  const succeeded = compilationBody("succeeded", {
+    artifact: fixture,
+    compilation: { head_source_sha256: headSourceSha256 },
+  });
+  /** @type {FetchCall[]} */
+  const calls = [];
+  /** @type {unknown[]} */
+  const progress = [];
+  const output = path.join(cwd, "application");
+  const result = await compileAndDownload({
+    cwd,
+    expectedEtag: etag,
+    expected: {
+      projectId: PROJECT_ID,
+      graphVersion: 7,
+      headSourceSha256,
+      analysisRunId: ANALYSIS_ID,
+      compilerRelease: COMPILER_RELEASE,
+      target: TARGET,
+    },
+    output,
+    fetchFunction: sequenceFetch(
+      [
+        jsonResponse(queued, 202, { Location: STATUS_PATH }),
+        jsonResponse(succeeded),
+        artifactResponse(fixture),
+      ],
+      calls,
+    ),
+    sleep: async () => {},
+    onProgress: (event) => progress.push(event),
+  });
+
+  assert.deepEqual(
+    calls.map(({ input, init }) => [init?.method, String(input)]),
+    [
+      [
+        "POST",
+        `https://api.example.test/v1/projects/${PROJECT_ID}/compilations`,
+      ],
+      ["GET", `https://api.example.test${STATUS_PATH}`],
+      ["GET", `https://api.example.test${ARTIFACT_PATH}`],
+    ],
+  );
+  assert.equal(new Headers(calls[0]?.init?.headers).get("if-match"), etag);
+  assert.deepEqual(progress, [
+    { phase: "compilation", status: "waiting" },
+    { phase: "compilation", status: "succeeded" },
+  ]);
+  assert.equal(result.compilation.status, "succeeded");
+  assert.equal(result.output.path, output);
+  assert.equal(
+    readFileSync(path.join(output, "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+});
 
 test("compilation status makes one canonical GET and returns terminal failures successfully", async (context) => {
   for (const status of ["failed", "cancelled"]) {
@@ -561,6 +630,38 @@ function remoteDirectory(context) {
   return cwd;
 }
 
+/**
+ * @param {import("node:test").TestContext} context
+ * @param {Buffer} planSource
+ * @param {string} etag
+ */
+function directDirectory(context, planSource, etag) {
+  const cwd = mkdtempSync(
+    path.join(tmpdir(), "firstdraft-direct-compilation-"),
+  );
+  context.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(path.join(cwd, ".firstdraft"));
+  writeFileSync(
+    path.join(cwd, ".firstdraft", "state.json"),
+    `${JSON.stringify(
+      {
+        format: "firstdraft.cli-state/1",
+        project_id: PROJECT_ID,
+        api_url: "https://api.example.test",
+        foundation_plan_etag: etag,
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(cwd, ".firstdraft", "foundation-plan.json"),
+    planSource,
+  );
+  return cwd;
+}
+
 /** @param {readonly string[]} argv @param {Record<string, unknown>} [options] */
 async function invoke(argv, options = {}) {
   let stdout = "";
@@ -597,11 +698,15 @@ function sequenceFetch(responses, calls = []) {
   };
 }
 
-/** @param {unknown} body */
-function jsonResponse(body) {
+/**
+ * @param {unknown} body
+ * @param {number} [status]
+ * @param {Record<string, string>} [headers]
+ */
+function jsonResponse(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
+    status,
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 

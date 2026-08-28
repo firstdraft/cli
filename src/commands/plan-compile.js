@@ -1,4 +1,6 @@
 import { publishPlan } from "./plan-publish.js";
+import { compileAndDownload } from "./compilation.js";
+import { resolveOutputTarget } from "../compilation-artifact.js";
 import {
   PlanPushNetworkError,
   PlanPushProtocolError,
@@ -91,6 +93,122 @@ export async function compilePlan({
   readStatus = readPlanStatus,
   publish = publishPlan,
 }) {
+  const prepared = await preparePlan({
+    cwd,
+    apiUrl,
+    fetchFunction,
+    fileSystem,
+    createTemporaryId,
+    createRequestSignal,
+    analysisSleep,
+    analysisNow,
+    onProgress,
+    push,
+    readStatus,
+  });
+
+  return publish({
+    cwd,
+    fetchFunction,
+    fileSystem,
+    createRequestSignal,
+    sleep: publicationSleep,
+    now: publicationNow,
+    expectedEtag: prepared.pushed.etag,
+    onProgress,
+  });
+}
+
+/**
+ * @typedef {CompilePlanOptions & {
+ *   output: string,
+ *   compilationSleep?: (delayMs: number) => Promise<void>,
+ *   compilationNow?: () => number,
+ *   compile?: typeof compileAndDownload
+ * }} CompilePlanToDirectoryOptions
+ */
+
+/**
+ * Submit and analyze the exact current local Plan, then start one direct
+ * Compilation and materialize its verified artifact into an absent directory.
+ * GitHub Publication remains the no-output mode owned by compilePlan.
+ *
+ * @param {CompilePlanToDirectoryOptions} options
+ */
+export async function compilePlanToDirectory({
+  cwd,
+  output,
+  apiUrl,
+  fetchFunction,
+  fileSystem,
+  createTemporaryId,
+  createRequestSignal,
+  analysisSleep,
+  analysisNow,
+  compilationSleep,
+  compilationNow,
+  onProgress = () => {},
+  push = pushPlan,
+  readStatus = readPlanStatus,
+  compile = compileAndDownload,
+}) {
+  // Reject an unavailable destination before the Plan push can mutate remote
+  // state. The Compilation boundary checks it again after Analysis in case the
+  // filesystem changes while this command is waiting.
+  resolveOutputTarget({ cwd, output });
+
+  const prepared = await preparePlan({
+    cwd,
+    apiUrl,
+    fetchFunction,
+    fileSystem,
+    createTemporaryId,
+    createRequestSignal,
+    analysisSleep,
+    analysisNow,
+    onProgress,
+    push,
+    readStatus,
+  });
+  const body = prepared.status.body;
+
+  return compile({
+    cwd,
+    expectedEtag: prepared.pushed.etag,
+    expected: {
+      projectId: body.project.id,
+      graphVersion: body.project.graph_version,
+      headSourceSha256: body.analysis.head_source_sha256,
+      analysisRunId: body.analysis.id,
+      compilerRelease: body.analysis.compiler_release,
+      target: body.analysis.target,
+    },
+    output,
+    fetchFunction,
+    fileSystem,
+    createRequestSignal,
+    sleep: compilationSleep,
+    now: compilationNow,
+    onProgress,
+  });
+}
+
+/**
+ * @param {Omit<CompilePlanOptions, "publicationSleep" | "publicationNow" | "publish">} options
+ */
+async function preparePlan({
+  cwd,
+  apiUrl,
+  fetchFunction,
+  fileSystem,
+  createTemporaryId,
+  createRequestSignal,
+  analysisSleep,
+  analysisNow,
+  onProgress = () => {},
+  push = pushPlan,
+  readStatus = readPlanStatus,
+}) {
   const pushed = await push({
     cwd,
     apiUrl,
@@ -146,14 +264,5 @@ export async function compilePlan({
   }
   onProgress({ phase: "analysis", status: "valid" });
 
-  return publish({
-    cwd,
-    fetchFunction,
-    fileSystem,
-    createRequestSignal,
-    sleep: publicationSleep,
-    now: publicationNow,
-    expectedEtag: pushed.etag,
-    onProgress,
-  });
+  return { pushed, status };
 }

@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { run } from "../src/cli.js";
+import {
+  ARTIFACT_MEDIA_TYPE,
+  FOUNDATION_PLAN_FORMAT,
+} from "../src/compilation-artifact.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000002001";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000002002";
@@ -84,6 +95,104 @@ test("plan compile submits exact bytes, waits for valid analysis, and publishes 
   );
 });
 
+test("plan compile --output completes the HTTP journey without GitHub Publication", async (context) => {
+  /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
+  const requests = [];
+  const artifact = directArtifactFixture();
+  let compilationReads = 0;
+  const server = createServer(async (request, response) => {
+    const body = await readRequestBody(request);
+    requests.push({
+      method: request.method,
+      url: request.url,
+      headers: request.headers,
+      body,
+    });
+
+    if (request.method === "PUT" && request.url === planPath()) {
+      respondJson(response, 201, acceptedPlanBody(), { ETag: ETAG });
+      return;
+    }
+    if (request.method === "GET" && request.url === analysisPath()) {
+      respondJson(response, 200, analysisBody("valid"));
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      request.url === compilationCollectionPath()
+    ) {
+      respondJson(response, 202, directCompilationBody("queued"), {
+        Location: directCompilationPath(),
+      });
+      return;
+    }
+    if (request.method === "GET" && request.url === directCompilationPath()) {
+      compilationReads += 1;
+      respondJson(
+        response,
+        200,
+        compilationReads === 1
+          ? directCompilationBody("running")
+          : directCompilationBody("succeeded", artifact),
+      );
+      return;
+    }
+    if (request.method === "GET" && request.url === directArtifactPath()) {
+      response.writeHead(200, {
+        "Content-Type": ARTIFACT_MEDIA_TYPE,
+        "Content-Length": artifact.source.byteLength,
+        "Cache-Control": "no-store, no-transform",
+        ETag: `"sha256:${artifact.sha256}"`,
+      });
+      response.end(artifact.source);
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const apiUrl = await listen(context, server);
+  const cwd = localDirectory(context, PLAN_SOURCE);
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      apiUrl,
+      compilationSleep: async () => {},
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(
+    requests.map(({ method, url }) => [method, url]),
+    [
+      ["PUT", planPath()],
+      ["GET", analysisPath()],
+      ["POST", compilationCollectionPath()],
+      ["GET", directCompilationPath()],
+      ["GET", directCompilationPath()],
+      ["GET", directArtifactPath()],
+    ],
+  );
+  assert.equal(requests[2]?.body.byteLength, 0);
+  assert.equal(requests[2]?.headers["if-match"], ETAG);
+  assert(
+    requests.every(
+      ({ headers }) => headers.authorization === `Bearer ${API_TOKEN}`,
+    ),
+  );
+  const printed = JSON.parse(result.stdout);
+  assert.equal(printed.compilation.id, COMPILATION_ID);
+  assert.equal(printed.compilation.status, "succeeded");
+  assert.equal(printed.output.path, path.join(cwd, "application"));
+  assert.equal(
+    readFileSync(path.join(cwd, "application", "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\nFirst Draft: Compiling application...\nFirst Draft: Application compiled.\n`,
+  );
+});
+
 test("plan compile may push unchanged bytes before analysis and Publication", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",
@@ -128,6 +237,152 @@ test("plan compile may push unchanged bytes before analysis and Publication", as
   assert.deepEqual(order, [["push", cwd], ["analysis", true], ["publication"]]);
   assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
   assert.equal(result.stderr, SUCCESS_PROGRESS);
+});
+
+test("plan compile --output starts a direct Compilation without Publication", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  const output = path.join(cwd, "application");
+  /** @type {unknown[]} */
+  const order = [];
+  const directResult = {
+    project: { id: PROJECT_ID, graph_version: 1 },
+    compilation: { id: COMPILATION_ID, status: "succeeded" },
+    output: {
+      path: output,
+      file_count: 264,
+      manifest_sha256: "9".repeat(64),
+    },
+  };
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      planCompilePush: async () => {
+        order.push("push");
+        return successfulPush();
+      },
+      planCompileReadStatus: async () => {
+        order.push("analysis");
+        return { status: 200, body: analysisBody("valid") };
+      },
+      planCompilePublish: async () => {
+        throw new Error("Publication must remain untouched");
+      },
+      planCompileDownload: async (
+        /** @type {{expectedEtag: string, expected: Record<string, unknown>, output: string, onProgress: (progress: unknown) => void}} */ options,
+      ) => {
+        order.push("compilation");
+        assert.equal(options.expectedEtag, ETAG);
+        assert.deepEqual(options.expected, {
+          projectId: PROJECT_ID,
+          graphVersion: 1,
+          headSourceSha256: HEAD_SHA256,
+          analysisRunId: ANALYSIS_ID,
+          compilerRelease: COMPILER_RELEASE,
+          target: TARGET,
+        });
+        assert.equal(options.output, "./application");
+        options.onProgress({ phase: "compilation", status: "waiting" });
+        options.onProgress({ phase: "compilation", status: "succeeded" });
+        return directResult;
+      },
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(order, ["push", "analysis", "compilation"]);
+  assert.deepEqual(JSON.parse(result.stdout), directResult);
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\nFirst Draft: Compiling application...\nFirst Draft: Application compiled.\n`,
+  );
+});
+
+test("plan compile --output rejects an existing destination before Plan mutation", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE);
+  mkdirSync(path.join(cwd, "application"));
+  let pushes = 0;
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      planCompilePush: async () => {
+        pushes += 1;
+        throw new Error("Plan push must remain untouched");
+      },
+    },
+  );
+
+  assertHandledFailure(result, "invalid_output_path", 2);
+  assert.equal(pushes, 0);
+});
+
+test("plan compile --output rechecks local Plan bytes before starting work", async (context) => {
+  /** @type {string | undefined} */
+  let cwd;
+  let compilationStarts = 0;
+  const server = createServer(async (request, response) => {
+    await readRequestBody(request);
+    if (request.method === "PUT" && request.url === planPath()) {
+      respondJson(response, 201, acceptedPlanBody(), { ETag: ETAG });
+      return;
+    }
+    if (request.method === "GET" && request.url === analysisPath()) {
+      assert(cwd);
+      writeFileSync(planFilePath(cwd), Buffer.from('{"changed":true}\n'));
+      respondJson(response, 200, analysisBody("valid"));
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      request.url === compilationCollectionPath()
+    ) {
+      compilationStarts += 1;
+    }
+    response.writeHead(500).end();
+  });
+  const apiUrl = await listen(context, server);
+  cwd = localDirectory(context, PLAN_SOURCE);
+  const output = path.join(cwd, "application");
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    { cwd, apiUrl },
+  );
+
+  assertHandledFailure(result, "local_plan_changed");
+  assert.equal(compilationStarts, 0);
+  assert.equal(existsSync(output), false);
+});
+
+test("plan compile --output never retries an ambiguous Compilation start", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  let requests = 0;
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      planCompilePush: successfulPush,
+      planCompileReadStatus: async () => ({
+        status: 200,
+        body: analysisBody("valid"),
+      }),
+      fetchFunction: async () => {
+        requests += 1;
+        throw new Error("network failure");
+      },
+    },
+  );
+
+  assertHandledFailure(result, "request_outcome_unknown");
+  assert.equal(errorEnvelope(result.stderr).phase, "compilation");
+  assert.equal(requests, 1);
+  assert.equal(existsSync(path.join(cwd, "application")), false);
 });
 
 test("plan compile waits past a terminal analysis for the prior graph version", async (context) => {
@@ -365,7 +620,7 @@ test("push ambiguity, analysis failures, and rejected reads have distinct errors
   }
 });
 
-test("help and removed local-output syntax have no prerequisites", async () => {
+test("help and invalid direct-output syntax have no prerequisites", async () => {
   const inaccessible = () => {
     throw new Error("dependency must remain inaccessible");
   };
@@ -376,15 +631,24 @@ test("help and removed local-output syntax have no prerequisites", async () => {
     fetchFunction: inaccessible,
   });
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /firstdraft plan compile/);
+  assert.match(
+    help.stdout,
+    /firstdraft plan compile --output <absent-directory>/,
+  );
 
-  const removed = await invoke(["plan", "compile", "--output", "generated"], {
-    cwd: process.cwd(),
-    apiToken: undefined,
-    getCwd: inaccessible,
-    fetchFunction: inaccessible,
-  });
-  assertHandledFailure(removed, "invalid_arguments", 2);
+  for (const argv of [
+    ["plan", "compile", "--output"],
+    ["plan", "compile", "--output", "one", "--output", "two"],
+    ["plan", "compile", "application"],
+  ]) {
+    const invalid = await invoke(argv, {
+      cwd: process.cwd(),
+      apiToken: undefined,
+      getCwd: inaccessible,
+      fetchFunction: inaccessible,
+    });
+    assertHandledFailure(invalid, "invalid_arguments", 2);
+  }
 });
 
 async function successfulPush() {
@@ -505,6 +769,93 @@ function publicationBody() {
   };
 }
 
+/** @param {string} status @param {ReturnType<typeof directArtifactFixture>} [artifact] */
+function directCompilationBody(status, artifact) {
+  const terminal = ["succeeded", "failed", "cancelled"].includes(status);
+  return {
+    project: { id: PROJECT_ID, graph_version: 1 },
+    compilation: {
+      id: COMPILATION_ID,
+      analysis_run_id: ANALYSIS_ID,
+      graph_version: 1,
+      head_source_sha256: HEAD_SHA256,
+      status,
+      compiler_release: COMPILER_RELEASE,
+      target: TARGET,
+      status_path: directCompilationPath(),
+      cancel_path: `${directCompilationPath()}/cancel`,
+      artifact:
+        status === "succeeded" && artifact
+          ? {
+              path: directArtifactPath(),
+              sha256: artifact.sha256,
+              media_type: ARTIFACT_MEDIA_TYPE,
+              byte_size: artifact.source.byteLength,
+            }
+          : null,
+      failure:
+        status === "failed"
+          ? {
+              phase: "render",
+              code: "render_failed",
+              message: "Rendering failed.",
+            }
+          : null,
+      created_at: "2026-08-04T12:00:00.000000Z",
+      started_at: status === "queued" ? null : "2026-08-04T12:00:01.000000Z",
+      completed_at: terminal ? "2026-08-04T12:00:02.000000Z" : null,
+    },
+  };
+}
+
+function directArtifactFixture() {
+  const contents = Buffer.from("Movie Catalog\n");
+  const file = {
+    path: "README.md",
+    sha256: sha256(contents),
+    mode: 0o644,
+    owner: "renderer:readme",
+    source_subject_uuids: [],
+    contents_base64: contents.toString("base64"),
+  };
+  const metadata = {
+    files: [
+      {
+        path: file.path,
+        sha256: file.sha256,
+        mode: file.mode,
+        owner: file.owner,
+        source_subject_uuids: file.source_subject_uuids,
+      },
+    ],
+  };
+  const body = {
+    format: "firstdraft.compilation-artifact/1",
+    provenance: {
+      compilation_id: COMPILATION_ID,
+      project_id: PROJECT_ID,
+      graph_version: 1,
+      head_source_sha256: HEAD_SHA256,
+      foundation_plan: {
+        format: FOUNDATION_PLAN_FORMAT,
+        sha256: HEAD_SHA256,
+      },
+      analysis: { id: ANALYSIS_ID, release: ANALYZER_RELEASE },
+      compiler_release: COMPILER_RELEASE,
+      target: TARGET,
+      core: {
+        repository: "firstdraft/foundation-rails-core",
+        revision: "2".repeat(40),
+        sha256: "3".repeat(64),
+      },
+    },
+    manifest_sha256: sha256(Buffer.from(JSON.stringify(metadata))),
+    files: [file],
+  };
+  const source = Buffer.from(JSON.stringify(body));
+  return { source, sha256: sha256(source) };
+}
+
 /** @param {string} code @param {string} [message] */
 function diagnostic(code, message = code) {
   return { code, severity: "error", message };
@@ -533,6 +884,18 @@ function analysisPath() {
 
 function publicationPath() {
   return `/v1/projects/${PROJECT_ID}/github-publication`;
+}
+
+function compilationCollectionPath() {
+  return `/v1/projects/${PROJECT_ID}/compilations`;
+}
+
+function directCompilationPath() {
+  return `${compilationCollectionPath()}/${COMPILATION_ID}`;
+}
+
+function directArtifactPath() {
+  return `${directCompilationPath()}/artifact`;
 }
 
 /** @param {import("node:test").TestContext} context @param {Buffer} source @param {Record<string, unknown>} [extraState] */
