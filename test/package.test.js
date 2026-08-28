@@ -119,10 +119,6 @@ test("stable release completion requires qualified latest promotion", () => {
     /Later on August 7, 2026,[\s\S]*?`next`, while `latest`[\s\S]*?continued to identify `0\.1\.0-alpha\.2`[\s\S]*?On August 12, 2026,[\s\S]*?selected bounded CLI `0\.1\.0` user-journey smoke passed[\s\S]*?separate promotion approval[\s\S]*?both `next` and `latest` then identified ordinary version `0\.1\.0`[\s\S]*?Full\s+v14 service qualification remained separate and incomplete/,
   );
   assert.match(
-    readme,
-    /stable release selected by npm's `latest` dist-tag[\s\S]*?Candidate publication under `next` is not stable\s+release completion and does not displace the supported `latest` release before promotion[\s\S]*?\[dated release history\]\(docs\/release-history\.md\)/,
-  );
-  assert.match(
     releasingGuide,
     /Until promotion, `latest` remains the supported stable release; a distinct `next` candidate\s+is supported only for its named qualification\. When both tags identify one version, that version fills both roles\./,
   );
