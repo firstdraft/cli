@@ -181,11 +181,11 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
   firstdraft plan compile
-  firstdraft plan compile --output <absent-directory>
+  firstdraft plan compile --output <absent-directory|.>
 
 Options:
-      --output <absent-directory>  Materialize the generated application here
-  -h, --help                       Show help
+      --output <absent-directory|.>  Materialize the generated application here
+  -h, --help                         Show help
 
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
@@ -195,7 +195,8 @@ The command submits the exact current whole-file Plan, waits for its analysis,
 and proceeds only when that analysis is valid. Without --output, it conditionally
 creates or replays the internal GitHub Publication lifecycle and prints the
 private repository URL. With --output, it starts one direct Compilation and
-atomically materializes the verified artifact into an absent directory without
+atomically materializes the verified artifact into an absent directory, or
+preserves existing root material under ./design when the output is ., without
 starting GitHub Publication. Progress is written to stderr.
 `;
 
@@ -232,18 +233,19 @@ cancelled terminal states are successful status reads.
 const COMPILATION_DOWNLOAD_HELP = `First Draft CLI
 
 Usage:
-  firstdraft compilation download <compilation-id> --output <absent-path>
+  firstdraft compilation download <compilation-id> --output <absent-path|.>
 
 Options:
-      --output <absent-path>  Materialize the generated application here
-  -h, --help                  Show help
+      --output <absent-path|.>  Materialize the generated application here
+  -h, --help                   Show help
 
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
 
 The command reads the retained Compilation once, requires it to have
 succeeded, downloads and verifies its exact artifact once, and atomically
-renames the verified files into an absent output path. It never starts work.
+materializes it into an absent output path or adopts the current directory
+while preserving existing material under ./design. It never starts work.
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI
@@ -386,7 +388,7 @@ const COMPILATION_ARTIFACT_UNAVAILABLE_DETAIL =
 const COMPILATION_ARTIFACT_INVALID_DETAIL =
   "The downloaded Compilation artifact did not satisfy the integrity contract. No files were materialized.";
 const COMPILATION_MATERIALIZATION_FAILED_DETAIL =
-  "The validated Compilation artifact could not be materialized at the requested absent output path.";
+  "The validated Compilation artifact could not be materialized at the requested output path.";
 const PLAN_COMPILE_DIRECT_ARTIFACT_UNAVAILABLE_DETAIL =
   "Could not download the retained Compilation artifact. Use current.compilation.id with 'firstdraft compilation download'; do not start another Compilation.";
 const PLAN_COMPILE_DIRECT_ARTIFACT_INVALID_DETAIL =
@@ -394,7 +396,7 @@ const PLAN_COMPILE_DIRECT_ARTIFACT_INVALID_DETAIL =
 const PLAN_COMPILE_DIRECT_MATERIALIZATION_FAILED_DETAIL =
   "The retained Compilation artifact was validated but could not be materialized. Use current.compilation.id with 'firstdraft compilation download' after repairing the output path; do not start another Compilation.";
 const COMPILATION_INVALID_OUTPUT_PATH_DETAIL =
-  "The compilation output path must be absent beneath an existing real directory. No network request was made.";
+  "The compilation output must be an absent path beneath an existing real directory or the eligible current directory. No network request was made.";
 const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.";
 const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
@@ -994,6 +996,7 @@ async function runCompilationDownload({
       writeJson(stderr, {
         error: "invalid_output_path",
         detail: COMPILATION_INVALID_OUTPUT_PATH_DETAIL,
+        ...(error.reason ? { reason: error.reason } : {}),
       });
       return 2;
     }
@@ -1002,6 +1005,8 @@ async function runCompilationDownload({
       writeJson(stderr, {
         error: "materialization_failed",
         detail: COMPILATION_MATERIALIZATION_FAILED_DETAIL,
+        ...(error.reason ? { reason: error.reason } : {}),
+        ...(error.recoveryPath ? { recovery_path: error.recoveryPath } : {}),
       });
       return 1;
     }
@@ -1928,6 +1933,7 @@ function writePlanCompileError(writer, error) {
     writeJson(writer, {
       error: "invalid_output_path",
       detail: COMPILATION_INVALID_OUTPUT_PATH_DETAIL,
+      ...(compilationError.reason ? { reason: compilationError.reason } : {}),
     });
     return 2;
   }
@@ -1936,6 +1942,10 @@ function writePlanCompileError(writer, error) {
     writeJson(writer, {
       error: "materialization_failed",
       detail: PLAN_COMPILE_DIRECT_MATERIALIZATION_FAILED_DETAIL,
+      ...(compilationError.reason ? { reason: compilationError.reason } : {}),
+      ...(compilationError.recoveryPath
+        ? { recovery_path: compilationError.recoveryPath }
+        : {}),
       ...(retainedCompilation ? { current: retainedCompilation } : {}),
     });
     return 1;

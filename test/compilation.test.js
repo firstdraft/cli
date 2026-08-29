@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -19,6 +20,7 @@ import {
   FOUNDATION_PLAN_FORMAT,
   MAX_ARTIFACT_BYTES,
 } from "../src/compilation-artifact.js";
+import { ROOT_TRANSACTION_NAME } from "../src/root-output.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000003001";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000003002";
@@ -155,7 +157,7 @@ test("compilation status wait pins provenance and follows valid transitions", as
     },
   );
 
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), succeeded);
   assert.deepEqual(delays, [1_000, 1_000]);
   assert.equal(calls.length, 3);
@@ -231,7 +233,7 @@ test("compilation download distinguishes Head and Plan provenance without starti
     },
   );
 
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
   assert.deepEqual(
     calls.map(({ input, init }) => [init?.method, String(input)]),
@@ -248,6 +250,60 @@ test("compilation download distinguishes Head and Plan provenance without starti
   assert.equal(body.compilation.head_source_sha256, RETAINED_HEAD);
   assert.equal(body.output.path, output);
   assert.equal(body.output.file_count, 1);
+});
+
+test("compilation download adopts the current directory without starting work", async (context) => {
+  const cwd = remoteDirectory(context);
+  writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
+  const retainedState = readFileSync(
+    path.join(cwd, ".firstdraft/state.json"),
+    "utf8",
+  );
+  const fixture = artifactFixture();
+  const status = compilationBody("succeeded", { artifact: fixture });
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const result = await invoke(
+    ["compilation", "download", COMPILATION_ID, "--output", "."],
+    {
+      cwd,
+      fetchFunction: sequenceFetch(
+        [jsonResponse(status), artifactResponse(fixture)],
+        calls,
+      ),
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(
+    calls.map(({ input, init }) => [init?.method, String(input)]),
+    [
+      ["GET", `https://api.example.test${STATUS_PATH}`],
+      ["GET", `https://api.example.test${ARTIFACT_PATH}`],
+    ],
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, "design/product-notes.md"), "utf8"),
+    "Design notes\n",
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, "design/.firstdraft/state.json"), "utf8"),
+    retainedState,
+  );
+  assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.output.path, realpathSync(cwd));
+  assert.deepEqual(body.output.root_adoption, {
+    design_path: path.join(realpathSync(cwd), "design"),
+    moved_entry_count: 2,
+    git_repository_preserved: false,
+    git_index_replaced: false,
+  });
 });
 
 test("download requires succeeded status and validates historical Head provenance", async (context) => {
@@ -418,6 +474,15 @@ test("compilation syntax and output preflight fail before network access", async
     { cwd, fetchFunction: inaccessible },
   );
   assertHandledFailure(invalidOutput, "invalid_output_path", 2);
+
+  mkdirSync(path.join(cwd, "design"));
+  const reservedRoot = await invoke(
+    ["compilation", "download", COMPILATION_ID, "--output", "."],
+    { cwd, fetchFunction: inaccessible },
+  );
+  assertHandledFailure(reservedRoot, "invalid_output_path", 2);
+  assert.equal(JSON.parse(reservedRoot.stderr).reason, "root_reserved_path");
+  assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
 
   const help = await invoke(["compilation", "download", "--help"], {
     cwd: process.cwd(),

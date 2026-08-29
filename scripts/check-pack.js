@@ -52,6 +52,7 @@ if (result.status !== 0) {
     "src/file-system.js",
     "src/plan-compile-progress.js",
     "src/plan-state.js",
+    "src/root-output.js",
     "src/uuid-v7.js",
     "src/version.js",
   ]);

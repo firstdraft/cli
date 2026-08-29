@@ -10,7 +10,8 @@ import {
   MAX_ARTIFACT_BYTES,
   materializeCompilationArtifact,
   parseCompilationArtifact,
-  resolveOutputTarget,
+  prepareCompilationOutputTarget,
+  releaseCompilationOutputTarget,
 } from "../compilation-artifact.js";
 import {
   FirstDraftNetworkError,
@@ -312,139 +313,18 @@ export async function downloadCompilation({
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
 }) {
   const context = readContext({ cwd, compilationId, fileSystem });
-  const outputTarget = resolveOutputTarget({ cwd, output });
-  const current = await readCompilationStatus({
-    ...context,
-    fetchFunction,
-    createRequestSignal,
-    requestTimeout: REQUEST_TIMEOUT_MS,
-  });
-  if (current.compilation.status !== "succeeded") {
-    throw new CompilationNotSucceededError(current);
-  }
-
-  const metadata =
-    /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
-      current.compilation.artifact
-    );
-  const source = await downloadArtifact({
-    apiUrl: context.apiUrl,
-    metadata,
-    fetchFunction,
-    createRequestSignal,
-  });
-  const artifact = parseCompilationArtifact(source, {
-    projectId: context.projectId,
-    compilationId: current.compilation.id,
-    graphVersion: current.compilation.graph_version,
-    headSourceSha256: current.compilation.head_source_sha256,
-    analysisRunId: current.compilation.analysis_run_id,
-    compilerRelease: current.compilation.compiler_release,
-    target: current.compilation.target,
-  });
-  const materialized = materializeCompilationArtifact(artifact, outputTarget);
-
-  return {
-    project: current.project,
-    compilation: current.compilation,
-    output: materialized,
-  };
-}
-
-/**
- * @typedef {object} CurrentCompilationIdentity
- * @property {string} projectId
- * @property {number} graphVersion
- * @property {string} headSourceSha256
- * @property {string} analysisRunId
- * @property {string} compilerRelease
- * @property {{id: string, profile: string}} target
- */
-
-/**
- * @typedef {object} CompileAndDownloadOptions
- * @property {string} cwd
- * @property {string} expectedEtag
- * @property {CurrentCompilationIdentity} expected
- * @property {string} output
- * @property {typeof globalThis.fetch} [fetchFunction]
- * @property {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
- * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
- * @property {(delayMs: number) => Promise<void>} [sleep]
- * @property {() => number} [now]
- * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
- */
-
-/**
- * Start one Compilation for the exact Plan and reviewed Analysis accepted by
- * the current command, wait for that retained Compilation, and materialize its
- * authenticated artifact into an absent destination.
- *
- * @param {CompileAndDownloadOptions} options
- */
-export async function compileAndDownload({
-  cwd,
-  expectedEtag,
-  expected,
-  output,
-  fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
-  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
-  sleep = sleepFor,
-  now = Date.now,
-  onProgress = () => {},
-}) {
-  const outputTarget = resolveOutputTarget({ cwd, output });
-  const context = readStartContext({
-    cwd,
-    expectedEtag,
-    expected,
-    fileSystem,
-  });
-  const deadline = now() + WAIT_TIMEOUT_MS;
-
-  onProgress({ phase: "compilation", status: "waiting" });
-  const initial = await startCompilation({
-    ...context,
-    expected,
-    fetchFunction,
-    createRequestSignal,
-  });
-  let current = initial;
-
+  const outputTarget = prepareCompilationOutputTarget({ cwd, output });
   try {
-    while (!TERMINAL_STATUSES.has(current.compilation.status)) {
-      const remaining = deadline - now();
-      if (remaining <= 0) throw new CompilationTimeoutError(current);
-
-      await sleep(Math.min(POLL_INTERVAL_MS, remaining));
-      if (now() >= deadline) throw new CompilationTimeoutError(current);
-
-      const next = await readCompilationStatus({
-        apiUrl: context.apiUrl,
-        projectId: context.projectId,
-        compilationId: initial.compilation.id,
-        fetchFunction,
-        createRequestSignal,
-        requestTimeout: Math.max(
-          1,
-          Math.min(REQUEST_TIMEOUT_MS, deadline - now()),
-        ),
-      });
-      if (!sameCompilation(initial, next) || !validTransition(current, next)) {
-        throw new CompilationChangedError(next);
-      }
-      current = next;
+    const current = await readCompilationStatus({
+      ...context,
+      fetchFunction,
+      createRequestSignal,
+      requestTimeout: REQUEST_TIMEOUT_MS,
+    });
+    if (current.compilation.status !== "succeeded") {
+      throw new CompilationNotSucceededError(current);
     }
 
-    if (current.compilation.status === "failed") {
-      throw new CompilationFailedError(current);
-    }
-    if (current.compilation.status === "cancelled") {
-      throw new CompilationCancelledError(current);
-    }
-
-    onProgress({ phase: "compilation", status: "succeeded" });
     const metadata =
       /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
         current.compilation.artifact
@@ -471,12 +351,151 @@ export async function compileAndDownload({
       compilation: current.compilation,
       output: materialized,
     };
-  } catch (error) {
-    if (requiresRetainedRecovery(error)) {
-      throw new CompilationRetainedError(error, current);
-    }
+  } finally {
+    releaseCompilationOutputTarget(outputTarget);
+  }
+}
 
-    throw error;
+/**
+ * @typedef {object} CurrentCompilationIdentity
+ * @property {string} projectId
+ * @property {number} graphVersion
+ * @property {string} headSourceSha256
+ * @property {string} analysisRunId
+ * @property {string} compilerRelease
+ * @property {{id: string, profile: string}} target
+ */
+
+/**
+ * @typedef {object} CompileAndDownloadOptions
+ * @property {string} cwd
+ * @property {string} expectedEtag
+ * @property {CurrentCompilationIdentity} expected
+ * @property {string} output
+ * @property {string | import("../root-output.js").RootOutputTarget} [outputTarget]
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
+ * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
+ * @property {(delayMs: number) => Promise<void>} [sleep]
+ * @property {() => number} [now]
+ * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
+ */
+
+/**
+ * Start one Compilation for the exact Plan and reviewed Analysis accepted by
+ * the current command, wait for that retained Compilation, and materialize its
+ * authenticated artifact into an absent destination.
+ *
+ * @param {CompileAndDownloadOptions} options
+ */
+export async function compileAndDownload({
+  cwd,
+  expectedEtag,
+  expected,
+  output,
+  outputTarget: suppliedOutputTarget,
+  fetchFunction = globalThis.fetch,
+  fileSystem = DEFAULT_FILE_SYSTEM,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
+  sleep = sleepFor,
+  now = Date.now,
+  onProgress = () => {},
+}) {
+  const ownsOutputTarget = suppliedOutputTarget === undefined;
+  const outputTarget =
+    suppliedOutputTarget ?? prepareCompilationOutputTarget({ cwd, output });
+  try {
+    const context = readStartContext({
+      cwd,
+      expectedEtag,
+      expected,
+      fileSystem,
+    });
+    const deadline = now() + WAIT_TIMEOUT_MS;
+
+    onProgress({ phase: "compilation", status: "waiting" });
+    const initial = await startCompilation({
+      ...context,
+      expected,
+      fetchFunction,
+      createRequestSignal,
+    });
+    let current = initial;
+
+    try {
+      while (!TERMINAL_STATUSES.has(current.compilation.status)) {
+        const remaining = deadline - now();
+        if (remaining <= 0) throw new CompilationTimeoutError(current);
+
+        await sleep(Math.min(POLL_INTERVAL_MS, remaining));
+        if (now() >= deadline) throw new CompilationTimeoutError(current);
+
+        const next = await readCompilationStatus({
+          apiUrl: context.apiUrl,
+          projectId: context.projectId,
+          compilationId: initial.compilation.id,
+          fetchFunction,
+          createRequestSignal,
+          requestTimeout: Math.max(
+            1,
+            Math.min(REQUEST_TIMEOUT_MS, deadline - now()),
+          ),
+        });
+        if (
+          !sameCompilation(initial, next) ||
+          !validTransition(current, next)
+        ) {
+          throw new CompilationChangedError(next);
+        }
+        current = next;
+      }
+
+      if (current.compilation.status === "failed") {
+        throw new CompilationFailedError(current);
+      }
+      if (current.compilation.status === "cancelled") {
+        throw new CompilationCancelledError(current);
+      }
+
+      onProgress({ phase: "compilation", status: "succeeded" });
+      const metadata =
+        /** @type {{path: string, sha256: string, media_type: string, byte_size: number}} */ (
+          current.compilation.artifact
+        );
+      const source = await downloadArtifact({
+        apiUrl: context.apiUrl,
+        metadata,
+        fetchFunction,
+        createRequestSignal,
+      });
+      const artifact = parseCompilationArtifact(source, {
+        projectId: context.projectId,
+        compilationId: current.compilation.id,
+        graphVersion: current.compilation.graph_version,
+        headSourceSha256: current.compilation.head_source_sha256,
+        analysisRunId: current.compilation.analysis_run_id,
+        compilerRelease: current.compilation.compiler_release,
+        target: current.compilation.target,
+      });
+      const materialized = materializeCompilationArtifact(
+        artifact,
+        outputTarget,
+      );
+
+      return {
+        project: current.project,
+        compilation: current.compilation,
+        output: materialized,
+      };
+    } catch (error) {
+      if (requiresRetainedRecovery(error)) {
+        throw new CompilationRetainedError(error, current);
+      }
+
+      throw error;
+    }
+  } finally {
+    if (ownsOutputTarget) releaseCompilationOutputTarget(outputTarget);
   }
 }
 

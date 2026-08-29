@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +19,7 @@ import {
   ARTIFACT_MEDIA_TYPE,
   FOUNDATION_PLAN_FORMAT,
 } from "../src/compilation-artifact.js";
+import { ROOT_TRANSACTION_NAME } from "../src/root-output.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000002001";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000002002";
@@ -299,6 +301,106 @@ test("plan compile --output starts a direct Compilation without Publication", as
     result.stderr,
     `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\nFirst Draft: Compiling application...\nFirst Draft: Application compiled.\n`,
   );
+});
+
+test("plan compile root output locks before push and releases after invalid analysis", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE);
+  writeFileSync(path.join(cwd, "notes.md"), "design notes\n");
+  let compilations = 0;
+  const result = await invoke(["plan", "compile", "--output", "."], {
+    cwd,
+    planCompilePush: async () => {
+      assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), true);
+      return successfulPush();
+    },
+    planCompileReadStatus: async () => ({
+      status: 200,
+      body: analysisBody("invalid"),
+    }),
+    planCompileDownload: async () => {
+      compilations += 1;
+      throw new Error("Compilation must remain untouched");
+    },
+  });
+
+  assertHandledFailure(result, "plan_not_valid");
+  assert.equal(compilations, 0);
+  assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
+  assert.equal(
+    readFileSync(path.join(cwd, "notes.md"), "utf8"),
+    "design notes\n",
+  );
+});
+
+test("plan compile root output materializes directly without Publication", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
+  const artifact = directArtifactFixture();
+  /** @type {{input: string | URL | Request, init: RequestInit}[]} */
+  const calls = [];
+  const result = await invoke(["plan", "compile", "--output", "."], {
+    cwd,
+    planCompilePush: successfulPush,
+    planCompileReadStatus: async () => ({
+      status: 200,
+      body: analysisBody("valid"),
+    }),
+    planCompilePublish: async () => {
+      throw new Error("Publication must remain untouched");
+    },
+    fetchFunction: sequenceFetch(
+      [
+        jsonResponse(directCompilationBody("succeeded", artifact), 202, {
+          Location: directCompilationPath(),
+        }),
+        new Response(artifact.source, {
+          status: 200,
+          headers: {
+            "Content-Type": ARTIFACT_MEDIA_TYPE,
+            "Content-Length": String(artifact.source.byteLength),
+            "Cache-Control": "no-store, no-transform",
+            ETag: `"sha256:${artifact.sha256}"`,
+          },
+        }),
+      ],
+      calls,
+    ),
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    calls.map((call) => [call.init.method, String(call.input)]),
+    [
+      ["POST", `https://api.example.test${compilationCollectionPath()}`],
+      ["GET", `https://api.example.test${directArtifactPath()}`],
+    ],
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, "design/product-notes.md"), "utf8"),
+    "Design notes\n",
+  );
+  assert.equal(
+    readFileSync(
+      path.join(cwd, "design/.firstdraft/foundation-plan.json"),
+      "utf8",
+    ),
+    PLAN_SOURCE.toString("utf8"),
+  );
+  assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
+  const output = JSON.parse(result.stdout).output;
+  assert.equal(output.path, realpathSync(cwd));
+  assert.equal(
+    output.root_adoption.design_path,
+    path.join(realpathSync(cwd), "design"),
+  );
+  assert.equal(output.root_adoption.moved_entry_count, 2);
 });
 
 test("plan compile --output rejects an existing destination before Plan mutation", async (context) => {
@@ -909,7 +1011,7 @@ test("help and invalid direct-output syntax have no prerequisites", async () => 
   assert.equal(help.status, 0);
   assert.match(
     help.stdout,
-    /firstdraft plan compile --output <absent-directory>/,
+    /firstdraft plan compile --output <absent-directory\|\.>/,
   );
 
   for (const argv of [

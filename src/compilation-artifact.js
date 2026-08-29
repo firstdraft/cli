@@ -14,6 +14,14 @@ import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
 import { isUuidV7 } from "./plan-state.js";
+import {
+  materializeRootOutput,
+  prepareRootOutput,
+  releaseRootOutput,
+  resolveRootOutputPath,
+  RootOutputMaterializationError,
+  RootOutputPathError,
+} from "./root-output.js";
 
 export const ARTIFACT_MEDIA_TYPE =
   "application/vnd.firstdraft.compilation-artifact+json";
@@ -61,8 +69,21 @@ const DIRECTORY_MODE = 0o755;
 const POSIX_MODE_BITS_SUPPORTED = process.platform !== "win32";
 
 export class CompilationArtifactInvalidError extends Error {}
-export class CompilationMaterializationError extends Error {}
-export class CompilationOutputPathError extends Error {}
+export class CompilationMaterializationError extends Error {
+  /** @param {string} message @param {{cause?: unknown, reason?: string, recoveryPath?: string}} [options] */
+  constructor(message, options = {}) {
+    super(message, options);
+    this.reason = options.reason;
+    this.recoveryPath = options.recoveryPath;
+  }
+}
+export class CompilationOutputPathError extends Error {
+  /** @param {string} message @param {{cause?: unknown, reason?: string}} [options] */
+  constructor(message, options = {}) {
+    super(message, options);
+    this.reason = options.reason;
+  }
+}
 
 /**
  * @typedef {object} ValidatedCompilationProvenance
@@ -202,10 +223,79 @@ export function resolveOutputTarget({ cwd, output }) {
 }
 
 /**
+ * Validate an ordinary absent output or reserve root adoption before requests.
+ *
+ * @param {object} options
+ * @param {string} options.cwd
+ * @param {string} options.output
+ */
+export function prepareCompilationOutputTarget({ cwd, output }) {
+  if (
+    typeof output !== "string" ||
+    output.length === 0 ||
+    output.includes("\0")
+  ) {
+    throw new CompilationOutputPathError(
+      "The compilation output path is invalid.",
+    );
+  }
+
+  const root = resolveRootOutputPath({ cwd, output });
+  if (root === null) return resolveOutputTarget({ cwd, output });
+
+  try {
+    return prepareRootOutput({ root });
+  } catch (error) {
+    if (!(error instanceof RootOutputPathError)) throw error;
+    throw new CompilationOutputPathError(error.message, {
+      cause: error,
+      reason: error.reason,
+    });
+  }
+}
+
+/** @param {string | import("./root-output.js").RootOutputTarget} target */
+export function releaseCompilationOutputTarget(target) {
+  if (typeof target === "string") return;
+  try {
+    releaseRootOutput(target);
+  } catch (error) {
+    if (!(error instanceof RootOutputMaterializationError)) throw error;
+    throw new CompilationMaterializationError(error.message, {
+      cause: error,
+      reason: error.reason,
+      recoveryPath: error.recoveryPath,
+    });
+  }
+}
+
+/**
  * @param {ValidatedCompilationArtifact} artifact
- * @param {string} target
+ * @param {string | import("./root-output.js").RootOutputTarget} target
  */
 export function materializeCompilationArtifact(artifact, target) {
+  if (typeof target !== "string") {
+    try {
+      return materializeRootOutput(target, artifact, {
+        writeArtifact: (root) => {
+          writeArtifactTree(artifact.files, root);
+          applyMode(root, DIRECTORY_MODE);
+        },
+        verifyArtifact: (root, ignoredRootEntries) =>
+          verifyArtifactTree(artifact.files, root, ignoredRootEntries, {
+            verifyRootMode: ignoredRootEntries === undefined,
+          }),
+      });
+    } catch (error) {
+      if (!(error instanceof RootOutputMaterializationError)) throw error;
+      throw new CompilationMaterializationError(error.message, {
+        cause: error,
+        reason: error.reason,
+        recoveryPath: error.recoveryPath,
+      });
+    }
+  }
+
   const parent = path.dirname(target);
   const prefix = path.join(parent, `.firstdraft-${path.basename(target)}-`);
   let temporaryDirectory = null;
@@ -222,10 +312,8 @@ export function materializeCompilationArtifact(artifact, target) {
     renameSync(temporaryDirectory, target);
     temporaryDirectory = null;
   } catch (error) {
-    if (
-      error instanceof CompilationMaterializationError ||
-      isFileSystemError(error)
-    ) {
+    if (error instanceof CompilationMaterializationError) throw error;
+    if (isFileSystemError(error)) {
       throw new CompilationMaterializationError(
         "The compilation artifact could not be materialized.",
         { cause: error },
@@ -502,8 +590,18 @@ function writeArtifactTree(files, root) {
   }
 }
 
-/** @param {ValidatedArtifactFile[]} files @param {string} root */
-function verifyArtifactTree(files, root) {
+/**
+ * @param {ValidatedArtifactFile[]} files
+ * @param {string} root
+ * @param {Set<string>} [ignoredRootEntries]
+ * @param {{verifyRootMode?: boolean}} [options]
+ */
+function verifyArtifactTree(
+  files,
+  root,
+  ignoredRootEntries = new Set(),
+  { verifyRootMode = true } = {},
+) {
   const expectedFiles = new Map(files.map((file) => [file.path, file]));
   const expectedDirectories = new Set();
   for (const file of files) {
@@ -519,13 +617,13 @@ function verifyArtifactTree(files, root) {
   if (
     !rootStat.isDirectory() ||
     rootStat.isSymbolicLink() ||
-    !hasExpectedMode(rootStat.mode, DIRECTORY_MODE)
+    (verifyRootMode && !hasExpectedMode(rootStat.mode, DIRECTORY_MODE))
   ) {
     throw new CompilationMaterializationError(
       "The materialized compilation root is invalid.",
     );
   }
-  walkTree(root, "", actualFiles, actualDirectories);
+  walkTree(root, "", actualFiles, actualDirectories, ignoredRootEntries);
   if (
     !setsEqual(actualFiles, new Set(expectedFiles.keys())) ||
     !setsEqual(actualDirectories, expectedDirectories)
@@ -581,16 +679,18 @@ function hasExpectedMode(actual, expected) {
  * @param {string} relative
  * @param {Set<string>} files
  * @param {Set<string>} directories
+ * @param {Set<string>} ignoredRootEntries
  */
-function walkTree(root, relative, files, directories) {
+function walkTree(root, relative, files, directories, ignoredRootEntries) {
   const directory = relative ? path.join(root, ...relative.split("/")) : root;
   const entries = readdirSync(directory, { withFileTypes: true });
 
   for (const entry of entries) {
+    if (relative === "" && ignoredRootEntries.has(entry.name)) continue;
     const entryRelative = relative ? `${relative}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       directories.add(entryRelative);
-      walkTree(root, entryRelative, files, directories);
+      walkTree(root, entryRelative, files, directories, ignoredRootEntries);
     } else if (entry.isFile()) {
       files.add(entryRelative);
     } else {
