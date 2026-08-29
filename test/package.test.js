@@ -131,6 +131,10 @@ test("stable release completion requires qualified latest promotion", () => {
     /Protected tag `v0\.1\.0` and package version `0\.1\.0` were consumed and immutable/,
   );
   assert.match(
+    releaseHistory,
+    /Package version `0\.2\.1` and protected tag `v0\.2\.1` are consumed and immutable[\s\S]*?current-directory root-output[\s\S]*?requires the next patch candidate/,
+  );
+  assert.match(
     releasingGuide,
     /If either identity is already[\s\S]*?consumed, prepare the next version required by the pre-1\.0 policy rather than moving or reusing it/,
   );

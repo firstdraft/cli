@@ -38,3 +38,10 @@ source or documentation does not mutate either dist-tag.
   promoted stable release.
 - Package version `0.2.0` and protected tag `v0.2.0` are consumed and immutable. A backward-compatible addition to
   the `0.2.x` line therefore requires a higher patch version rather than reusing those identities.
+
+## 0.2.1 candidate publication
+
+- On August 28, 2026, protected tag `v0.2.1` published ordinary version `0.2.1` under `next`; `latest` remained
+  `0.1.0`. The patch hardened direct Compilation recovery while preserving the `0.2.x` compatibility line.
+- Package version `0.2.1` and protected tag `v0.2.1` are consumed and immutable. The current-directory root-output
+  behavior integrated on August 29 is not part of those registry bytes and requires the next patch candidate.
