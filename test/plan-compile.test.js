@@ -422,6 +422,43 @@ test("plan compile --output rejects an existing destination before Plan mutation
   assert.equal(pushes, 0);
 });
 
+test("plan compile rechecks an absent destination after analysis", async (context) => {
+  /** @type {string | undefined} */
+  let cwd;
+  let compilationStarts = 0;
+  const server = createServer(async (request, response) => {
+    await readRequestBody(request);
+    if (request.method === "PUT" && request.url === planPath()) {
+      respondJson(response, 201, acceptedPlanBody(), { ETag: ETAG });
+      return;
+    }
+    if (request.method === "GET" && request.url === analysisPath()) {
+      assert(cwd);
+      mkdirSync(path.join(cwd, "application"));
+      respondJson(response, 200, analysisBody("valid"));
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      request.url === compilationCollectionPath()
+    ) {
+      compilationStarts += 1;
+    }
+    response.writeHead(500).end();
+  });
+  const apiUrl = await listen(context, server);
+  cwd = localDirectory(context, PLAN_SOURCE);
+
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    { cwd, apiUrl },
+  );
+
+  assertHandledFailure(result, "invalid_output_path", 2);
+  assert.equal(errorEnvelope(result.stderr).reason, "destination_exists");
+  assert.equal(compilationStarts, 0);
+});
+
 test("plan compile --output rechecks local Plan bytes before starting work", async (context) => {
   /** @type {string | undefined} */
   let cwd;

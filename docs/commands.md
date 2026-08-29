@@ -187,11 +187,12 @@ both honored. A refusal is `invalid_output_path` with a machine-readable `reason
 The CLI creates `.firstdraft-root-output` with exclusive creation during the pre-push output check and holds it
 through analysis, Compilation, and materialization. That directory is both the single-writer lock and the owned
 transaction journal, so a concurrent root adoption is refused before either command sends a request. Immediately
-after acquiring it, the CLI captures every other top-level entry's exact name, entry type, device, and inode. It
-rechecks that set immediately before moving anything. Size, modification time, and contents are deliberately not
-part of this identity: interior changes are not recursively inventoried, and a top-level directory moves intact at
-the transaction boundary. A replaced, added, or removed top-level entry stops materialization. The reserved-path
-precondition ignores only the transaction directory created and still held by this invocation.
+after acquiring it, the CLI captures every other top-level entry's exact name, entry type, device, and inode. After
+staging the artifact and any replacement Git index, it rechecks that set immediately before moving anything. Size,
+modification time, and contents are deliberately not part of this identity: interior changes are not recursively
+inventoried, and a top-level directory moves intact at the transaction boundary. A replaced, added, or removed
+top-level entry stops materialization. The reserved-path precondition ignores only the transaction directory
+created and still held by this invocation.
 
 `compilation download --output .` acquires the same lock before its first status request and holds it through
 artifact download and materialization. Either command removes its own transaction directory on every ordinary exit
@@ -216,13 +217,14 @@ failure, not permission to copy or traverse the mount.
 For a Git root, the CLI first prepares a replacement index that stages each formerly tracked path at
 `design/<old-path>` and stages every exact generated artifact path at the root. This handles overlapping names such
 as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated path. Previously
-untracked and ignored paths are never added to the index. After the worktree renames finish, the CLI installs the
+untracked and ignored paths are never added to the index. Preparing that index writes the generated blobs into the
+Git object database; a rollback may therefore leave unreachable blobs for ordinary Git garbage collection, while
+`HEAD`, refs, configuration, and history remain unchanged. After the worktree renames finish, the CLI installs the
 prepared index through Git's actual index lock path and atomic lock-file commit protocol, including in a linked
 worktree whose index is outside the adopted root. The transaction journal retains whether an index existed plus an
 exact private copy, mode, and digest of its prior bytes until final verification succeeds. The preflighted ignore
-protection is rechecked after the move. `HEAD`, refs, configuration, and history do not change. The caller should
-inspect and commit this staged root-adoption change before using destructive worktree or index restoration commands.
-A non-Git root remains non-Git and is not initialized.
+protection is rechecked after the move. The caller should inspect and commit this staged root-adoption change before
+using destructive worktree or index restoration commands. A non-Git root remains non-Git and is not initialized.
 
 The journal is a versioned private JSON record plus owned staging files. It records the physical root and original
 top-level identity set, the transaction phase, completed design and artifact renames, and, for Git, the resolved

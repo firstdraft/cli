@@ -87,6 +87,10 @@ test("preflight holds one root lock and releases it before any irreversible phas
   assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
   const second = prepareRootOutput({ root });
   releaseRootOutput(second);
+
+  const externallyRemoved = prepareRootOutput({ root });
+  rmSync(externallyRemoved.transactionPath, { recursive: true });
+  assert.doesNotThrow(() => releaseRootOutput(externallyRemoved));
 });
 
 test("rejects unsafe root shapes before mutation", (context) => {
@@ -291,7 +295,7 @@ test("detects pre-move changes and rolls back a failed rename exactly", (context
   );
 });
 
-test("restores exact Git index bytes when post-install verification fails", (context) => {
+test("rolls back an unexpected post-install verification failure", (context) => {
   const root = temporaryDirectory(context);
   initializeGit(root);
   writeFileSync(path.join(root, "README.md"), "Design README\n");
@@ -316,10 +320,7 @@ test("restores exact Git index bytes when post-install verification fails", (con
             verifications += 1;
             verifyArtifact(artifactRoot, ignoredRootEntries);
             if (verifications === 2) {
-              throw new RootOutputMaterializationError(
-                "Injected post-install verification failure.",
-                "root_transaction_failed",
-              );
+              throw new Error("Injected post-install verification failure.");
             }
           },
         },

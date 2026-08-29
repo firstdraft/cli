@@ -12,6 +12,7 @@ import {
   parseCompilationArtifact,
   prepareCompilationOutputTarget,
   releaseCompilationOutputTarget,
+  resolveOutputTarget,
 } from "../compilation-artifact.js";
 import {
   FirstDraftNetworkError,
@@ -412,6 +413,12 @@ export async function compileAndDownload({
       expected,
       fileSystem,
     });
+    if (
+      suppliedOutputTarget !== undefined &&
+      typeof outputTarget === "string"
+    ) {
+      resolveOutputTarget({ cwd, output });
+    }
     const deadline = now() + WAIT_TIMEOUT_MS;
 
     onProgress({ phase: "compilation", status: "waiting" });
