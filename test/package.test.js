@@ -132,7 +132,17 @@ test("stable release completion requires qualified latest promotion", () => {
   );
   assert.match(
     releaseHistory,
-    /Package version `0\.2\.1` and protected tag `v0\.2\.1` are consumed and immutable[\s\S]*?current-directory root-output[\s\S]*?requires the next patch candidate/,
+    /Package version `0\.2\.1` and protected tag `v0\.2\.1` are consumed and immutable[\s\S]*?As observed on August 29, 2026,[\s\S]*?current-directory root-output[\s\S]*?`4352f64baf673ad93457e8bc84273e9d1d9a9501`[\s\S]*?`b43ba6de98e27328e548cc3410ba9f39dfa9fcee`[\s\S]*?was not part of those registry bytes/,
+  );
+  const consumedVersions = [
+    ...releaseHistory.matchAll(
+      /(?:Package|package) version `([^`]+)`(?=[\s\S]{0,120}?consumed and immutable)/g,
+    ),
+  ].map((match) => match[1]);
+  assert.equal(
+    consumedVersions.includes(metadata.version),
+    false,
+    `package version ${metadata.version} is already recorded as consumed`,
   );
   assert.match(
     releasingGuide,
