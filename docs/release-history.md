@@ -43,5 +43,6 @@ source or documentation does not mutate either dist-tag.
 
 - On August 28, 2026, protected tag `v0.2.1` published ordinary version `0.2.1` under `next`; `latest` remained
   `0.1.0`. The patch hardened direct Compilation recovery while preserving the `0.2.x` compatibility line.
-- Package version `0.2.1` and protected tag `v0.2.1` are consumed and immutable. The current-directory root-output
-  behavior integrated on August 29 is not part of those registry bytes and requires the next patch candidate.
+- Package version `0.2.1` and protected tag `v0.2.1` are consumed and immutable. As observed on August 29, 2026,
+  current-directory root-output had integrated to `main` at `4352f64baf673ad93457e8bc84273e9d1d9a9501` (tree
+  `b43ba6de98e27328e548cc3410ba9f39dfa9fcee`) but was not part of those registry bytes.
