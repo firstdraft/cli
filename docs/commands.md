@@ -248,6 +248,7 @@ without starting duplicate work. Follow the [direct Compilation recovery procedu
 Success writes one JSON object to stdout containing the validated Project, Compilation, and absolute output path.
 Root adoption additionally reports `root_adoption.design_path` (or `null` when no design directory was needed), its
 top-level moved-entry count, whether a Git repository was preserved, and whether its index was replaced.
+After final verification succeeds, the CLI removes its owned `.firstdraft-root-output` transaction directory.
 An absent output directory contains exactly the artifact files and modes. Root adoption additionally contains the
 preserved `design` directory and an existing root `.git`, when present; every artifact-owned path remains exact. The
 CLI does not add a Git repository, run a formatter, or repair generated source. When an absent output is nested

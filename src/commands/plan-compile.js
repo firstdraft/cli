@@ -1,6 +1,9 @@
 import { publishPlan } from "./plan-publish.js";
 import { compileAndDownload } from "./compilation.js";
-import { resolveOutputTarget } from "../compilation-artifact.js";
+import {
+  prepareCompilationOutputTarget,
+  releaseCompilationOutputTarget,
+} from "../compilation-artifact.js";
 import {
   PlanPushNetworkError,
   PlanPushProtocolError,
@@ -152,45 +155,46 @@ export async function compilePlanToDirectory({
   readStatus = readPlanStatus,
   compile = compileAndDownload,
 }) {
-  // Reject an unavailable destination before the Plan push can mutate remote
-  // state. The Compilation boundary checks it again after Analysis in case the
-  // filesystem changes while this command is waiting.
-  resolveOutputTarget({ cwd, output });
+  const outputTarget = prepareCompilationOutputTarget({ cwd, output });
+  try {
+    const prepared = await preparePlan({
+      cwd,
+      apiUrl,
+      fetchFunction,
+      fileSystem,
+      createTemporaryId,
+      createRequestSignal,
+      analysisSleep,
+      analysisNow,
+      onProgress,
+      push,
+      readStatus,
+    });
+    const body = prepared.status.body;
 
-  const prepared = await preparePlan({
-    cwd,
-    apiUrl,
-    fetchFunction,
-    fileSystem,
-    createTemporaryId,
-    createRequestSignal,
-    analysisSleep,
-    analysisNow,
-    onProgress,
-    push,
-    readStatus,
-  });
-  const body = prepared.status.body;
-
-  return compile({
-    cwd,
-    expectedEtag: prepared.pushed.etag,
-    expected: {
-      projectId: body.project.id,
-      graphVersion: body.project.graph_version,
-      headSourceSha256: body.analysis.head_source_sha256,
-      analysisRunId: body.analysis.id,
-      compilerRelease: body.analysis.compiler_release,
-      target: body.analysis.target,
-    },
-    output,
-    fetchFunction,
-    fileSystem,
-    createRequestSignal,
-    sleep: compilationSleep,
-    now: compilationNow,
-    onProgress,
-  });
+    return await compile({
+      cwd,
+      expectedEtag: prepared.pushed.etag,
+      expected: {
+        projectId: body.project.id,
+        graphVersion: body.project.graph_version,
+        headSourceSha256: body.analysis.head_source_sha256,
+        analysisRunId: body.analysis.id,
+        compilerRelease: body.analysis.compiler_release,
+        target: body.analysis.target,
+      },
+      output,
+      outputTarget,
+      fetchFunction,
+      fileSystem,
+      createRequestSignal,
+      sleep: compilationSleep,
+      now: compilationNow,
+      onProgress,
+    });
+  } finally {
+    releaseCompilationOutputTarget(outputTarget);
+  }
 }
 
 /**

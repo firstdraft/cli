@@ -83,11 +83,11 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
   firstdraft plan compile
-  firstdraft plan compile --output <absent-directory>
+  firstdraft plan compile --output <absent-directory|.>
 
 Options:
-      --output <absent-directory>  Materialize the generated application here
-  -h, --help                       Show help
+      --output <absent-directory|.>  Materialize the generated application here
+  -h, --help                         Show help
 
 Environment:
   FIRSTDRAFT_API_TOKEN  Authenticate API requests
@@ -97,7 +97,8 @@ The command submits the exact current whole-file Plan, waits for its analysis,
 and proceeds only when that analysis is valid. Without --output, it conditionally
 creates or replays the internal GitHub Publication lifecycle and prints the
 private repository URL. With --output, it starts one direct Compilation and
-atomically materializes the verified artifact into an absent directory without
+atomically materializes the verified artifact into an absent directory, or
+preserves existing root material under ./design when the output is ., without
 starting GitHub Publication. Progress is written to stderr.
 `;
 
