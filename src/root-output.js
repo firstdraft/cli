@@ -229,7 +229,15 @@ export function prepareRootOutput({ root, platform = process.platform }) {
     installSignalHandlers(target);
     return target;
   } catch (error) {
-    removePreparedTransaction(target);
+    releaseRootOutput(target);
+    if (error instanceof RootOutputPathError) throw error;
+    if (isFileSystemError(error)) {
+      throw new RootOutputPathError(
+        "The root output preflight could not be completed.",
+        "root_not_writable",
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
@@ -238,7 +246,21 @@ export function prepareRootOutput({ root, platform = process.platform }) {
 export function releaseRootOutput(target) {
   removeSignalHandlers(target);
   if (target.released || target.irreversible) return;
-  removePreparedTransaction(target);
+  try {
+    removePreparedTransaction(target);
+  } catch (error) {
+    if (isFileSystemError(error) && error.code === "ENOENT") {
+      target.released = true;
+      return;
+    }
+    if (
+      error instanceof RootOutputMaterializationError ||
+      isFileSystemError(error)
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -265,9 +287,9 @@ export function materializeRootOutput(
     chmodSync(artifactStage, DIRECTORY_MODE);
     writeArtifact(artifactStage);
     verifyArtifact(artifactStage);
-    recheckRootSnapshot(target);
 
     if (target.git !== null) prepareGitIndex(target, artifact.files);
+    recheckRootSnapshot(target);
     performRootTransaction(target, artifact.files, rename);
     verifyRootResult(target, artifact.files, verifyArtifact);
 
@@ -769,7 +791,11 @@ function normalizeMaterializationError(error) {
       { cause: error },
     );
   }
-  throw error;
+  return new RootOutputMaterializationError(
+    "The root output transaction failed.",
+    "root_transaction_failed",
+    { cause: error },
+  );
 }
 
 /** @param {string} root @param {string} transactionPath */
@@ -1061,7 +1087,17 @@ function createPreviewEntry(root, previewWorktree, ignoredPath) {
     ROOT_DESIGN_NAME,
     ...ignoredPath.split("/"),
   );
-  const stat = lstatSync(source);
+  let stat;
+  try {
+    stat = lstatSync(source);
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+    throw new RootOutputPathError(
+      "A currently ignored path changed during root output preflight.",
+      "root_ignore_not_preserved",
+      { cause: error },
+    );
+  }
   if (stat.isDirectory()) {
     mkdirSync(destination, { recursive: true, mode: DIRECTORY_MODE });
   } else {
@@ -1317,7 +1353,12 @@ function requiredGit(root, arguments_, options = {}) {
  */
 function invokeGit(root, arguments_, options = {}) {
   /** @type {NodeJS.ProcessEnv} */
-  const environment = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+  const environment = {
+    ...process.env,
+    GIT_OPTIONAL_LOCKS: "0",
+    LC_ALL: "C",
+    LANGUAGE: "",
+  };
   delete environment.GIT_DIR;
   delete environment.GIT_WORK_TREE;
   delete environment.GIT_INDEX_FILE;
