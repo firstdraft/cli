@@ -133,8 +133,9 @@ export async function compilePlan({
 
 /**
  * Submit and analyze the exact current local Plan, then start one direct
- * Compilation and materialize its verified artifact into an absent directory.
- * GitHub Publication remains the no-output mode owned by compilePlan.
+ * Compilation and materialize its verified artifact into an absent directory
+ * or the eligible current directory. GitHub Publication remains the no-output
+ * mode owned by compilePlan.
  *
  * @param {CompilePlanToDirectoryOptions} options
  */
