@@ -295,6 +295,48 @@ test("detects pre-move changes and rolls back a failed rename exactly", (context
   );
 });
 
+test("preserves a Git index changed before installation", (context) => {
+  const root = temporaryDirectory(context);
+  initializeGit(root);
+  writeFileSync(path.join(root, "README.md"), "Design README\n");
+  git(root, ["add", "README.md"]);
+  git(root, ["commit", "-m", "Design application"]);
+  const indexPath = path.resolve(
+    root,
+    git(root, ["rev-parse", "--git-path", "index"]).trim(),
+  );
+  const originalIndex = readFileSync(indexPath);
+  const target = prepareRootOutput({ root });
+  /** @type {Buffer | undefined} */
+  let externalIndex;
+
+  assert.throws(
+    () =>
+      materialize(target, {
+        rename() {
+          git(root, ["update-index", "--index-version=4"]);
+          externalIndex = readFileSync(indexPath);
+          assert.equal(externalIndex.equals(originalIndex), false);
+          const error = new Error("Injected pre-install rename failure");
+          Object.assign(error, { code: "EIO" });
+          throw error;
+        },
+      }),
+    (error) =>
+      error instanceof RootOutputMaterializationError &&
+      error.reason === "root_transaction_failed",
+  );
+
+  assert(externalIndex);
+  assert.equal(readFileSync(indexPath).equals(externalIndex), true);
+  assert.equal(
+    readFileSync(path.join(root, "README.md"), "utf8"),
+    "Design README\n",
+  );
+  assert.equal(existsSync(path.join(root, "design")), false);
+  assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
+});
+
 test("rolls back an unexpected post-install verification failure", (context) => {
   const root = temporaryDirectory(context);
   initializeGit(root);
