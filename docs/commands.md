@@ -154,14 +154,16 @@ the accepted source SHA-256 from the saved ETag, hashes the current local bytes,
 ### Materialize a direct Compilation
 
 With `--output`, the CLI accepts either an explicit absent destination beneath an existing real directory or a path
-that resolves to the physical current directory. It validates that destination before pushing the Plan and checks
-it again after analysis. Other existing destinations remain invalid, so `--output ./application` retains its
-absent-directory contract.
+that resolves to the physical current directory. It validates either destination before pushing the Plan. An absent
+destination is checked again after analysis; root adoption instead holds its owned lock and performs the exact
+pre-move identity recheck described below. Other existing destinations remain invalid, so
+`--output ./application` retains its absent-directory contract.
 
 `--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
 another spelling that resolves to that same physical directory select the same mode. It works at any real current
 directory that meets the preconditions below and does not recognize Drawing Board or another repository layout
-specially. Before starting Compilation, the CLI requires:
+specially. This first root-adoption contract supports POSIX filesystems; Windows retains absent-directory output
+and refuses root adoption as `root_platform_unsupported`. Before starting Compilation, the CLI requires:
 
 - the current directory to be a real, writable, non-filesystem-root directory;
 - no existing top-level path whose portable, case-insensitive name is `design` or the reserved
@@ -188,7 +190,14 @@ transaction journal, so a concurrent root adoption is refused before either comm
 after acquiring it, the CLI captures every other top-level entry's exact name, entry type, device, and inode. It
 rechecks that set immediately before moving anything. Size, modification time, and contents are deliberately not
 part of this identity: interior changes are not recursively inventoried, and a top-level directory moves intact at
-the transaction boundary. A replaced, added, or removed top-level entry stops materialization.
+the transaction boundary. A replaced, added, or removed top-level entry stops materialization. The reserved-path
+precondition ignores only the transaction directory created and still held by this invocation.
+
+`compilation download --output .` acquires the same lock before its first status request and holds it through
+artifact download and materialization. Either command removes its own transaction directory on every ordinary exit
+before the journal records an irreversible move or index installation. Its signal handlers do the same when Node
+dispatches the signal before that boundary. A journal whose phase records no irreversible operation is likewise
+safe to remove; the manual reconciliation rule below applies only after `root_rollback_incomplete`.
 
 The complete generated artifact is written and verified inside that in-root transaction directory before any
 existing path moves. Staging inside the destination makes every later rename same-filesystem even when the current
@@ -198,7 +207,9 @@ depth.
 
 The transaction creates `./design` with mode `0755` on POSIX, moves every preexisting non-Git top-level entry under
 it, keeps an existing top-level `.git` file or directory at the root, and installs the artifact's top-level entries
-at the root. If the root contains no entry other than `.git`, it does not retain an empty `design` directory. A
+at the root. Immediately before each artifact entry is installed, its root destination must still be absent; an
+unexpected entry stops the transaction and is never overwritten. If the root contains no entry other than `.git`,
+it does not retain an empty `design` directory. A
 nested mount that cannot travel with its top-level directory may make its rename fail; that is a transactional
 failure, not permission to copy or traverse the mount.
 
