@@ -474,6 +474,7 @@ test("compilation syntax and output preflight fail before network access", async
     { cwd, fetchFunction: inaccessible },
   );
   assertHandledFailure(invalidOutput, "invalid_output_path", 2);
+  assert.equal(JSON.parse(invalidOutput.stderr).reason, "destination_exists");
 
   mkdirSync(path.join(cwd, "design"));
   const reservedRoot = await invoke(

@@ -384,7 +384,8 @@ export async function downloadCompilation({
 /**
  * Start one Compilation for the exact Plan and reviewed Analysis accepted by
  * the current command, wait for that retained Compilation, and materialize its
- * authenticated artifact into an absent destination.
+ * authenticated artifact into an absent destination or the eligible current
+ * directory.
  *
  * @param {CompileAndDownloadOptions} options
  */

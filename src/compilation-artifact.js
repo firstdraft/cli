@@ -192,13 +192,15 @@ export function resolveOutputTarget({ cwd, output }) {
 
   const target = path.resolve(cwd, output);
   const parent = path.dirname(target);
+  const targetIsAbsent = isInitiallyAbsent(target);
   if (
     target === parent ||
     path.basename(target).length === 0 ||
-    !isInitiallyAbsent(target)
+    !targetIsAbsent
   ) {
     throw new CompilationOutputPathError(
       "The compilation output path must be absent.",
+      targetIsAbsent ? undefined : { reason: "destination_exists" },
     );
   }
 
