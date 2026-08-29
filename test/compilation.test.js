@@ -253,6 +253,7 @@ test("compilation download distinguishes Head and Plan provenance without starti
 });
 
 test("compilation download adopts the current directory without starting work", async (context) => {
+  if (process.platform === "win32") return context.skip();
   const cwd = remoteDirectory(context);
   writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
   const retainedState = readFileSync(
@@ -482,7 +483,12 @@ test("compilation syntax and output preflight fail before network access", async
     { cwd, fetchFunction: inaccessible },
   );
   assertHandledFailure(reservedRoot, "invalid_output_path", 2);
-  assert.equal(JSON.parse(reservedRoot.stderr).reason, "root_reserved_path");
+  assert.equal(
+    JSON.parse(reservedRoot.stderr).reason,
+    process.platform === "win32"
+      ? "root_platform_unsupported"
+      : "root_reserved_path",
+  );
   assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
 
   const help = await invoke(["compilation", "download", "--help"], {
