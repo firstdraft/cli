@@ -70,7 +70,10 @@ materialization failure envelopes include that last validated projection as `cur
 - after `materialization_failed`, repair the destination condition, then use the same lower-level download command
   with a new absent path. A root-output attempt whose transaction fully rolled back may instead retry that retained
   download with `--output .`; `reason: "root_rollback_incomplete"` requires reconciliation of the retained
-  `.firstdraft-root-output` journal before another root attempt.
+  `.firstdraft-root-output` journal before another root attempt. Do not delete that journal or run Git restoration
+  commands: read its versioned record, restore the exact listed index and path identities, verify its original
+  snapshot, and then remove the transaction directory. After `.firstdraft` has moved successfully under `design`,
+  run retained status and later Plan commands from `design`, not from the generated application root.
 
 After `compilation_wait_timed_out`, retained work may still continue. Use
 `firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun
@@ -123,7 +126,9 @@ stopped without following the replacement.
 | Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.  |
 | Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable. |
 
-Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_reserved_path`,
-`root_entry_unsupported`, `root_enclosing_worktree`, `root_git_unavailable`, `root_git_unsupported`,
-`root_git_dirty`, `root_ignore_not_preserved`, and `root_busy`. Root-output `materialization_failed.reason` values
-are `output_changed`, `root_artifact_collision`, `root_transaction_failed`, and `root_rollback_incomplete`.
+Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_not_writable`,
+`root_reserved_path`, `root_entry_unsupported`, `root_enclosing_worktree`, `root_git_unavailable`,
+`root_git_unsupported`, `root_git_dirty`, `root_ignore_not_preserved`, and `root_busy`. Git refusing discovery,
+including a `safe.directory` refusal, is `root_git_unavailable`; a discovered but unsupported Git shape such as a
+submodule is `root_git_unsupported`. Root-output `materialization_failed.reason` values are `output_changed`,
+`root_artifact_collision`, `root_ignore_changed`, `root_transaction_failed`, and `root_rollback_incomplete`.

@@ -171,8 +171,10 @@ specially. Before starting Compilation, the CLI requires:
   top-level directory; the CLI neither follows nor repairs them; and
 - when the current directory is the root of a Git worktree, a clean tracked worktree and index with no unmerged
   entries, sparse checkout, or in-progress merge, rebase, cherry-pick, or revert. Untracked and ignored design
-  material may remain present. A directory nested inside a higher Git worktree is refused rather than treated as
-  non-Git. A valid top-level `.git` file for a linked worktree is retained like a `.git` directory.
+  material may remain present. Submodules and tracked `.gitmodules` files are refused in this first root-adoption
+  contract rather than moved with broken Git wiring. A directory nested inside a higher Git worktree is refused
+  rather than treated as non-Git. A valid top-level `.git` file for a linked worktree is retained like a `.git`
+  directory.
 
 Git-backed root adoption invokes the installed Git executable explicitly. Read-only discovery uses
 `git --no-optional-locks` with stable NUL-delimited porcelain so it does not refresh the index. Before remote work,
@@ -180,11 +182,13 @@ the CLI verifies in a temporary preview that every currently ignored entry remai
 applicable worktree `.gitignore` files move beneath `design`; repository-local and configured global exclusions are
 both honored. A refusal is `invalid_output_path` with a machine-readable `reason` and happens before Plan push.
 
-After the accepted Plan and matching valid Analysis, the CLI creates `.firstdraft-root-output` with exclusive
-creation. That directory is both the single-writer lock and the owned transaction journal. It captures the exact
-top-level entry identities immediately before it starts Compilation and rechecks them immediately before moving
-anything. A detected top-level change stops materialization. Interior changes are not recursively hashed: the
-top-level directory is moved intact at the transaction boundary.
+The CLI creates `.firstdraft-root-output` with exclusive creation during the pre-push output check and holds it
+through analysis, Compilation, and materialization. That directory is both the single-writer lock and the owned
+transaction journal, so a concurrent root adoption is refused before either command sends a request. Immediately
+after acquiring it, the CLI captures every other top-level entry's exact name, entry type, device, and inode. It
+rechecks that set immediately before moving anything. Size, modification time, and contents are deliberately not
+part of this identity: interior changes are not recursively inventoried, and a top-level directory moves intact at
+the transaction boundary. A replaced, added, or removed top-level entry stops materialization.
 
 The complete generated artifact is written and verified inside that in-root transaction directory before any
 existing path moves. Staging inside the destination makes every later rename same-filesystem even when the current
@@ -195,18 +199,32 @@ depth.
 The transaction creates `./design` with mode `0755` on POSIX, moves every preexisting non-Git top-level entry under
 it, keeps an existing top-level `.git` file or directory at the root, and installs the artifact's top-level entries
 at the root. If the root contains no entry other than `.git`, it does not retain an empty `design` directory. A
-failed rename or post-install verification reverses the completed renames and removes only the owned transaction.
-If rollback itself cannot finish, `materialization_failed` reports `reason: "root_rollback_incomplete"` and leaves
-`.firstdraft-root-output` in place as the recovery journal rather than deleting either copy. Another root adoption
-is refused until that state is reconciled.
+nested mount that cannot travel with its top-level directory may make its rename fail; that is a transactional
+failure, not permission to copy or traverse the mount.
 
-For a Git root, the same transaction atomically replaces the index with a prepared index that stages each formerly
-tracked path at `design/<old-path>` and stages every exact generated artifact path at the root. This handles
-overlapping names such as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated
-path. Previously untracked and ignored paths are never added to the index; the preflighted ignore protection is
-rechecked after the move. `HEAD`, refs, configuration, and history do not change. The caller should inspect and
-commit this staged root-adoption change before using destructive worktree or index restoration commands. A non-Git
-root remains non-Git and is not initialized.
+For a Git root, the CLI first prepares a replacement index that stages each formerly tracked path at
+`design/<old-path>` and stages every exact generated artifact path at the root. This handles overlapping names such
+as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated path. Previously
+untracked and ignored paths are never added to the index. After the worktree renames finish, the CLI installs the
+prepared index through Git's actual index lock path and atomic lock-file commit protocol, including in a linked
+worktree whose index is outside the adopted root. The transaction journal retains whether an index existed plus an
+exact private copy, mode, and digest of its prior bytes until final verification succeeds. The preflighted ignore
+protection is rechecked after the move. `HEAD`, refs, configuration, and history do not change. The caller should
+inspect and commit this staged root-adoption change before using destructive worktree or index restoration commands.
+A non-Git root remains non-Git and is not initialized.
+
+The journal is a versioned private JSON record plus owned staging files. It records the physical root and original
+top-level identity set, the transaction phase, completed design and artifact renames, and, for Git, the resolved
+index path and original and prepared index digests. Each irreversible phase is recorded before the next one starts.
+On any failure after a move, index installation, or post-install verification, the CLI first restores the exact
+prior index through the same Git lock boundary, then reverses artifact and design renames in journal order. A fully
+successful rollback removes only the owned transaction. If rollback itself cannot finish,
+`materialization_failed` reports `reason: "root_rollback_incomplete"` and includes
+`recovery_path: ".firstdraft-root-output"`; it leaves the journal and owned copies in place rather than guessing.
+Do not delete that directory or run Git restoration commands. Inspect the versioned journal, restore the listed
+index and paths to its recorded original identities, verify that snapshot, and only then remove the transaction
+directory. Another root adoption reports `root_busy` until that state is reconciled; a foreign preexisting directory
+with the same reserved name reports `root_reserved_path`.
 
 After valid analysis, the CLI requests one Compilation for that exact reviewed Head and never starts GitHub
 Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
