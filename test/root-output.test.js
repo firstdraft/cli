@@ -34,7 +34,17 @@ const ARTIFACT_FILES = [
   { path: "bin/setup", mode: 0o755, contents: "#!/bin/sh\n" },
 ];
 
+test("refuses root adoption on Windows", () => {
+  assert.throws(
+    () => prepareRootOutput({ root: "ignored", platform: "win32" }),
+    (error) =>
+      error instanceof RootOutputPathError &&
+      error.reason === "root_platform_unsupported",
+  );
+});
+
 test("adopts an arbitrary non-Git root without traversing preserved interiors", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   mkdirSync(path.join(root, ".firstdraft"));
   writeFileSync(
@@ -74,6 +84,7 @@ test("adopts an arbitrary non-Git root without traversing preserved interiors", 
 });
 
 test("preflight holds one root lock and releases it before any irreversible phase", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   writeFileSync(path.join(root, "notes.md"), "notes\n");
   const first = prepareRootOutput({ root });
@@ -94,14 +105,7 @@ test("preflight holds one root lock and releases it before any irreversible phas
 });
 
 test("rejects unsafe root shapes before mutation", (context) => {
-  const windowsRoot = temporaryDirectory(context);
-  assert.throws(
-    () => prepareRootOutput({ root: windowsRoot, platform: "win32" }),
-    (error) =>
-      error instanceof RootOutputPathError &&
-      error.reason === "root_platform_unsupported",
-  );
-
+  if (process.platform === "win32") return context.skip();
   const linkedRoot = temporaryDirectory(context);
   writeFileSync(path.join(linkedRoot, "outside"), "outside\n");
   symlinkSync("outside", path.join(linkedRoot, "linked"));
@@ -124,6 +128,7 @@ test("rejects unsafe root shapes before mutation", (context) => {
 });
 
 test("preserves a Git worktree and installs an exact prepared index", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   initializeGit(root);
   writeFileSync(path.join(root, ".gitignore"), ".env\n");
@@ -182,6 +187,7 @@ test("preserves a Git worktree and installs an exact prepared index", (context) 
 });
 
 test("preserves a linked Git worktree without relocating its Git file", (context) => {
+  if (process.platform === "win32") return context.skip();
   const holder = temporaryDirectory(context);
   initializeGit(holder);
   writeFileSync(path.join(holder, "README.md"), "Design README\n");
@@ -209,6 +215,7 @@ test("preserves a linked Git worktree without relocating its Git file", (context
 });
 
 test("refuses enclosing worktrees, dirty indexes, and submodule metadata", (context) => {
+  if (process.platform === "win32") return context.skip();
   const enclosing = temporaryDirectory(context);
   initializeGit(enclosing);
   mkdirSync(path.join(enclosing, "child"));
@@ -245,6 +252,7 @@ test("refuses enclosing worktrees, dirty indexes, and submodule metadata", (cont
 });
 
 test("detects pre-move changes and rolls back a failed rename exactly", (context) => {
+  if (process.platform === "win32") return context.skip();
   const changedRoot = temporaryDirectory(context);
   writeFileSync(path.join(changedRoot, "notes.md"), "notes\n");
   const changed = prepareRootOutput({ root: changedRoot });
@@ -296,6 +304,7 @@ test("detects pre-move changes and rolls back a failed rename exactly", (context
 });
 
 test("preserves a Git index changed before installation", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   initializeGit(root);
   writeFileSync(path.join(root, "README.md"), "Design README\n");
@@ -338,6 +347,7 @@ test("preserves a Git index changed before installation", (context) => {
 });
 
 test("rolls back an unexpected post-install verification failure", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   initializeGit(root);
   writeFileSync(path.join(root, "README.md"), "Design README\n");
@@ -384,6 +394,7 @@ test("rolls back an unexpected post-install verification failure", (context) => 
 });
 
 test("refuses artifact collisions with reserved root names", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   writeFileSync(path.join(root, "notes.md"), "notes\n");
   const target = prepareRootOutput({ root });
@@ -406,6 +417,7 @@ test("refuses artifact collisions with reserved root names", (context) => {
 });
 
 test("retains a versioned journal only when rollback cannot complete", (context) => {
+  if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   writeFileSync(path.join(root, "one"), "one\n");
   writeFileSync(path.join(root, "two"), "two\n");

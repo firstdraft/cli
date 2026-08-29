@@ -304,6 +304,7 @@ test("plan compile --output starts a direct Compilation without Publication", as
 });
 
 test("plan compile root output locks before push and releases after invalid analysis", async (context) => {
+  if (process.platform === "win32") return context.skip();
   const cwd = localDirectory(context, PLAN_SOURCE);
   writeFileSync(path.join(cwd, "notes.md"), "design notes\n");
   let compilations = 0;
@@ -333,6 +334,7 @@ test("plan compile root output locks before push and releases after invalid anal
 });
 
 test("plan compile root output materializes directly without Publication", async (context) => {
+  if (process.platform === "win32") return context.skip();
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",
     foundation_plan_etag: ETAG,
