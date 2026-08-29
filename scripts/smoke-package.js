@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -652,11 +653,85 @@ First Draft: Application compiled.
         0o644,
       );
     }
+
+    const rootOutput = await spawnPackedCliAsync(
+      ["plan", "compile", "--output", "."],
+      projectDirectory,
+    );
+    const expectedCompilationStarts = process.platform === "win32" ? 1 : 2;
+
+    if (process.platform === "win32") {
+      assertHandledFailure(rootOutput, 2, {
+        error: "invalid_output_path",
+        detail:
+          "The compilation output must be an absent path beneath an existing real directory or the eligible current directory.",
+        reason: "root_platform_unsupported",
+      });
+    } else {
+      const realProjectDirectory = realpathSync(projectDirectory);
+      assert.equal(rootOutput.status, 0);
+      assert.equal(
+        rootOutput.stderr,
+        `First Draft: Analyzing Foundation Plan...
+First Draft: Foundation Plan analysis valid.
+First Draft: Compiling application...
+First Draft: Application compiled.
+`,
+      );
+      assert.deepEqual(JSON.parse(rootOutput.stdout).output, {
+        path: realProjectDirectory,
+        file_count: 1,
+        manifest_sha256: manifestSha256,
+        root_adoption: {
+          design_path: path.join(realProjectDirectory, "design"),
+          moved_entry_count: 3,
+          git_repository_preserved: false,
+          git_index_replaced: false,
+        },
+      });
+      assert.equal(
+        readFileSync(
+          path.join(realProjectDirectory, "app/models/movie.rb"),
+          "utf8",
+        ),
+        contents.toString("utf8"),
+      );
+      assert.deepEqual(
+        readFileSync(
+          path.join(
+            realProjectDirectory,
+            "design/.firstdraft/foundation-plan.json",
+          ),
+        ),
+        plan,
+      );
+      assert.equal(
+        readFileSync(
+          path.join(
+            realProjectDirectory,
+            "design/application/app/models/movie.rb",
+          ),
+          "utf8",
+        ),
+        contents.toString("utf8"),
+      );
+      assert.equal(
+        readFileSync(
+          path.join(
+            realProjectDirectory,
+            "design/generated/app/models/movie.rb",
+          ),
+          "utf8",
+        ),
+        contents.toString("utf8"),
+      );
+    }
+
     assert.deepEqual(seen, {
       plan: true,
       analysis: true,
       publication: 1,
-      compilationStarts: 1,
+      compilationStarts: expectedCompilationStarts,
       status: true,
       artifact: true,
     });
@@ -692,7 +767,7 @@ function sha256(value) {
 }
 
 /**
- * @param {ReturnType<typeof spawnPackedCli>} execution
+ * @param {{status: number | null, stdout: string, stderr: string}} execution
  * @param {number} status
  * @param {Record<string, unknown>} error
  */
