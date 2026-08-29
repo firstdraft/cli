@@ -68,7 +68,9 @@ materialization failure envelopes include that last validated projection as `cur
 - after `artifact_unavailable`, wait if appropriate and use
   `firstdraft compilation download <current.compilation.id> --output <new-absent-path>`; and
 - after `materialization_failed`, repair the destination condition, then use the same lower-level download command
-  with a new absent path.
+  with a new absent path. A root-output attempt whose transaction fully rolled back may instead retry that retained
+  download with `--output .`; `reason: "root_rollback_incomplete"` requires reconciliation of the retained
+  `.firstdraft-root-output` journal before another root attempt.
 
 After `compilation_wait_timed_out`, retained work may still continue. Use
 `firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun
@@ -118,5 +120,10 @@ stopped without following the replacement.
 | `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                |
 | `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                              |
 | Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`. |
-| Download commands                            | `invalid_output_path`                                                                              |    2 | The destination was not an absent path beneath an existing real directory.                             |
-| Download commands                            | `materialization_failed`                                                                           |    1 | The output raced or installation failed; direct Compile post-start errors include `current`.           |
+| Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.  |
+| Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable. |
+
+Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_reserved_path`,
+`root_entry_unsupported`, `root_enclosing_worktree`, `root_git_unavailable`, `root_git_unsupported`,
+`root_git_dirty`, `root_ignore_not_preserved`, and `root_busy`. Root-output `materialization_failed.reason` values
+are `output_changed`, `root_artifact_collision`, `root_transaction_failed`, and `root_rollback_incomplete`.
