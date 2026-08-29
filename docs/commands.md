@@ -153,41 +153,60 @@ the accepted source SHA-256 from the saved ETag, hashes the current local bytes,
 
 ### Materialize a direct Compilation
 
-With `--output`, the CLI accepts either an explicit absent destination beneath an existing real directory or the
-exact current directory (`.`). It validates that destination before pushing the Plan and checks it again after
-analysis. Other existing destinations remain invalid, so `--output ./application` retains its absent-directory
-contract.
+With `--output`, the CLI accepts either an explicit absent destination beneath an existing real directory or a path
+that resolves to the physical current directory. It validates that destination before pushing the Plan and checks
+it again after analysis. Other existing destinations remain invalid, so `--output ./application` retains its
+absent-directory contract.
 
-`--output .` is the noninteractive root-adoption mode. It works in an arbitrary real current directory and does not
-recognize Drawing Board or another repository layout specially. Before starting Compilation, the CLI requires:
+`--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
+another spelling that resolves to that same physical directory select the same mode. It works at any real current
+directory that meets the preconditions below and does not recognize Drawing Board or another repository layout
+specially. Before starting Compilation, the CLI requires:
 
-- the current directory and its parent to be real directories, with the current directory not a filesystem root;
-- no existing top-level path whose portable, case-insensitive name is `design`;
-- only regular files and real directories in the existing tree, with no symbolic links, special files, nested Git
-  repositories, or mounted subtrees; and
-- when the current directory is a Git worktree, a clean tracked worktree and index. Untracked and ignored design
-  material may remain present.
+- the current directory to be a real, writable, non-filesystem-root directory;
+- no existing top-level path whose portable, case-insensitive name is `design` or the reserved
+  `.firstdraft-root-output` transaction path;
+- every top-level entry other than `.git` to be a regular file or real directory on the current directory's
+  filesystem. Interior symlinks, dependency trees, sockets, and nested repositories move opaquely with their
+  top-level directory; the CLI neither follows nor repairs them; and
+- when the current directory is the root of a Git worktree, a clean tracked worktree and index with no unmerged
+  entries, sparse checkout, or in-progress merge, rebase, cherry-pick, or revert. Untracked and ignored design
+  material may remain present. A directory nested inside a higher Git worktree is refused rather than treated as
+  non-Git. A valid top-level `.git` file for a linked worktree is retained like a `.git` directory.
 
-After the accepted Plan and matching valid Analysis, the CLI captures the exact preexisting path, type, mode, and
-file-byte inventory immediately before it starts Compilation. It also captures the worktree's untracked and ignored
-paths without changing the index. A filesystem change while Compilation or artifact download is in progress stops
-materialization instead of guessing which state to preserve.
+Git-backed root adoption invokes the installed Git executable explicitly. Read-only discovery uses
+`git --no-optional-locks` with stable NUL-delimited porcelain so it does not refresh the index. Before remote work,
+the CLI verifies in a temporary preview that every currently ignored entry remains ignored after its path and
+applicable worktree `.gitignore` files move beneath `design`; repository-local and configured global exclusions are
+both honored. A refusal is `invalid_output_path` with a machine-readable `reason` and happens before Plan push.
 
-The complete generated artifact is written and verified in a uniquely created sibling transaction directory on the
-same filesystem before any existing path moves. The artifact may not own `design` or `.git`. The transaction then
-moves every preexisting non-Git entry, including the private `.firstdraft` authoring state, under the fixed
-`./design` directory; keeps an existing top-level `.git` repository at the root; and installs the exact artifact as
-the root application. If the root contains no entry other than `.git`, it does not create an empty `design`
-directory. A failed rename or post-install verification reverses the completed renames and removes only the
-transaction directory. A rollback failure leaves the owned transaction journal intact and reports
-`materialization_failed` rather than deleting either copy.
+After the accepted Plan and matching valid Analysis, the CLI creates `.firstdraft-root-output` with exclusive
+creation. That directory is both the single-writer lock and the owned transaction journal. It captures the exact
+top-level entry identities immediately before it starts Compilation and rechecks them immediately before moving
+anything. A detected top-level change stops materialization. Interior changes are not recursively hashed: the
+top-level directory is moved intact at the transaction boundary.
 
-Git history is preserved, but the CLI does not rewrite or stage the index: formerly tracked design paths therefore
-appear as root deletions plus untracked paths beneath `design` until the caller deliberately stages the new layout.
-Previously untracked paths remain untracked. Every previously ignored path must still be ignored at its relocated
-`design/...` path after the switch; otherwise the CLI rolls the whole transaction back. This preserves ordinary
-relative `.gitignore` protection without editing `.git/info/exclude` or a configured global excludes file. A
-non-Git root remains non-Git.
+The complete generated artifact is written and verified inside that in-root transaction directory before any
+existing path moves. Staging inside the destination makes every later rename same-filesystem even when the current
+directory itself is a container mount point. The artifact may not own a top-level path whose portable,
+case-insensitive name is `design` or `.firstdraft-root-output`; artifact validation already excludes `.git` at any
+depth.
+
+The transaction creates `./design` with mode `0755` on POSIX, moves every preexisting non-Git top-level entry under
+it, keeps an existing top-level `.git` file or directory at the root, and installs the artifact's top-level entries
+at the root. If the root contains no entry other than `.git`, it does not retain an empty `design` directory. A
+failed rename or post-install verification reverses the completed renames and removes only the owned transaction.
+If rollback itself cannot finish, `materialization_failed` reports `reason: "root_rollback_incomplete"` and leaves
+`.firstdraft-root-output` in place as the recovery journal rather than deleting either copy. Another root adoption
+is refused until that state is reconciled.
+
+For a Git root, the same transaction atomically replaces the index with a prepared index that stages each formerly
+tracked path at `design/<old-path>` and stages every exact generated artifact path at the root. This handles
+overlapping names such as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated
+path. Previously untracked and ignored paths are never added to the index; the preflighted ignore protection is
+rechecked after the move. `HEAD`, refs, configuration, and history do not change. The caller should inspect and
+commit this staged root-adoption change before using destructive worktree or index restoration commands. A non-Git
+root remains non-Git and is not initialized.
 
 After valid analysis, the CLI requests one Compilation for that exact reviewed Head and never starts GitHub
 Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
@@ -198,6 +217,8 @@ and materialization failures retain the last validated Compilation projection so
 without starting duplicate work. Follow the [direct Compilation recovery procedure](errors.md#direct-compilation-recovery).
 
 Success writes one JSON object to stdout containing the validated Project, Compilation, and absolute output path.
+Root adoption additionally reports `root_adoption.design_path` (or `null` when no design directory was needed), its
+top-level moved-entry count, whether a Git repository was preserved, and whether its index was replaced.
 An absent output directory contains exactly the artifact files and modes. Root adoption additionally contains the
 preserved `design` directory and an existing root `.git`, when present; every artifact-owned path remains exact. The
 CLI does not add a Git repository, run a formatter, or repair generated source. When an absent output is nested
@@ -267,8 +288,14 @@ firstdraft compilation download 01900000-0000-7000-8000-000000000001 --output ..
 ```
 
 The same command accepts `--output .` and applies the root-adoption transaction above. This is the recovery path
-when a retained direct Compilation succeeded but its earlier root materialization did not complete; it never starts
-replacement work.
+when a retained direct Compilation succeeded but an earlier root materialization failed _and fully rolled back_; it
+never starts replacement work. An incomplete rollback leaves `.firstdraft-root-output` and requires journal
+reconciliation before this command can run again.
+
+Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
+`design/.firstdraft`; run later Plan commands from `design`, not from the generated application root. Compiling a
+later Plan revision does not overwrite an already adopted root: choose a new absent output and deliberately
+reconcile it with application work.
 
 The command validates the UUID and output path before network access, makes one status `GET`, requires `succeeded`,
 and makes one artifact `GET`. It never starts work or polls. Historical artifact validation uses the retained
