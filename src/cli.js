@@ -396,7 +396,7 @@ const PLAN_COMPILE_DIRECT_ARTIFACT_INVALID_DETAIL =
 const PLAN_COMPILE_DIRECT_MATERIALIZATION_FAILED_DETAIL =
   "The retained Compilation artifact was validated but could not be materialized. Use current.compilation.id with 'firstdraft compilation download' after repairing the output path; do not start another Compilation.";
 const COMPILATION_INVALID_OUTPUT_PATH_DETAIL =
-  "The compilation output must be an absent path beneath an existing real directory or the eligible current directory. No network request was made.";
+  "The compilation output must be an absent path beneath an existing real directory or the eligible current directory.";
 const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.";
 const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =

@@ -1263,6 +1263,15 @@ function rollbackIndex(target) {
   const indexJournal = /** @type {Record<string, unknown>} */ (
     target.journal.index
   );
+  const pending = /** @type {Record<string, unknown> | null} */ (
+    target.journal.pending
+  );
+  const installationAttempted =
+    indexJournal.installed === true ||
+    target.journal.phase === "index_installed" ||
+    pending?.kind === "install_git_index";
+  if (!installationAttempted) return true;
+
   try {
     const indexExists = pathExists(git.indexPath);
     const currentDigest = indexExists
