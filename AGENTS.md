@@ -11,3 +11,7 @@ in `docs/release-history.md`. When behavior changes, update its owning document 
   is complete only after that exact candidate passes its explicitly named release-specific qualification, is
   separately approved, and is selected by npm's `latest` dist-tag. Preserve dated alpha observations as history
   rather than describing them as current channel state.
+- The authenticated npm access and trust checks in `RELEASING.md` are configuration audits. For an ordinary release,
+  verify the retained GitHub workflow/environment binding and protected tag; do not require another npm login or
+  `npm trust list`/2FA ceremony unless that configuration changed. OIDC publication confirms the retained binding.
+  Moving an existing version's `latest` dist-tag still requires ordinary npm authentication.
