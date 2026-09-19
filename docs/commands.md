@@ -6,7 +6,7 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 The current `0.3.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.3.x`
-requires the service's `0.3.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
+requires the service's `0.4.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
 ## Command map
@@ -44,9 +44,10 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `sketch/0.19` Plan and client-generated Project ID under `.firstdraft/`. A nested ignore file
-keeps that local scratch area out of Git without changing the project's own `.gitignore`. Initialization makes no
-network request and refuses to replace an existing `.firstdraft` path.
+This creates an empty `firstdraft.foundation-plan.sketch/0.20` Plan targeting `rails-sketch/2026-09` and a
+client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
+without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
+existing `.firstdraft` path.
 
 Provide either `--name`, `--application-key`, or both. Name-only initialization derives a lower-snake key. Key-only
 initialization derives a humanized display name. Supplying both preserves both values exactly after validating them
@@ -288,7 +289,7 @@ local paths, or environment values. Success writes exactly the validated private
 newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
 stderr document after the progress lines.
 
-The closed API `0.3.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.4.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -336,6 +337,10 @@ The same command accepts `--output .` and applies the root-adoption transaction 
 when a retained direct Compilation succeeded but an earlier root materialization failed _and fully rolled back_; it
 never starts replacement work. An incomplete rollback leaves `.firstdraft-root-output` and requires journal
 reconciliation before this command can run again.
+
+Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.20` and target profile
+`rails-sketch/2026-09`, in addition to matching the retained Compilation's provenance and verifying file integrity.
+An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
 `.firstdraft/design/.firstdraft`; run later First Draft commands from `.firstdraft/design`. Run ordinary Rails

@@ -1,7 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { FOUNDATION_PLAN_FORMAT } from "../compilation-artifact.js";
+import {
+  FOUNDATION_PLAN_FORMAT,
+  RAILS_TARGET_PROFILE,
+} from "../compilation-artifact.js";
 
 /**
  * @typedef {object} FileSystem
@@ -58,7 +61,7 @@ function emptyPlan(applicationKey, name) {
     format: FOUNDATION_PLAN_FORMAT,
     target: {
       id: "rails",
-      profile: "rails-sketch/2026-08",
+      profile: RAILS_TARGET_PROFILE,
     },
     application: {
       key: applicationKey,

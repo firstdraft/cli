@@ -62,10 +62,10 @@ const PLAN_INIT_ERROR = jsonOutput({
 });
 
 const EXPECTED_PLAN = `{
-  "format": "firstdraft.foundation-plan.sketch/0.19",
+  "format": "firstdraft.foundation-plan.sketch/0.20",
   "target": {
     "id": "rails",
-    "profile": "rails-sketch/2026-08"
+    "profile": "rails-sketch/2026-09"
   },
   "application": {
     "key": "oscar_party",

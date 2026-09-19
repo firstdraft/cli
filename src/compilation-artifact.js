@@ -26,7 +26,8 @@ import {
 export const ARTIFACT_MEDIA_TYPE =
   "application/vnd.firstdraft.compilation-artifact+json";
 export const ARTIFACT_FORMAT = "firstdraft.compilation-artifact/1";
-export const FOUNDATION_PLAN_FORMAT = "firstdraft.foundation-plan.sketch/0.19";
+export const FOUNDATION_PLAN_FORMAT = "firstdraft.foundation-plan.sketch/0.20";
+export const RAILS_TARGET_PROFILE = "rails-sketch/2026-09";
 export const MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 const ARTIFACT_KEYS = ["format", "provenance", "manifest_sha256", "files"];
@@ -361,6 +362,7 @@ function parseProvenance(value, expected) {
     !hasExactKeys(value.target, TARGET_KEYS) ||
     value.target.id !== expected.target.id ||
     value.target.profile !== expected.target.profile ||
+    value.target.profile !== RAILS_TARGET_PROFILE ||
     !hasExactKeys(value.core, CORE_KEYS) ||
     !isRepository(value.core.repository) ||
     typeof value.core.revision !== "string" ||
