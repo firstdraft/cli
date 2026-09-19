@@ -340,7 +340,7 @@ test("plan compile root output materializes directly without Publication", async
     foundation_plan_etag: ETAG,
   });
   writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
-  const artifact = directArtifactFixture();
+  const artifact = directArtifactFixture(true);
   /** @type {{input: string | URL | Request, init: RequestInit}[]} */
   const calls = [];
   const result = await invoke(["plan", "compile", "--output", "."], {
@@ -385,12 +385,12 @@ test("plan compile root output materializes directly without Publication", async
     "Movie Catalog\n",
   );
   assert.equal(
-    readFileSync(path.join(cwd, "design/product-notes.md"), "utf8"),
+    readFileSync(path.join(cwd, ".firstdraft/design/product-notes.md"), "utf8"),
     "Design notes\n",
   );
   assert.equal(
     readFileSync(
-      path.join(cwd, "design/.firstdraft/foundation-plan.json"),
+      path.join(cwd, ".firstdraft/design/.firstdraft/foundation-plan.json"),
       "utf8",
     ),
     PLAN_SOURCE.toString("utf8"),
@@ -400,9 +400,22 @@ test("plan compile root output materializes directly without Publication", async
   assert.equal(output.path, realpathSync(cwd));
   assert.equal(
     output.root_adoption.design_path,
-    path.join(realpathSync(cwd), "design"),
+    path.join(realpathSync(cwd), ".firstdraft/design"),
   );
   assert.equal(output.root_adoption.moved_entry_count, 2);
+  assert.equal(
+    readFileSync(
+      path.join(cwd, ".firstdraft/submitted-foundation-plan.json"),
+      "utf8",
+    ),
+    PLAN_SOURCE.toString("utf8"),
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, ".firstdraft/gaps.json"), "utf8"),
+    '{"gaps":[]}\n',
+  );
+  assert.equal(existsSync(path.join(cwd, ".firstdraft/state.json")), false);
+  assert.equal(existsSync(path.join(cwd, "design")), false);
 });
 
 test("plan compile --output rejects an existing destination before Plan mutation", async (context) => {
@@ -1225,7 +1238,8 @@ function directCompilationBody(status, artifact) {
   };
 }
 
-function directArtifactFixture() {
+/** @param {boolean} [withContext] */
+function directArtifactFixture(withContext = false) {
   const contents = Buffer.from("Movie Catalog\n");
   const file = {
     path: "README.md",
@@ -1235,16 +1249,30 @@ function directArtifactFixture() {
     source_subject_uuids: [],
     contents_base64: contents.toString("base64"),
   };
+  const files = [file];
+  if (withContext) {
+    for (const [filePath, source] of [
+      [".firstdraft/gaps.json", Buffer.from('{"gaps":[]}\n')],
+      [".firstdraft/submitted-foundation-plan.json", PLAN_SOURCE],
+    ]) {
+      const contents = /** @type {Buffer} */ (source);
+      files.push({
+        ...file,
+        path: String(filePath),
+        sha256: sha256(contents),
+        contents_base64: contents.toString("base64"),
+      });
+    }
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
   const metadata = {
-    files: [
-      {
-        path: file.path,
-        sha256: file.sha256,
-        mode: file.mode,
-        owner: file.owner,
-        source_subject_uuids: file.source_subject_uuids,
-      },
-    ],
+    files: files.map(({ path, sha256, mode, owner, source_subject_uuids }) => ({
+      path,
+      sha256,
+      mode,
+      owner,
+      source_subject_uuids,
+    })),
   };
   const body = {
     format: "firstdraft.compilation-artifact/1",
@@ -1267,7 +1295,7 @@ function directArtifactFixture() {
       },
     },
     manifest_sha256: sha256(Buffer.from(JSON.stringify(metadata))),
-    files: [file],
+    files,
   };
   const source = Buffer.from(JSON.stringify(body));
   return { source, sha256: sha256(source) };

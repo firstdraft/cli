@@ -336,6 +336,15 @@ async function exercisePackedCompilation(projectDirectory) {
   const analyzerRelease = "foundation-plan-rails/application-2026-08";
   const compilerRelease = "foundation-plan-rails/compiler-scalar-2026-08";
   const target = { id: "rails", profile: "rails-sketch/2026-08" };
+  const gapSet = {
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: headSha256 },
+    project: { id: projectId, graph_version: 1 },
+    analysis: { release: analyzerRelease },
+    compiler_release: compilerRelease,
+    target,
+    gaps: [],
+  };
   const contents = Buffer.from("class Movie < ApplicationRecord\nend\n");
   const file = {
     path: "app/models/movie.rb",
@@ -345,15 +354,32 @@ async function exercisePackedCompilation(projectDirectory) {
     source_subject_uuids: [],
     contents_base64: contents.toString("base64"),
   };
-  const metadata = {
-    path: file.path,
-    sha256: file.sha256,
-    mode: file.mode,
-    owner: file.owner,
-    source_subject_uuids: file.source_subject_uuids,
-  };
+  const files = [
+    ...[
+      [".firstdraft/gaps.json", Buffer.from(`${JSON.stringify(gapSet)}\n`)],
+      [".firstdraft/submitted-foundation-plan.json", plan],
+    ].map(([filePath, source]) => {
+      const bytes = /** @type {Buffer} */ (source);
+      return {
+        ...file,
+        path: String(filePath),
+        sha256: sha256(bytes),
+        contents_base64: bytes.toString("base64"),
+      };
+    }),
+    file,
+  ];
+  const metadata = files.map(
+    ({ path, sha256, mode, owner, source_subject_uuids }) => ({
+      path,
+      sha256,
+      mode,
+      owner,
+      source_subject_uuids,
+    }),
+  );
   const manifestSha256 = sha256(
-    Buffer.from(JSON.stringify({ files: [metadata] })),
+    Buffer.from(JSON.stringify({ files: metadata })),
   );
   const artifact = Buffer.from(
     JSON.stringify({
@@ -380,7 +406,7 @@ async function exercisePackedCompilation(projectDirectory) {
         },
       },
       manifest_sha256: manifestSha256,
-      files: [file],
+      files,
     }),
   );
   const artifactSha256 = sha256(artifact);
@@ -407,15 +433,6 @@ async function exercisePackedCompilation(projectDirectory) {
       started_at: "2026-07-30T12:00:01.000000Z",
       completed_at: "2026-07-30T12:00:02.000000Z",
     },
-  };
-  const gapSet = {
-    format: "firstdraft.foundation-gaps/2",
-    source: { sha256: headSha256 },
-    project: { id: projectId, graph_version: 1 },
-    analysis: { release: analyzerRelease },
-    compiler_release: compilerRelease,
-    target,
-    gaps: [],
   };
   const analysis = {
     project: { id: projectId, graph_version: 1 },
@@ -453,7 +470,7 @@ async function exercisePackedCompilation(projectDirectory) {
       artifact: {
         sha256: artifactSha256,
         manifest_sha256: manifestSha256,
-        file_count: 1,
+        file_count: 3,
       },
     },
     publication: {
@@ -680,15 +697,31 @@ First Draft: Application compiled.
       );
       assert.deepEqual(JSON.parse(rootOutput.stdout).output, {
         path: realProjectDirectory,
-        file_count: 1,
+        file_count: 3,
         manifest_sha256: manifestSha256,
         root_adoption: {
-          design_path: path.join(realProjectDirectory, "design"),
+          design_path: path.join(realProjectDirectory, ".firstdraft/design"),
           moved_entry_count: 3,
           git_repository_preserved: false,
           git_index_replaced: false,
         },
       });
+      assert.deepEqual(
+        readFileSync(
+          path.join(
+            realProjectDirectory,
+            ".firstdraft/submitted-foundation-plan.json",
+          ),
+        ),
+        plan,
+      );
+      assert.equal(
+        readFileSync(
+          path.join(realProjectDirectory, ".firstdraft/gaps.json"),
+          "utf8",
+        ),
+        `${JSON.stringify(gapSet)}\n`,
+      );
       assert.equal(
         readFileSync(
           path.join(realProjectDirectory, "app/models/movie.rb"),
@@ -700,7 +733,7 @@ First Draft: Application compiled.
         readFileSync(
           path.join(
             realProjectDirectory,
-            "design/.firstdraft/foundation-plan.json",
+            ".firstdraft/design/.firstdraft/foundation-plan.json",
           ),
         ),
         plan,
@@ -709,7 +742,7 @@ First Draft: Application compiled.
         readFileSync(
           path.join(
             realProjectDirectory,
-            "design/application/app/models/movie.rb",
+            ".firstdraft/design/application/app/models/movie.rb",
           ),
           "utf8",
         ),
@@ -719,7 +752,7 @@ First Draft: Application compiled.
         readFileSync(
           path.join(
             realProjectDirectory,
-            "design/generated/app/models/movie.rb",
+            ".firstdraft/design/generated/app/models/movie.rb",
           ),
           "utf8",
         ),

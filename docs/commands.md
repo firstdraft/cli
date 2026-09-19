@@ -3,9 +3,9 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.2.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.3.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.2.x`
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.3.x`
 requires the service's `0.3.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
@@ -159,6 +159,10 @@ destination is checked again after analysis; root adoption instead holds its own
 pre-move identity recheck described below. Other existing destinations remain invalid, so
 `--output ./application` retains its absent-directory contract.
 
+The nested archive layout below describes the unreleased `0.3.0` candidate.
+[Published CLI `0.2.2`](release-history.md#022-publication-and-registry-observation) archives at top-level `design/`;
+existing applications are not migrated automatically.
+
 `--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
 another spelling that resolves to that same physical directory select the same mode. It works at any real current
 directory that meets the preconditions below and does not recognize Drawing Board or another repository layout
@@ -166,8 +170,8 @@ specially. This first root-adoption contract supports POSIX filesystems; Windows
 and refuses root adoption as `root_platform_unsupported`. Before starting Compilation, the CLI requires:
 
 - the current directory to be a real, writable, non-filesystem-root directory;
-- no existing top-level path whose portable, case-insensitive name is `design` or the reserved
-  `.firstdraft-root-output` transaction path;
+- no existing `.firstdraft/design` archive or top-level `.firstdraft-root-output` transaction path, including
+  portable, case-insensitive spellings;
 - every top-level entry other than `.git` to be a regular file or real directory on the current directory's
   filesystem. Interior symlinks, dependency trees, sockets, and nested repositories move opaquely with their
   top-level directory; the CLI neither follows nor repairs them; and
@@ -181,8 +185,8 @@ and refuses root adoption as `root_platform_unsupported`. Before starting Compil
 Git-backed root adoption invokes the installed Git executable explicitly. Read-only discovery uses
 `git --no-optional-locks` with stable NUL-delimited porcelain so it does not refresh the index. Before remote work,
 the CLI verifies in a temporary preview that every currently ignored entry remains ignored after its path and
-applicable worktree `.gitignore` files move beneath `design`; repository-local and configured global exclusions are
-both honored. A refusal is `invalid_output_path` with a machine-readable `reason` and happens before Plan push.
+applicable worktree `.gitignore` files move beneath `.firstdraft/design`; repository-local and configured global
+exclusions are both honored. A refusal is `invalid_output_path` with a machine-readable `reason` and happens before Plan push.
 
 The CLI creates `.firstdraft-root-output` with exclusive creation during the pre-push output check and holds it
 through analysis, Compilation, and materialization. That directory is both the single-writer lock and the owned
@@ -202,21 +206,25 @@ safe to remove; the manual reconciliation rule below applies only after `root_ro
 
 The complete generated artifact is written and verified inside that in-root transaction directory before any
 existing path moves. Staging inside the destination makes every later rename same-filesystem even when the current
-directory itself is a container mount point. The artifact may not own a top-level path whose portable,
-case-insensitive name is `design` or `.firstdraft-root-output`; artifact validation already excludes `.git` at any
-depth.
+directory itself is a container mount point. The artifact may not own `.firstdraft/design`, its descendants, or
+the top-level `.firstdraft-root-output` path, including portable, case-insensitive spellings. `.firstdraft` must be
+a directory with that exact spelling when present; artifact validation already excludes `.git` at any depth.
 
-The transaction creates `./design` with mode `0755` on POSIX, moves every preexisting non-Git top-level entry under
-it, keeps an existing top-level `.git` file or directory at the root, and installs the artifact's top-level entries
-at the root. Immediately before each artifact entry is installed, its root destination must still be absent; an
-unexpected entry stops the transaction and is never overwritten. If the root contains no entry other than `.git`,
-it does not retain an empty `design` directory. A
-nested mount that cannot travel with its top-level directory may make its rename fail; that is a transactional
-failure, not permission to copy or traverse the mount.
+The transaction creates `.firstdraft/design` inside the verified artifact stage with mode `0755` on POSIX and moves
+every preexisting non-Git top-level entry beneath it. It keeps an existing top-level `.git` file or directory at the
+root, then installs the artifact's top-level entries there. Installing the staged `.firstdraft` places the archive
+directly at `.firstdraft/design`; there is no intermediate top-level `design` directory. The original planning
+`.firstdraft` remains intact at `.firstdraft/design/.firstdraft`, separate from the generated submitted Plan and
+gaps at `.firstdraft/`.
+
+Immediately before each artifact entry is installed, its root destination must still be absent; an unexpected
+entry stops the transaction and is never overwritten. If the root contains no entry other than `.git`, it does not
+retain an empty archive. A nested mount that cannot travel with its top-level directory may make its rename fail;
+that is a transactional failure, not permission to copy or traverse the mount.
 
 For a Git root, the CLI first prepares a replacement index that stages each formerly tracked path at
-`design/<old-path>` and stages every exact generated artifact path at the root. This handles overlapping names such
-as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated path. Previously
+`.firstdraft/design/<old-path>` and stages every exact generated artifact path at the root. This handles overlapping
+names such as `README.md` and `.gitignore` without leaving the old design blob indexed at a generated path. Previously
 untracked and ignored paths are never added to the index. Preparing that index writes the generated blobs into the
 Git object database; a rollback may therefore leave unreachable blobs for ordinary Git garbage collection, while
 `HEAD`, refs, configuration, and history remain unchanged. After the worktree renames finish, the CLI installs the
@@ -230,14 +238,17 @@ The journal is a versioned private JSON record plus owned staging files. It reco
 top-level identity set, the transaction phase, completed design and artifact renames, and, for Git, the resolved
 index path and original and prepared index digests. Each irreversible phase is recorded before the next one starts.
 On any failure after a move, index installation, or post-install verification, the CLI first restores the exact
-prior index through the same Git lock boundary, then reverses artifact and design renames in journal order. A fully
+prior index through the same Git lock boundary, then reverses artifact moves in reverse recorded order, followed
+by design moves in reverse recorded order. Reversing the installed `.firstdraft` first returns the archive to
+staging so the original planning `.firstdraft` can move back to its original root path. A fully
 successful rollback removes only the owned transaction. If rollback itself cannot finish,
 `materialization_failed` reports `reason: "root_rollback_incomplete"` and includes
 `recovery_path: ".firstdraft-root-output"`; it leaves the journal and owned copies in place rather than guessing.
-Do not delete that directory or run Git restoration commands. Inspect the versioned journal, restore the listed
-index and paths to its recorded original identities, verify that snapshot, and only then remove the transaction
-directory. Another root adoption reports `root_busy` until that state is reconciled; a foreign preexisting directory
-with the same reserved name reports `root_reserved_path`.
+Do not delete that directory or run Git restoration commands. Follow the
+[manual recovery order](errors.md#direct-compilation-recovery), reconcile the versioned journal with the current
+path identities, and verify its original snapshot before removing the transaction directory. Another root adoption
+reports `root_busy` until that state is reconciled; a foreign preexisting directory with the same reserved name
+reports `root_reserved_path`.
 
 After valid analysis, the CLI requests one Compilation for that exact reviewed Head and never starts GitHub
 Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
@@ -252,7 +263,9 @@ Root adoption additionally reports `root_adoption.design_path` (or `null` when n
 top-level moved-entry count, whether a Git repository was preserved, and whether its index was replaced.
 After final verification succeeds, the CLI removes its owned `.firstdraft-root-output` transaction directory.
 An absent output directory contains exactly the artifact files and modes. Root adoption additionally contains the
-preserved `design` directory and an existing root `.git`, when present; every artifact-owned path remains exact. The
+preserved `.firstdraft/design` archive and an existing root `.git`, when present. Verification skips only the
+archive and retained Git/transaction paths; it still checks every generated file, including
+`.firstdraft/submitted-foundation-plan.json` and `.firstdraft/gaps.json`, and rejects unexpected generated paths. The
 CLI does not add a Git repository, run a formatter, or repair generated source. When an absent output is nested
 inside another Git worktree, initialize the application as its own repository before running generated checks that
 inspect Git; otherwise Git resolves to the parent worktree. Progress on stderr reports analysis and Compilation
@@ -325,9 +338,11 @@ never starts replacement work. An incomplete rollback leaves `.firstdraft-root-o
 reconciliation before this command can run again.
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
-`design/.firstdraft`; run later Plan commands from `design`, not from the generated application root. Compiling a
-later Plan revision does not overwrite an already adopted root: choose a new absent output and deliberately
-reconcile it with application work.
+`.firstdraft/design/.firstdraft`; run later First Draft commands from `.firstdraft/design`. Run ordinary Rails
+setup, preview, and tests from the generated application root. Retain the archive when further First Draft
+authoring is useful. The CLI does not run or qualify the generated application's setup, preview, or test commands.
+Compiling a later Plan revision does not overwrite an already adopted root: choose a new absent output and
+deliberately reconcile it with application work.
 
 The command validates the UUID and output path before network access, makes one status `GET`, requires `succeeded`,
 and makes one artifact `GET`. It never starts work or polls. Historical artifact validation uses the retained

@@ -283,9 +283,9 @@ export function materializeCompilationArtifact(artifact, target) {
           writeArtifactTree(artifact.files, root);
           applyMode(root, DIRECTORY_MODE);
         },
-        verifyArtifact: (root, ignoredRootEntries) =>
-          verifyArtifactTree(artifact.files, root, ignoredRootEntries, {
-            verifyRootMode: ignoredRootEntries === undefined,
+        verifyArtifact: (root, ignoredPaths) =>
+          verifyArtifactTree(artifact.files, root, ignoredPaths, {
+            verifyRootMode: ignoredPaths === undefined,
           }),
       });
     } catch (error) {
@@ -595,19 +595,19 @@ function writeArtifactTree(files, root) {
 /**
  * @param {ValidatedArtifactFile[]} files
  * @param {string} root
- * @param {Set<string>} [ignoredRootEntries]
+ * @param {Set<string>} [ignoredPaths]
  * @param {{verifyRootMode?: boolean}} [options]
  */
 function verifyArtifactTree(
   files,
   root,
-  ignoredRootEntries = new Set(),
+  ignoredPaths = new Set(),
   { verifyRootMode = true } = {},
 ) {
   const expectedFiles = new Map(files.map((file) => [file.path, file]));
   const expectedDirectories = new Set();
-  for (const file of files) {
-    const components = file.path.split("/");
+  for (const relativePath of [...expectedFiles.keys(), ...ignoredPaths]) {
+    const components = relativePath.split("/");
     for (let index = 1; index < components.length; index += 1) {
       expectedDirectories.add(components.slice(0, index).join("/"));
     }
@@ -625,7 +625,7 @@ function verifyArtifactTree(
       "The materialized compilation root is invalid.",
     );
   }
-  walkTree(root, "", actualFiles, actualDirectories, ignoredRootEntries);
+  walkTree(root, "", actualFiles, actualDirectories, ignoredPaths);
   if (
     !setsEqual(actualFiles, new Set(expectedFiles.keys())) ||
     !setsEqual(actualDirectories, expectedDirectories)
@@ -681,18 +681,18 @@ function hasExpectedMode(actual, expected) {
  * @param {string} relative
  * @param {Set<string>} files
  * @param {Set<string>} directories
- * @param {Set<string>} ignoredRootEntries
+ * @param {Set<string>} ignoredPaths
  */
-function walkTree(root, relative, files, directories, ignoredRootEntries) {
+function walkTree(root, relative, files, directories, ignoredPaths) {
   const directory = relative ? path.join(root, ...relative.split("/")) : root;
   const entries = readdirSync(directory, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (relative === "" && ignoredRootEntries.has(entry.name)) continue;
     const entryRelative = relative ? `${relative}/${entry.name}` : entry.name;
+    if (ignoredPaths.has(entryRelative)) continue;
     if (entry.isDirectory()) {
       directories.add(entryRelative);
-      walkTree(root, entryRelative, files, directories, ignoredRootEntries);
+      walkTree(root, entryRelative, files, directories, ignoredPaths);
     } else if (entry.isFile()) {
       files.add(entryRelative);
     } else {

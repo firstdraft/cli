@@ -23,7 +23,7 @@ import path from "node:path";
 import { isFileSystemError } from "./file-system.js";
 
 export const ROOT_TRANSACTION_NAME = ".firstdraft-root-output";
-export const ROOT_DESIGN_NAME = "design";
+export const ROOT_DESIGN_PATH = ".firstdraft/design";
 
 const JOURNAL_FORMAT = "firstdraft.root-output-transaction/1";
 const JOURNAL_NAME = "journal.json";
@@ -37,10 +37,7 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const MAX_GIT_OUTPUT_BYTES = 128 * 1024 * 1024;
 const GIT_HASH_PATTERN = /^[0-9a-f]{40,64}$/;
-const RESERVED_NAMES = new Set([
-  ROOT_DESIGN_NAME.toLowerCase(),
-  ROOT_TRANSACTION_NAME.toLowerCase(),
-]);
+const RESERVED_NAMES = new Set([ROOT_TRANSACTION_NAME.toLowerCase()]);
 
 export class RootOutputPathError extends Error {
   /** @param {string} message @param {string} reason @param {{cause?: unknown}} [options] */
@@ -270,7 +267,7 @@ export function releaseRootOutput(target) {
  * @param {string} artifact.manifest_sha256
  * @param {object} callbacks
  * @param {(root: string) => void} callbacks.writeArtifact
- * @param {(root: string, ignoredRootEntries?: Set<string>) => void} callbacks.verifyArtifact
+ * @param {(root: string, ignoredPaths?: Set<string>) => void} callbacks.verifyArtifact
  * @param {(from: string, to: string) => void} [callbacks.rename]
  */
 export function materializeRootOutput(
@@ -310,7 +307,7 @@ export function materializeRootOutput(
         design_path:
           movedEntries.length === 0
             ? null
-            : path.join(target.path, ROOT_DESIGN_NAME),
+            : path.join(target.path, ROOT_DESIGN_PATH),
         moved_entry_count: movedEntries.length,
         git_repository_preserved: target.git !== null,
         git_index_replaced: target.git !== null,
@@ -344,16 +341,24 @@ function assertReservedPathsAvailable(root) {
   const names = readdirSync(root);
   for (const name of names) {
     const folded = name.toLowerCase();
-    if (folded === ROOT_DESIGN_NAME.toLowerCase()) {
-      throw new RootOutputPathError(
-        "The root output design path is reserved.",
-        "root_reserved_path",
-      );
-    }
     if (folded !== ROOT_TRANSACTION_NAME.toLowerCase()) continue;
     if (name === ROOT_TRANSACTION_NAME) throw existingTransactionError(root);
     throw new RootOutputPathError(
       "The root output transaction path is reserved.",
+      "root_reserved_path",
+    );
+  }
+  for (const name of names) assertDesignPathAvailable(root, name);
+}
+
+/** @param {string} root @param {string} name */
+function assertDesignPathAvailable(root, name) {
+  if (name.toLowerCase() !== ".firstdraft") return;
+  const entry = path.join(root, name);
+  if (!lstatSync(entry).isDirectory()) return;
+  if (readdirSync(entry).some((child) => child.toLowerCase() === "design")) {
+    throw new RootOutputPathError(
+      "The root output design path is reserved.",
       "root_reserved_path",
     );
   }
@@ -388,6 +393,7 @@ function captureRootSnapshot(root, rootDevice) {
   const names = readdirSync(root).sort(compareStrings);
   for (const name of names) {
     if (name === ROOT_TRANSACTION_NAME) continue;
+    assertDesignPathAvailable(root, name);
     if (RESERVED_NAMES.has(name.toLowerCase())) {
       throw new RootOutputPathError(
         "A reserved root output path appeared during preflight.",
@@ -549,7 +555,14 @@ function removeCompletedTransaction(target) {
 function assertArtifactRootNames(files) {
   for (const file of files) {
     const top = file.path.split("/", 1)[0] ?? "";
-    if (RESERVED_NAMES.has(top.toLowerCase())) {
+    const folded = file.path.toLowerCase();
+    if (
+      RESERVED_NAMES.has(top.toLowerCase()) ||
+      folded === ".firstdraft" ||
+      (top.toLowerCase() === ".firstdraft" && top !== ".firstdraft") ||
+      folded === ROOT_DESIGN_PATH ||
+      folded.startsWith(`${ROOT_DESIGN_PATH}/`)
+    ) {
       throw new RootOutputMaterializationError(
         "The compilation artifact owns a reserved root path.",
         "root_artifact_collision",
@@ -567,10 +580,15 @@ function performRootTransaction(target, files, rename) {
   const designEntries = target.snapshot.filter(
     (entry) => entry.name !== ".git",
   );
-  const designPath = path.join(target.path, ROOT_DESIGN_NAME);
   const artifactStage = path.join(target.transactionPath, ARTIFACT_STAGE_NAME);
+  // Keep the old .firstdraft inside the staged archive until the generated
+  // .firstdraft and its archive can be installed together at the root.
+  const designPath = path.join(artifactStage, ROOT_DESIGN_PATH);
   const artifactTopNames = [
-    ...new Set(files.map((file) => file.path.split("/", 1)[0] ?? "")),
+    ...new Set([
+      ...files.map((file) => file.path.split("/", 1)[0] ?? ""),
+      ...(designEntries.length > 0 ? [".firstdraft"] : []),
+    ]),
   ].sort(compareStrings);
 
   if (designEntries.length > 0) {
@@ -578,6 +596,11 @@ function performRootTransaction(target, files, rename) {
       kind: "create_design",
       path: designPath,
     });
+    mkdirSync(path.dirname(designPath), {
+      recursive: true,
+      mode: DIRECTORY_MODE,
+    });
+    chmodSync(path.dirname(designPath), DIRECTORY_MODE);
     mkdirSync(designPath, { mode: DIRECTORY_MODE });
     target.journal.design_created = true;
     chmodSync(designPath, DIRECTORY_MODE);
@@ -644,7 +667,7 @@ function finishIrreversibleStep(target, phase) {
 /**
  * @param {RootOutputTarget} target
  * @param {Array<{path: string}>} files
- * @param {(root: string, ignoredRootEntries?: Set<string>) => void} verifyArtifact
+ * @param {(root: string, ignoredPaths?: Set<string>) => void} verifyArtifact
  */
 function verifyRootResult(target, files, verifyArtifact) {
   const ignored = new Set([ROOT_TRANSACTION_NAME]);
@@ -652,11 +675,11 @@ function verifyRootResult(target, files, verifyArtifact) {
     ignored.add(".git");
   }
   if (target.snapshot.some((entry) => entry.name !== ".git")) {
-    ignored.add(ROOT_DESIGN_NAME);
+    ignored.add(ROOT_DESIGN_PATH);
   }
   verifyArtifact(target.path, ignored);
 
-  const designPath = path.join(target.path, ROOT_DESIGN_NAME);
+  const designPath = path.join(target.path, ROOT_DESIGN_PATH);
   for (const identity of target.snapshot) {
     const currentPath =
       identity.name === ".git"
@@ -698,7 +721,7 @@ function verifyRootResult(target, files, verifyArtifact) {
   const expectedTopNames = new Set(
     files.map((file) => file.path.split("/", 1)[0] ?? ""),
   );
-  for (const name of ignored) expectedTopNames.add(name);
+  for (const name of ignored) expectedTopNames.add(name.split("/", 1)[0] ?? "");
   const actualTopNames = new Set(readdirSync(target.path));
   if (!setsEqual(expectedTopNames, actualTopNames)) {
     throw new RootOutputMaterializationError(
@@ -750,7 +773,11 @@ function rollbackRootTransaction(target, rename) {
 
   if (target.journal.design_created) {
     try {
-      const designPath = path.join(target.path, ROOT_DESIGN_NAME);
+      const designPath = path.join(
+        target.transactionPath,
+        ARTIFACT_STAGE_NAME,
+        ROOT_DESIGN_PATH,
+      );
       if (readdirSync(designPath).length === 0) {
         rmdirSync(designPath);
       } else {
@@ -1019,7 +1046,7 @@ function assertIgnoreProtection(target) {
     }
 
     const expected = target.git.ignoredPaths.map(
-      (candidate) => `${ROOT_DESIGN_NAME}/${candidate}`,
+      (candidate) => `${ROOT_DESIGN_PATH}/${candidate}`,
     );
     const result = invokeGit(
       target.path,
@@ -1066,7 +1093,7 @@ function copyApplicableIgnoreFiles(root, previewWorktree, ignoredPath) {
 
     const destination = path.join(
       previewWorktree,
-      ROOT_DESIGN_NAME,
+      ROOT_DESIGN_PATH,
       ...ancestor,
       ".gitignore",
     );
@@ -1084,7 +1111,7 @@ function createPreviewEntry(root, previewWorktree, ignoredPath) {
   const source = path.join(root, ...ignoredPath.split("/"));
   const destination = path.join(
     previewWorktree,
-    ROOT_DESIGN_NAME,
+    ROOT_DESIGN_PATH,
     ...ignoredPath.split("/"),
   );
   let stat;
@@ -1123,7 +1150,7 @@ function prepareGitIndex(target, files) {
   for (const entry of git.indexEntries) {
     indexRecords.push(
       Buffer.from(
-        `${entry.mode} ${entry.object} 0\t${ROOT_DESIGN_NAME}/${entry.path}\0`,
+        `${entry.mode} ${entry.object} 0\t${ROOT_DESIGN_PATH}/${entry.path}\0`,
       ),
     );
   }
@@ -1317,7 +1344,7 @@ function rollbackIndex(target) {
 function assertMovedIgnoreProtection(target) {
   if (target.git === null || target.git.ignoredPaths.length === 0) return;
   const expected = target.git.ignoredPaths.map(
-    (candidate) => `${ROOT_DESIGN_NAME}/${candidate}`,
+    (candidate) => `${ROOT_DESIGN_PATH}/${candidate}`,
   );
   const result = invokeGit(
     target.path,

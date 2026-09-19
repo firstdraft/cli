@@ -29,6 +29,12 @@ import {
 
 /** @type {Array<{path: string, mode: 420 | 493, contents: string}>} */
 const ARTIFACT_FILES = [
+  { path: ".firstdraft/gaps.json", mode: 0o644, contents: '{"gaps":[]}\n' },
+  {
+    path: ".firstdraft/submitted-foundation-plan.json",
+    mode: 0o644,
+    contents: '{"submitted":true}\n',
+  },
   { path: "README.md", mode: 0o644, contents: "Generated application\n" },
   { path: "app/models/movie.rb", mode: 0o644, contents: "class Movie; end\n" },
   { path: "bin/setup", mode: 0o755, contents: "#!/bin/sh\n" },
@@ -46,7 +52,7 @@ test("refuses root adoption on Windows", () => {
 test("adopts an arbitrary non-Git root without traversing preserved interiors", (context) => {
   if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
-  mkdirSync(path.join(root, ".firstdraft"));
+  mkdirSync(path.join(root, ".firstdraft"), { mode: 0o700 });
   writeFileSync(
     path.join(root, ".firstdraft", "foundation-plan.json"),
     "plan\n",
@@ -60,7 +66,7 @@ test("adopts an arbitrary non-Git root without traversing preserved interiors", 
   const result = materialize(target);
 
   assert.deepEqual(result.root_adoption, {
-    design_path: path.join(realpathSync(root), "design"),
+    design_path: path.join(realpathSync(root), ".firstdraft/design"),
     moved_entry_count: 2,
     git_repository_preserved: false,
     git_index_replaced: false,
@@ -71,15 +77,22 @@ test("adopts an arbitrary non-Git root without traversing preserved interiors", 
   );
   assert.equal(
     readFileSync(
-      path.join(root, "design/.firstdraft/foundation-plan.json"),
+      path.join(root, ".firstdraft/design/.firstdraft/foundation-plan.json"),
       "utf8",
     ),
     "plan\n",
   );
   assert.equal(
-    lstatSync(path.join(root, "design/materials/latest")).isSymbolicLink(),
+    lstatSync(
+      path.join(root, ".firstdraft/design/materials/latest"),
+    ).isSymbolicLink(),
     true,
   );
+  assert.equal(
+    lstatSync(path.join(root, ".firstdraft/design/.firstdraft")).mode & 0o777,
+    0o700,
+  );
+  assert.equal(lstatSync(path.join(root, ".firstdraft")).mode & 0o777, 0o755);
   assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
 });
 
@@ -118,7 +131,7 @@ test("rejects unsafe root shapes before mutation", (context) => {
   assert.equal(existsSync(path.join(linkedRoot, ROOT_TRANSACTION_NAME)), false);
 
   const reservedRoot = temporaryDirectory(context);
-  mkdirSync(path.join(reservedRoot, "Design"));
+  mkdirSync(path.join(reservedRoot, ".FirstDraft/Design"), { recursive: true });
   assert.throws(
     () => prepareRootOutput({ root: reservedRoot }),
     (error) =>
@@ -131,14 +144,20 @@ test("preserves a Git worktree and installs an exact prepared index", (context) 
   if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
   initializeGit(root);
-  writeFileSync(path.join(root, ".gitignore"), ".env\n");
+  writeFileSync(
+    path.join(root, ".gitignore"),
+    ".env\n.firstdraft/state.json\n",
+  );
   writeFileSync(path.join(root, "README.md"), "Design README\n");
   mkdirSync(path.join(root, ".firstdraft"));
   writeFileSync(
     path.join(root, ".firstdraft", "foundation-plan.json"),
     "plan\n",
   );
-  writeFileSync(path.join(root, ".env"), "SECRET=value\n");
+  writeFileSync(path.join(root, ".firstdraft/state.json"), "private-state\n", {
+    mode: 0o600,
+  });
+  writeFileSync(path.join(root, ".env"), "SECRET=value\n", { mode: 0o600 });
   writeFileSync(path.join(root, "notes.md"), "untracked\n");
   git(root, [
     "add",
@@ -147,7 +166,9 @@ test("preserves a Git worktree and installs an exact prepared index", (context) 
     ".firstdraft/foundation-plan.json",
   ]);
   git(root, ["commit", "-m", "Design application"]);
+  git(root, ["remote", "add", "origin", "https://example.test/planning.git"]);
   const originalHead = git(root, ["rev-parse", "HEAD"]).trim();
+  const originalConfig = readFileSync(path.join(root, ".git/config"));
 
   const target = prepareRootOutput({ root });
   const result = materialize(target);
@@ -155,19 +176,43 @@ test("preserves a Git worktree and installs an exact prepared index", (context) 
   assert.equal(result.root_adoption.git_repository_preserved, true);
   assert.equal(result.root_adoption.git_index_replaced, true);
   assert.equal(git(root, ["rev-parse", "HEAD"]).trim(), originalHead);
+  assert.deepEqual(
+    readFileSync(path.join(root, ".git/config")),
+    originalConfig,
+  );
+  assert.equal(
+    readFileSync(
+      path.join(root, ".firstdraft/design/.firstdraft/state.json"),
+      "utf8",
+    ),
+    "private-state\n",
+  );
+  assert.equal(
+    lstatSync(path.join(root, ".firstdraft/design/.firstdraft/state.json"))
+      .mode & 0o777,
+    0o600,
+  );
+  assert.equal(
+    gitStatus(root, [
+      "check-ignore",
+      ".firstdraft/design/.firstdraft/state.json",
+    ]),
+    0,
+  );
+  assert.equal(existsSync(path.join(root, "design")), false);
   assert.equal(
     readFileSync(path.join(root, "README.md"), "utf8"),
     "Generated application\n",
   );
   assert.equal(
-    readFileSync(path.join(root, "design/README.md"), "utf8"),
+    readFileSync(path.join(root, ".firstdraft/design/README.md"), "utf8"),
     "Design README\n",
   );
   assert.equal(
-    readFileSync(path.join(root, "design/.env"), "utf8"),
+    readFileSync(path.join(root, ".firstdraft/design/.env"), "utf8"),
     "SECRET=value\n",
   );
-  assert.equal(gitStatus(root, ["check-ignore", "design/.env"]), 0);
+  assert.equal(gitStatus(root, ["check-ignore", ".firstdraft/design/.env"]), 0);
   assert.equal(gitStatus(root, ["diff-files", "--quiet", "--"]), 0);
 
   const indexed = git(root, ["ls-files", "-z"])
@@ -175,15 +220,17 @@ test("preserves a Git worktree and installs an exact prepared index", (context) 
     .filter(Boolean)
     .sort();
   assert.deepEqual(indexed, [
+    ".firstdraft/design/.firstdraft/foundation-plan.json",
+    ".firstdraft/design/.gitignore",
+    ".firstdraft/design/README.md",
+    ".firstdraft/gaps.json",
+    ".firstdraft/submitted-foundation-plan.json",
     "README.md",
     "app/models/movie.rb",
     "bin/setup",
-    "design/.firstdraft/foundation-plan.json",
-    "design/.gitignore",
-    "design/README.md",
   ]);
-  assert.equal(indexed.includes("design/.env"), false);
-  assert.equal(indexed.includes("design/notes.md"), false);
+  assert.equal(indexed.includes(".firstdraft/design/.env"), false);
+  assert.equal(indexed.includes(".firstdraft/design/notes.md"), false);
 });
 
 test("preserves a linked Git worktree without relocating its Git file", (context) => {
@@ -209,7 +256,7 @@ test("preserves a linked Git worktree without relocating its Git file", (context
     "Generated application\n",
   );
   assert.equal(
-    readFileSync(path.join(root, "design/README.md"), "utf8"),
+    readFileSync(path.join(root, ".firstdraft/design/README.md"), "utf8"),
     "Design README\n",
   );
 });
@@ -296,7 +343,10 @@ test("detects pre-move changes and rolls back a failed rename exactly", (context
   );
   assert.equal(readFileSync(path.join(rollbackRoot, "one"), "utf8"), "one\n");
   assert.equal(readFileSync(path.join(rollbackRoot, "two"), "utf8"), "two\n");
-  assert.equal(existsSync(path.join(rollbackRoot, "design")), false);
+  assert.equal(
+    existsSync(path.join(rollbackRoot, ".firstdraft/design")),
+    false,
+  );
   assert.equal(
     existsSync(path.join(rollbackRoot, ROOT_TRANSACTION_NAME)),
     false,
@@ -342,96 +392,185 @@ test("preserves a Git index changed before installation", (context) => {
     readFileSync(path.join(root, "README.md"), "utf8"),
     "Design README\n",
   );
-  assert.equal(existsSync(path.join(root, "design")), false);
+  assert.equal(existsSync(path.join(root, ".firstdraft/design")), false);
   assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
 });
 
-test("rolls back an unexpected post-install verification failure", (context) => {
-  if (process.platform === "win32") return context.skip();
-  const root = temporaryDirectory(context);
-  initializeGit(root);
-  writeFileSync(path.join(root, "README.md"), "Design README\n");
-  git(root, ["add", "README.md"]);
-  git(root, ["commit", "-m", "Design application"]);
-  const indexPath = path.resolve(
-    root,
-    git(root, ["rev-parse", "--git-path", "index"]).trim(),
-  );
-  const originalIndex = readFileSync(indexPath);
-  const target = prepareRootOutput({ root });
-  let verifications = 0;
-
-  assert.throws(
-    () =>
-      materializeRootOutput(
-        target,
-        { files: ARTIFACT_FILES, manifest_sha256: "a".repeat(64) },
-        {
-          writeArtifact,
-          verifyArtifact(artifactRoot, ignoredRootEntries) {
-            verifications += 1;
-            verifyArtifact(artifactRoot, ignoredRootEntries);
-            if (verifications === 2) {
-              throw new Error("Injected post-install verification failure.");
-            }
+for (const failureAt of [
+  "planning",
+  "context",
+  "application",
+  "verification",
+]) {
+  test(`restores both contexts, private files, and Git after ${failureAt} failure`, (context) => {
+    if (process.platform === "win32") return context.skip();
+    const root = temporaryDirectory(context);
+    initializeGit(root);
+    git(root, ["remote", "add", "origin", "https://example.test/planning.git"]);
+    writeFileSync(
+      path.join(root, ".gitignore"),
+      ".env\n.firstdraft/state.json\n",
+    );
+    writeFileSync(path.join(root, "README.md"), "Planning README\n");
+    mkdirSync(path.join(root, ".firstdraft"), { mode: 0o700 });
+    writeFileSync(
+      path.join(root, ".firstdraft/foundation-plan.json"),
+      "original plan\n",
+    );
+    writeFileSync(
+      path.join(root, ".firstdraft/state.json"),
+      "original private state\n",
+      { mode: 0o600 },
+    );
+    writeFileSync(path.join(root, ".env"), "SECRET=original\n", {
+      mode: 0o600,
+    });
+    writeFileSync(path.join(root, "notes.md"), "untracked notes\n");
+    git(root, [
+      "add",
+      ".gitignore",
+      "README.md",
+      ".firstdraft/foundation-plan.json",
+    ]);
+    git(root, ["commit", "-m", "Plan application"]);
+    const originalHead = git(root, ["rev-parse", "HEAD"]);
+    const originalConfig = readFileSync(path.join(root, ".git/config"));
+    const originalIndex = readFileSync(path.join(root, ".git/index"));
+    const originalFiles = snapshotWorktree(root);
+    const target = prepareRootOutput({ root });
+    let injected = false;
+    assert.throws(
+      () =>
+        materializeRootOutput(
+          target,
+          { files: ARTIFACT_FILES, manifest_sha256: "a".repeat(64) },
+          {
+            writeArtifact,
+            rename(from, to) {
+              const shouldFail =
+                !injected &&
+                ((failureAt === "planning" &&
+                  from === path.join(target.path, "README.md")) ||
+                  (failureAt === "context" &&
+                    to === path.join(target.path, ".firstdraft")) ||
+                  (failureAt === "application" &&
+                    to === path.join(target.path, "README.md")));
+              if (shouldFail) {
+                injected = true;
+                throw Object.assign(new Error("Injected rename failure"), {
+                  code: "EIO",
+                });
+              }
+              renameSync(from, to);
+            },
+            verifyArtifact(artifactRoot, ignoredPaths) {
+              verifyArtifact(artifactRoot, ignoredPaths);
+              if (failureAt === "verification" && ignoredPaths !== undefined) {
+                injected = true;
+                throw new Error("Injected post-install verification failure");
+              }
+            },
           },
-        },
-      ),
-    (error) =>
-      error instanceof RootOutputMaterializationError &&
-      error.reason === "root_transaction_failed",
-  );
+        ),
+      (error) =>
+        error instanceof RootOutputMaterializationError &&
+        error.reason === "root_transaction_failed",
+    );
+    assert.equal(injected, true);
+    assert.deepEqual(snapshotWorktree(root), originalFiles);
+    assert.deepEqual(
+      readFileSync(path.join(root, ".git/index")),
+      originalIndex,
+    );
+    assert.deepEqual(
+      readFileSync(path.join(root, ".git/config")),
+      originalConfig,
+    );
+    assert.equal(git(root, ["rev-parse", "HEAD"]), originalHead);
+    assert.equal(gitStatus(root, ["diff", "--quiet", "--"]), 0);
+    assert.equal(gitStatus(root, ["diff", "--cached", "--quiet", "--"]), 0);
+    assert.equal(
+      gitStatus(root, ["check-ignore", ".env", ".firstdraft/state.json"]),
+      0,
+    );
+    assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
+  });
+}
 
-  assert.equal(readFileSync(indexPath).equals(originalIndex), true);
-  assert.equal(gitStatus(root, ["diff", "--quiet", "--"]), 0);
-  assert.equal(gitStatus(root, ["diff", "--cached", "--quiet", "--"]), 0);
+test("archives existing top-level design material without reserving that name", (context) => {
+  if (process.platform === "win32") return context.skip();
+  const root = temporaryDirectory(context);
+  mkdirSync(path.join(root, "design"));
+  writeFileSync(path.join(root, "design/notes.md"), "original design\n");
+  materialize(prepareRootOutput({ root }));
   assert.equal(
-    readFileSync(path.join(root, "README.md"), "utf8"),
-    "Design README\n",
+    readFileSync(path.join(root, ".firstdraft/design/design/notes.md"), "utf8"),
+    "original design\n",
   );
   assert.equal(existsSync(path.join(root, "design")), false);
-  assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
 });
 
-test("refuses artifact collisions with reserved root names", (context) => {
+test("does not retain an archive when the original root is empty", (context) => {
   if (process.platform === "win32") return context.skip();
   const root = temporaryDirectory(context);
-  writeFileSync(path.join(root, "notes.md"), "notes\n");
-  const target = prepareRootOutput({ root });
-  assert.throws(
-    () =>
-      materializeRootOutput(
-        target,
-        {
-          files: [{ path: "design/README.md", mode: 0o644 }],
-          manifest_sha256: "a".repeat(64),
-        },
-        { writeArtifact, verifyArtifact },
-      ),
-    (error) =>
-      error instanceof RootOutputMaterializationError &&
-      error.reason === "root_artifact_collision",
-  );
-  assert.equal(readFileSync(path.join(root, "notes.md"), "utf8"), "notes\n");
-  assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
+  const result = materialize(prepareRootOutput({ root }));
+  assert.equal(result.root_adoption.design_path, null);
+  assert.equal(result.root_adoption.moved_entry_count, 0);
+  assert.equal(existsSync(path.join(root, ".firstdraft/design")), false);
 });
 
-test("retains a versioned journal only when rollback cannot complete", (context) => {
+for (const artifactPath of [
+  ".firstdraft/design/README.md",
+  ".firstdraft/Design",
+  ".FIRSTDRAFT/gaps.json",
+  ".firstdraft",
+  ".FIRSTDRAFT-ROOT-OUTPUT/notes.md",
+]) {
+  test(`refuses artifact collision at ${artifactPath}`, (context) => {
+    if (process.platform === "win32") return context.skip();
+    const root = temporaryDirectory(context);
+    writeFileSync(path.join(root, "notes.md"), "notes\n");
+    const target = prepareRootOutput({ root });
+    assert.throws(
+      () =>
+        materializeRootOutput(
+          target,
+          {
+            files: [{ path: artifactPath, mode: 0o644 }],
+            manifest_sha256: "a".repeat(64),
+          },
+          { writeArtifact, verifyArtifact },
+        ),
+      (error) =>
+        error instanceof RootOutputMaterializationError &&
+        error.reason === "root_artifact_collision",
+    );
+    assert.equal(readFileSync(path.join(root, "notes.md"), "utf8"), "notes\n");
+    assert.equal(existsSync(path.join(root, ROOT_TRANSACTION_NAME)), false);
+  });
+}
+
+test("retains both contexts and their journal when rollback cannot complete", (context) => {
   if (process.platform === "win32") return context.skip();
-  const root = temporaryDirectory(context);
-  writeFileSync(path.join(root, "one"), "one\n");
-  writeFileSync(path.join(root, "two"), "two\n");
+  const root = realpathSync(temporaryDirectory(context));
+  mkdirSync(path.join(root, ".firstdraft"), { mode: 0o700 });
+  writeFileSync(path.join(root, ".firstdraft/state.json"), "private state\n", {
+    mode: 0o600,
+  });
+  writeFileSync(path.join(root, "README.md"), "Planning README\n");
   const target = prepareRootOutput({ root });
-  let renames = 0;
   assert.throws(
     () =>
       materialize(target, {
         rename(from, to) {
-          renames += 1;
-          if (renames === 2 || renames === 3) {
-            const error = new Error("injected rename failure");
-            Object.assign(error, { code: "EIO" });
-            throw error;
+          if (
+            to === path.join(root, "README.md") ||
+            (from === path.join(root, ".firstdraft") &&
+              to === path.join(target.transactionPath, "artifact/.firstdraft"))
+          ) {
+            throw Object.assign(new Error("Injected rename failure"), {
+              code: "EIO",
+            });
           }
           renameSync(from, to);
         },
@@ -449,6 +588,45 @@ test("retains a versioned journal only when rollback cannot complete", (context)
   );
   assert.equal(journal.format, "firstdraft.root-output-transaction/1");
   assert.equal(journal.phase, "rollback_incomplete");
+  assert.equal(
+    readFileSync(
+      path.join(root, ".firstdraft/design/.firstdraft/state.json"),
+      "utf8",
+    ),
+    "private state\n",
+  );
+  assert.equal(
+    readFileSync(path.join(root, ".firstdraft/design/README.md"), "utf8"),
+    "Planning README\n",
+  );
+  for (const file of ARTIFACT_FILES.filter((file) =>
+    file.path.startsWith(".firstdraft/"),
+  )) {
+    assert.equal(
+      readFileSync(path.join(root, file.path), "utf8"),
+      file.contents,
+    );
+  }
+  assert.equal(
+    journal.artifact_moves[0].destination,
+    path.join(root, ".firstdraft"),
+  );
+  assert.equal(
+    journal.design_moves[0].destination,
+    path.join(
+      target.transactionPath,
+      "artifact/.firstdraft/design/.firstdraft",
+    ),
+  );
+  assert.equal(
+    lstatSync(path.join(root, ROOT_TRANSACTION_NAME)).mode & 0o777,
+    0o700,
+  );
+  assert.throws(
+    () => prepareRootOutput({ root }),
+    (error) =>
+      error instanceof RootOutputPathError && error.reason === "root_busy",
+  );
 });
 
 /** @param {ReturnType<typeof prepareRootOutput>} target @param {{rename?: (from: string, to: string) => void}} [options] */
@@ -474,11 +652,11 @@ function writeArtifact(root) {
   }
 }
 
-/** @param {string} root @param {Set<string>} [ignoredRootEntries] */
-function verifyArtifact(root, ignoredRootEntries = new Set()) {
+/** @param {string} root @param {Set<string>} [ignoredPaths] */
+function verifyArtifact(root, ignoredPaths = new Set()) {
   const expected = new Set(ARTIFACT_FILES.map((file) => file.path));
   const actual = new Set();
-  walkFiles(root, "", actual, ignoredRootEntries);
+  walkFiles(root, "", actual, ignoredPaths);
   assert.deepEqual(actual, expected);
   for (const file of ARTIFACT_FILES) {
     const destination = path.join(root, ...file.path.split("/"));
@@ -489,17 +667,39 @@ function verifyArtifact(root, ignoredRootEntries = new Set()) {
   }
 }
 
-/** @param {string} root @param {string} relative @param {Set<string>} files @param {Set<string>} ignoredRootEntries */
-function walkFiles(root, relative, files, ignoredRootEntries) {
+/** @param {string} root @param {string} relative @param {Set<string>} files @param {Set<string>} ignoredPaths */
+function walkFiles(root, relative, files, ignoredPaths) {
   const current =
     relative === "" ? root : path.join(root, ...relative.split("/"));
   for (const entry of readdirSync(current, { withFileTypes: true })) {
-    if (relative === "" && ignoredRootEntries.has(entry.name)) continue;
     const child = relative === "" ? entry.name : `${relative}/${entry.name}`;
-    if (entry.isDirectory()) walkFiles(root, child, files, ignoredRootEntries);
+    if (ignoredPaths.has(child)) continue;
+    if (entry.isDirectory()) walkFiles(root, child, files, ignoredPaths);
     else if (entry.isFile()) files.add(child);
     else assert.fail(`unexpected artifact entry ${child}`);
   }
+}
+
+/** @param {string} root @param {string} [relative] @returns {unknown[]} */
+function snapshotWorktree(root, relative = "") {
+  return readdirSync(path.join(root, relative))
+    .sort()
+    .flatMap((name) => {
+      if (relative === "" && name === ".git") return [];
+      const child = path.join(relative, name);
+      const stat = lstatSync(path.join(root, child));
+      return [
+        {
+          path: child,
+          mode: stat.mode,
+          inode: stat.ino,
+          contents: stat.isFile()
+            ? readFileSync(path.join(root, child)).toString("base64")
+            : null,
+        },
+        ...(stat.isDirectory() ? snapshotWorktree(root, child) : []),
+      ];
+    });
 }
 
 /** @param {import("node:test").TestContext} context */
