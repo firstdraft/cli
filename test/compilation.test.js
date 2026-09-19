@@ -260,7 +260,7 @@ test("compilation download adopts the current directory without starting work", 
     path.join(cwd, ".firstdraft/state.json"),
     "utf8",
   );
-  const fixture = artifactFixture();
+  const fixture = artifactFixture({ withContext: true });
   const status = compilationBody("succeeded", { artifact: fixture });
   /** @type {FetchCall[]} */
   const calls = [];
@@ -289,22 +289,38 @@ test("compilation download adopts the current directory without starting work", 
     "Movie Catalog\n",
   );
   assert.equal(
-    readFileSync(path.join(cwd, "design/product-notes.md"), "utf8"),
+    readFileSync(path.join(cwd, ".firstdraft/design/product-notes.md"), "utf8"),
     "Design notes\n",
   );
   assert.equal(
-    readFileSync(path.join(cwd, "design/.firstdraft/state.json"), "utf8"),
+    readFileSync(
+      path.join(cwd, ".firstdraft/design/.firstdraft/state.json"),
+      "utf8",
+    ),
     retainedState,
   );
   assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
   const body = JSON.parse(result.stdout);
   assert.equal(body.output.path, realpathSync(cwd));
   assert.deepEqual(body.output.root_adoption, {
-    design_path: path.join(realpathSync(cwd), "design"),
+    design_path: path.join(realpathSync(cwd), ".firstdraft/design"),
     moved_entry_count: 2,
     git_repository_preserved: false,
     git_index_replaced: false,
   });
+  assert.equal(
+    readFileSync(
+      path.join(cwd, ".firstdraft/submitted-foundation-plan.json"),
+      "utf8",
+    ),
+    "submitted plan\n",
+  );
+  assert.equal(
+    readFileSync(path.join(cwd, ".firstdraft/gaps.json"), "utf8"),
+    '{"gaps":[]}\n',
+  );
+  assert.equal(existsSync(path.join(cwd, ".firstdraft/state.json")), false);
+  assert.equal(existsSync(path.join(cwd, "design")), false);
 });
 
 test("download requires succeeded status and validates historical Head provenance", async (context) => {
@@ -477,7 +493,7 @@ test("compilation syntax and output preflight fail before network access", async
   assertHandledFailure(invalidOutput, "invalid_output_path", 2);
   assert.equal(JSON.parse(invalidOutput.stderr).reason, "destination_exists");
 
-  mkdirSync(path.join(cwd, "design"));
+  mkdirSync(path.join(cwd, ".firstdraft/design"));
   const reservedRoot = await invoke(
     ["compilation", "download", COMPILATION_ID, "--output", "."],
     { cwd, fetchFunction: inaccessible },
@@ -602,7 +618,7 @@ function compilationBody(status, changes = {}) {
   };
 }
 
-/** @param {{headSourceSha256?: string}} [changes] */
+/** @param {{headSourceSha256?: string, withContext?: boolean}} [changes] */
 function artifactFixture(changes = {}) {
   const contents = Buffer.from("Movie Catalog\n");
   const file = {
@@ -613,16 +629,33 @@ function artifactFixture(changes = {}) {
     source_subject_uuids: [],
     contents_base64: contents.toString("base64"),
   };
+  const files = [file];
+  if (changes.withContext) {
+    for (const [filePath, source] of [
+      [".firstdraft/gaps.json", Buffer.from('{"gaps":[]}\n')],
+      [
+        ".firstdraft/submitted-foundation-plan.json",
+        Buffer.from("submitted plan\n"),
+      ],
+    ]) {
+      const contents = /** @type {Buffer} */ (source);
+      files.push({
+        ...file,
+        path: String(filePath),
+        sha256: sha256(contents),
+        contents_base64: contents.toString("base64"),
+      });
+    }
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
   const metadata = {
-    files: [
-      {
-        path: file.path,
-        sha256: file.sha256,
-        mode: file.mode,
-        owner: file.owner,
-        source_subject_uuids: file.source_subject_uuids,
-      },
-    ],
+    files: files.map(({ path, sha256, mode, owner, source_subject_uuids }) => ({
+      path,
+      sha256,
+      mode,
+      owner,
+      source_subject_uuids,
+    })),
   };
   const body = {
     format: "firstdraft.compilation-artifact/1",
@@ -648,7 +681,7 @@ function artifactFixture(changes = {}) {
       },
     },
     manifest_sha256: sha256(Buffer.from(JSON.stringify(metadata))),
-    files: [file],
+    files,
   };
   const source = Buffer.from(JSON.stringify(body));
   return { source, sha256: sha256(source) };

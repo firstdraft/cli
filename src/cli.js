@@ -196,7 +196,7 @@ and proceeds only when that analysis is valid. Without --output, it conditionall
 creates or replays the internal GitHub Publication lifecycle and prints the
 private repository URL. With --output, it starts one direct Compilation and
 atomically materializes the verified artifact into an absent directory, or
-preserves existing root material under ./design when the output is ., without
+preserves existing root material under .firstdraft/design when the output is ., without
 starting GitHub Publication. Progress is written to stderr.
 `;
 
@@ -245,7 +245,7 @@ Environment:
 The command reads the retained Compilation once, requires it to have
 succeeded, downloads and verifies its exact artifact once, and atomically
 materializes it into an absent output path or adopts the current directory
-while preserving existing material under ./design. It never starts work.
+while preserving existing material under .firstdraft/design. It never starts work.
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI

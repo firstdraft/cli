@@ -39,7 +39,10 @@ declarations from exact, clean checkouts of `firstdraft/firstdraft` and `firstdr
 precedence. CLI `0.2.x` requires the service's `0.3.x` API contract because Analysis now returns the complete reviewed
 GapSet and digest. The released CLI `0.1.0` accepts only API `0.2.x`, uses a generic 2 MiB response bound for Analysis,
 and cannot safely consume every schema-valid API `0.3.x` result. CLI `0.2.x` retains that generic bound but gives
-Analysis and Compilation artifacts dedicated 128 MiB bounds. Comparator arrays form one conjunction, while
+Analysis and Compilation artifacts dedicated 128 MiB bounds. CLI `0.3.x` retains those Service requirements and
+bounds. Its new minor line identifies the incompatible root archive-path change to `.firstdraft/design`; Skills
+and other callers that depend on that destination require the new CLI line. Existing applications are not migrated.
+Comparator arrays form one conjunction, while
 `foundation_plan_formats` lists alternatives. A prerelease satisfies a comparator set only when a comparator
 explicitly names a prerelease with the same major, minor, and patch numbers. Skills names the candidate CLI version
 explicitly, so a stale comparator makes the three-repository candidate ineligible.

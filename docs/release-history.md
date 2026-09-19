@@ -46,3 +46,16 @@ source or documentation does not mutate either dist-tag.
 - Package version `0.2.1` and protected tag `v0.2.1` are consumed and immutable. As observed on August 29, 2026,
   current-directory root-output had integrated to `main` at `4352f64baf673ad93457e8bc84273e9d1d9a9501` (tree
   `b43ba6de98e27328e548cc3410ba9f39dfa9fcee`) but was not part of those registry bytes.
+
+## 0.2.2 publication and registry observation
+
+- The [npm registry](https://registry.npmjs.org/@firstdraft.com%2fcli) records version `0.2.2` published at
+  `2026-08-30T04:40:13.459Z`.
+  [Tag `v0.2.2`](https://github.com/firstdraft/cli/releases/tag/v0.2.2) resolves to
+  `799a184cb2453ceadf5575f7b46ba975e084f192`. That source implements current-root adoption with the archive at
+  top-level `design/`.
+- On September 18, 2026, a read-only registry check found both `next` and `latest` selecting `0.2.2`. This is an
+  observation of their selection, not evidence of the time or approval of the earlier promotion. The check ran no
+  fresh package parity, service, authenticated user-journey, or Codespaces qualification.
+- Package version `0.2.2` and protected tag `v0.2.2` are consumed and immutable. The nested `.firstdraft/design`
+  archive belongs to the unpublished `0.3.0` source candidate; preparing it does not change installed `0.2.2` bytes.

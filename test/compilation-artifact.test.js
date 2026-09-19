@@ -1,26 +1,32 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
+import fs, {
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
   CompilationArtifactInvalidError,
+  CompilationMaterializationError,
   CompilationOutputPathError,
   FOUNDATION_PLAN_FORMAT,
   MAX_ARTIFACT_BYTES,
   materializeCompilationArtifact,
   parseCompilationArtifact,
   resolveOutputTarget,
+  prepareCompilationOutputTarget,
 } from "../src/compilation-artifact.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000000801";
@@ -81,6 +87,93 @@ test("parses canonical binary-safe artifact bytes and materializes an exact tree
     false,
   );
 });
+
+test("root adoption accepts an artifact without generated context files", (context) => {
+  if (process.platform === "win32") return context.skip();
+  const fixture = artifactFixture();
+  const artifact = parseCompilationArtifact(fixture.source, EXPECTED);
+  const root = temporaryDirectory(context);
+  writeFileSync(path.join(root, "notes.md"), "Planning notes\n");
+  const target = prepareCompilationOutputTarget({ cwd: root, output: "." });
+  materializeCompilationArtifact(artifact, target);
+  assert.equal(
+    readFileSync(path.join(root, ".firstdraft/design/notes.md"), "utf8"),
+    "Planning notes\n",
+  );
+  assert.deepEqual(readdirSync(path.join(root, ".firstdraft")), ["design"]);
+  assert.deepEqual(
+    readFileSync(path.join(root, "bin/setup")),
+    Buffer.from([0, 255]),
+  );
+});
+
+for (const corruptPath of [
+  ".firstdraft/submitted-foundation-plan.json",
+  ".firstdraft/gaps.json",
+  ".firstdraft/unexpected.json",
+]) {
+  test(`root adoption verifies ${corruptPath} beside the archive`, (context) => {
+    if (process.platform === "win32") return context.skip();
+    const fixture = artifactFixture({
+      files: [
+        fileFixture(
+          ".firstdraft/submitted-foundation-plan.json",
+          "submitted plan\n",
+        ),
+        fileFixture(".firstdraft/gaps.json", '{"gaps":[]}\n'),
+        fileFixture("README.md", "Application\n"),
+      ],
+    });
+    const artifact = parseCompilationArtifact(fixture.source, EXPECTED);
+    const root = realpathSync(temporaryDirectory(context));
+    mkdirSync(path.join(root, ".firstdraft"), { mode: 0o700 });
+    writeFileSync(
+      path.join(root, ".firstdraft/state.json"),
+      "private state\n",
+      { mode: 0o600 },
+    );
+    writeFileSync(path.join(root, "README.md"), "Planning\n");
+    const target = prepareCompilationOutputTarget({ cwd: root, output: "." });
+    const rename = fs.renameSync;
+    let corrupted = false;
+    context.mock.method(
+      fs,
+      "renameSync",
+      (/** @type {string} */ from, /** @type {string} */ to) => {
+        rename(from, to);
+        if (!corrupted && to === path.join(root, ".firstdraft")) {
+          writeFileSync(path.join(root, corruptPath), "corrupted\n");
+          corrupted = true;
+        }
+      },
+    );
+    syncBuiltinESMExports();
+    try {
+      assert.throws(
+        () => materializeCompilationArtifact(artifact, target),
+        (error) =>
+          error instanceof CompilationMaterializationError &&
+          error.reason === "root_transaction_failed",
+      );
+    } finally {
+      context.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    assert.equal(corrupted, true);
+    assert.equal(
+      readFileSync(path.join(root, ".firstdraft/state.json"), "utf8"),
+      "private state\n",
+    );
+    assert.equal(
+      readFileSync(path.join(root, "README.md"), "utf8"),
+      "Planning\n",
+    );
+    assert.deepEqual(readdirSync(path.join(root, ".firstdraft")), [
+      "state.json",
+    ]);
+    assert.equal(existsSync(path.join(root, ".firstdraft-root-output")), false);
+  });
+}
 
 test("materialization enforces supported permission bits independently of umask", (context) => {
   const previousUmask =

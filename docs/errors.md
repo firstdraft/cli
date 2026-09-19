@@ -70,11 +70,18 @@ materialization failure envelopes include that last validated projection as `cur
 - after `materialization_failed`, repair the destination condition, then use the same lower-level download command
   with a new absent path. A root-output attempt whose transaction fully rolled back may instead retry that retained
   download with `--output .`; `reason: "root_rollback_incomplete"` requires reconciliation of the retained
-  `.firstdraft-root-output` journal before another root attempt. Only that reason requires manual reconciliation:
-  do not delete its journal or run Git restoration commands; read its versioned record, restore the exact listed
-  index and path identities, verify its original snapshot, and then remove the transaction directory. A journal
-  whose phase records no irreversible operation is safe to remove. After `.firstdraft` has moved successfully under
-  `design`, run retained status and later Plan commands from `design`, not from the generated application root.
+  `.firstdraft-root-output` journal before another root attempt. Only that reason requires manual reconciliation.
+
+For an incomplete root rollback, preserve the journal and avoid Git restoration commands. Reconcile its recorded
+identities with the current tree: some moves may already have been reversed. Restore the exact original index
+through Git's index lock when applicable. Reverse the remaining `artifact_moves` in reverse recorded order, moving
+each destination back to its source; only then reverse the remaining `design_moves` in reverse recorded order.
+The recorded design destinations are inside transaction staging. While the generated `.firstdraft` remains at the
+root, its archive is at `.firstdraft/design`; reversing that artifact move returns the archive to staging before the
+original planning `.firstdraft` can return to the root. Do not merge or overwrite either directory. Verify the
+original snapshot before removing the transaction directory. A journal whose phase records no irreversible
+operation is safe to remove. After successful adoption, run retained status and later Plan commands from
+`.firstdraft/design`, and ordinary Rails commands from the generated application root.
 
 After `compilation_wait_timed_out`, retained work may still continue. Use
 `firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun

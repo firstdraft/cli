@@ -98,7 +98,7 @@ and proceeds only when that analysis is valid. Without --output, it conditionall
 creates or replays the internal GitHub Publication lifecycle and prints the
 private repository URL. With --output, it starts one direct Compilation and
 atomically materializes the verified artifact into an absent directory, or
-preserves existing root material under ./design when the output is ., without
+preserves existing root material under .firstdraft/design when the output is ., without
 starting GitHub Publication. Progress is written to stderr.
 `;
 
