@@ -1274,7 +1274,7 @@ function acceptedBody(source, diagnostics = []) {
   return {
     project: { id: PROJECT_ID, graph_version: 1 },
     foundation_plan: {
-      format: "firstdraft.foundation-plan.sketch/0.19",
+      format: "firstdraft.foundation-plan.sketch/0.20",
       source_sha256: sha256(source),
     },
     diagnostics,

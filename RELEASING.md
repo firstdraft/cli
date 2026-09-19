@@ -39,9 +39,18 @@ declarations from exact, clean checkouts of `firstdraft/firstdraft` and `firstdr
 precedence. CLI `0.2.x` requires the service's `0.3.x` API contract because Analysis now returns the complete reviewed
 GapSet and digest. The released CLI `0.1.0` accepts only API `0.2.x`, uses a generic 2 MiB response bound for Analysis,
 and cannot safely consume every schema-valid API `0.3.x` result. CLI `0.2.x` retains that generic bound but gives
-Analysis and Compilation artifacts dedicated 128 MiB bounds. CLI `0.3.x` retains those Service requirements and
-bounds. Its new minor line identifies the incompatible root archive-path change to `.firstdraft/design`; Skills
-and other callers that depend on that destination require the new CLI line. Existing applications are not migrated.
+Analysis and Compilation artifacts dedicated 128 MiB bounds. CLI `0.3.x` retains those bounds and requires API
+`0.4.x`, Plan `firstdraft.foundation-plan.sketch/0.20`, and target profile `rails-sketch/2026-09`. Its new minor line
+combines that contract transition with the incompatible root archive-path change to `.firstdraft/design`; Skills
+and other callers require the matching CLI line. Existing applications are not migrated.
+
+The API `0.4.x` transition keeps `/v1` paths, authentication, statuses, and ETag behavior. Its breaking boundary is
+the new Plan and target identity, including removal of record-wide Validation targets, normalization order,
+optional Home selection, and target realization changes. The Service owns those semantics. The CLI initializes
+the current identity, preserves authored bytes when pushing, and validates the current artifact identity; it does
+not translate earlier Plans or artifacts. The proposed CLI `0.3.0` may retain that version while unpublished and
+untagged under the policy above. This source declaration does not establish package availability or deployment.
+
 Comparator arrays form one conjunction, while
 `foundation_plan_formats` lists alternatives. A prerelease satisfies a comparator set only when a comparator
 explicitly names a prerelease with the same major, minor, and patch numbers. Skills names the candidate CLI version

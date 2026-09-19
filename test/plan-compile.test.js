@@ -28,7 +28,7 @@ const COMPILATION_ID = "01900000-0000-7000-8000-000000002003";
 const PUBLICATION_ID = "01900000-0000-7000-8000-000000002004";
 const API_TOKEN = `fd_${"a".repeat(43)}`;
 const PLAN_SOURCE = Buffer.from(
-  '{"format":"firstdraft.foundation-plan.sketch/0.19","application":{"key":"movie_catalog","name":"Movie Catalog"}}\n',
+  '{"format":"firstdraft.foundation-plan.sketch/0.20","application":{"key":"movie_catalog","name":"Movie Catalog"}}\n',
 );
 const HEAD_SHA256 = sha256(PLAN_SOURCE);
 const ETAG = `"sha256:${HEAD_SHA256}"`;
@@ -36,9 +36,11 @@ const CREATED_AT = "2026-08-04T12:00:00.000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000Z";
 const REPOSITORY_URL = "https://github.com/octocat/movie-catalog";
-const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-08";
-const COMPILER_RELEASE = "foundation-plan-rails/compiler-2026-08";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
+const ANALYZER_RELEASE =
+  "foundation-plan-rails/application-2026-09-19-conventions";
+const COMPILER_RELEASE =
+  "foundation-plan-rails/compiler-application-2026-09-19-conventions";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-09" };
 const SUCCESS_PROGRESS = `First Draft: Analyzing Foundation Plan...
 First Draft: Foundation Plan analysis valid.
 First Draft: Compiling application...
@@ -1095,7 +1097,7 @@ function acceptedPlanBody(graphVersion = 1) {
   return {
     project: { id: PROJECT_ID, graph_version: graphVersion },
     foundation_plan: {
-      format: "firstdraft.foundation-plan.sketch/0.19",
+      format: "firstdraft.foundation-plan.sketch/0.20",
       source_sha256: HEAD_SHA256,
     },
     diagnostics: [],

@@ -31,9 +31,11 @@ const ETAG = '"opaque:plan-validator"';
 const STARTED_AT = "2026-07-30T12:00:00.123Z";
 const COMPLETED_AT = "2026-07-30T12:00:01.456Z";
 const HEAD_SOURCE_SHA256 = "1".repeat(64);
-const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-08";
-const COMPILER_RELEASE = "foundation-plan-rails/compiler-application-2026-08";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
+const ANALYZER_RELEASE =
+  "foundation-plan-rails/application-2026-09-19-conventions";
+const COMPILER_RELEASE =
+  "foundation-plan-rails/compiler-application-2026-09-19-conventions";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-09" };
 const PLAN_STATUS_HELP = `First Draft CLI
 
 Usage:
@@ -244,7 +246,7 @@ test("plan status accepts the pinned Service zero-gap canonical digest", async (
   const body = analysisBody("valid");
   body.analysis.gap_set.gaps = [];
   body.analysis.gap_set_sha256 =
-    "1fae5c215a5d9cf7a244ac5bd7c121d6da12497d5af2bf2e97073f41ac2dff7f";
+    "f02a7aa00937e1a586775db8a9d68ecbde47338b975cfd9a3ad570cb23985d9e";
   const result = await invoke(["plan", "status"], {
     cwd,
     fetchFunction: recordingFetch([jsonResponse(body)], []),

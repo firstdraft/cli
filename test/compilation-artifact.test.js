@@ -35,8 +35,9 @@ const ANALYSIS_ID = "01900000-0000-7000-8000-000000000803";
 const SUBJECT_ID = "01900000-0000-7000-8000-000000000804";
 const HEAD_SHA256 = "1".repeat(64);
 const FOUNDATION_PLAN_SHA256 = "5".repeat(64);
-const COMPILER_RELEASE = "foundation-plan-rails/compiler-scalar-2026-08";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-08" };
+const COMPILER_RELEASE =
+  "foundation-plan-rails/compiler-application-2026-09-19-conventions";
+const TARGET = { id: "rails", profile: "rails-sketch/2026-09" };
 const EXPECTED = {
   projectId: PROJECT_ID,
   compilationId: COMPILATION_ID,
@@ -261,7 +262,7 @@ test("pins external provenance identities and validates nested metadata", () => 
     artifactFixture({
       provenance: {
         foundation_plan: {
-          format: "firstdraft.foundation-plan.sketch/0.18",
+          format: "firstdraft.foundation-plan.sketch/0.19",
           sha256: FOUNDATION_PLAN_SHA256,
         },
       },
@@ -278,7 +279,7 @@ test("pins external provenance identities and validates nested metadata", () => 
       provenance: {
         analysis: {
           id: "01900000-0000-7000-8000-000000000899",
-          release: "foundation-plan-rails/scalar-2026-08",
+          release: "foundation-plan-rails/application-2026-09-19-conventions",
         },
       },
     }),
@@ -300,6 +301,16 @@ test("pins external provenance identities and validates nested metadata", () => 
       CompilationArtifactInvalidError,
     );
   }
+});
+
+test("rejects an older target profile even when retained status agrees", () => {
+  const target = { id: "rails", profile: "rails-sketch/2026-08" };
+  const fixture = artifactFixture({ provenance: { target } });
+
+  assert.throws(
+    () => parseCompilationArtifact(fixture.source, { ...EXPECTED, target }),
+    CompilationArtifactInvalidError,
+  );
 });
 
 test("requires strict Base64, exact file digests, and the metadata-only manifest digest", () => {
@@ -471,7 +482,7 @@ function artifactFixture(changes = {}) {
     },
     analysis: {
       id: ANALYSIS_ID,
-      release: "foundation-plan-rails/scalar-2026-08",
+      release: "foundation-plan-rails/application-2026-09-19-conventions",
     },
     compiler_release: COMPILER_RELEASE,
     target: TARGET,

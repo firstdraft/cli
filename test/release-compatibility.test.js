@@ -39,12 +39,12 @@ test("release compatibility declares the coordinated CLI contract", () => {
     "foundation_plan_formats",
   ]);
   assert.deepEqual(compatibility.requires.api_contract, [
-    ">= 0.3.0",
-    "< 0.4.0",
+    ">= 0.4.0",
+    "< 0.5.0",
   ]);
   assert.match(
     commandReference,
-    /The closed API `0\.3\.x` progress-reason allowlist/,
+    /The closed API `0\.4\.x` progress-reason allowlist/,
   );
   assert.match(
     commandReference,
