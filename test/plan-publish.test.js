@@ -86,9 +86,11 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 Usage:
   firstdraft plan compile
   firstdraft plan compile --output <absent-directory|.>
+  firstdraft plan compile --github
 
 Options:
-      --output <absent-directory|.>  Materialize the generated application here
+      --output <absent-directory|.>  Materialize here (default: .)
+      --github                      Publish to a private GitHub repository
   -h, --help                         Show help
 
 Environment:
@@ -96,12 +98,11 @@ Environment:
   FIRSTDRAFT_API_URL    Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. Without --output, it conditionally
-creates or replays the internal GitHub Publication lifecycle and prints the
-private repository URL. With --output, it starts one direct Compilation and
-atomically materializes the verified artifact into an absent directory, or
-preserves existing root material under .firstdraft/design when the output is ., without
-starting GitHub Publication. Progress is written to stderr.
+and proceeds only when that analysis is valid. By default it materializes the
+verified application in the current directory, preserving existing root material
+under .firstdraft/design. --output can select another absent directory.
+--github selects the GitHub Publication lifecycle and prints the private repository
+URL; it cannot be combined with --output. Progress is written to stderr.
 `;
 
 test("plan compile invokes Publication and one conditional singleton PUT and polls sequentially", async (context) => {
@@ -151,7 +152,7 @@ test("plan compile invokes Publication and one conditional singleton PUT and pol
   const timeouts = [];
   /** @type {number[]} */
   const delays = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     apiUrl: "https://canary-secret.example",
     createRequestSignal: (/** @type {number} */ timeoutMs) => {
@@ -331,7 +332,7 @@ test("progress reports each safe GitHub phase, scheduled retry, and parked retry
     jsonResponse(publicationBody("succeeded")),
   ];
 
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(responses),
     planPublishSleep: async () => {},
@@ -392,7 +393,7 @@ test("progress accepts every coordinated safe reason code", async (context) => {
   );
   responses.push(jsonResponse(publicationBody("succeeded")));
 
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(responses),
     planPublishSleep: async () => {},
@@ -419,7 +420,7 @@ test("a repeated singleton PUT accepts provenance matching local Plan state", as
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(
       [jsonResponse(publicationBody("succeeded"), 200)],
@@ -439,7 +440,7 @@ test("an ambiguous PUT is reconciled by one safe singleton GET", async (context)
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -469,7 +470,7 @@ test("an ambiguous PUT does not adopt a singleton from a different Plan Head", a
   const retainedHead = "a".repeat(64);
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -509,7 +510,7 @@ test("an invalid successful PUT response can reconcile to the exact singleton", 
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -539,7 +540,7 @@ test("an unresolved ambiguous PUT remains outcome unknown without replaying the 
   const cwd = remoteDirectory(context, "https://api.example.test");
   /** @type {FetchCall[]} */
   const calls = [];
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch(
       [
@@ -620,7 +621,7 @@ test("local prerequisites reject before publication network access", async (cont
     project_id: PROJECT_ID,
   });
   assertHandledFailure(
-    await invoke(["plan", "compile"], {
+    await invoke(["plan", "compile", "--github"], {
       cwd: unpushed,
       fetchFunction: inaccessible,
     }),
@@ -634,7 +635,7 @@ test("local prerequisites reject before publication network access", async (cont
     foundation_plan_etag: '"opaque"',
   });
   assertHandledFailure(
-    await invoke(["plan", "compile"], {
+    await invoke(["plan", "compile", "--github"], {
       cwd: opaque,
       fetchFunction: inaccessible,
       planCompilePush: async () => ({
@@ -657,7 +658,7 @@ test("local prerequisites reject before publication network access", async (cont
     Buffer.concat([PLAN_SOURCE, Buffer.from(" ")]),
   );
   assertHandledFailure(
-    await invoke(["plan", "compile"], {
+    await invoke(["plan", "compile", "--github"], {
       cwd: changed,
       fetchFunction: inaccessible,
     }),
@@ -667,7 +668,7 @@ test("local prerequisites reject before publication network access", async (cont
   const missingPlan = remoteDirectory(context, "https://api.example.test");
   rmSync(planPath(missingPlan));
   assertHandledFailure(
-    await invoke(["plan", "compile"], {
+    await invoke(["plan", "compile", "--github"], {
       cwd: missingPlan,
       fetchFunction: inaccessible,
     }),
@@ -677,14 +678,14 @@ test("local prerequisites reject before publication network access", async (cont
 
 test("missing and rejected credentials use the stable authentication error", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const missing = await invoke(["plan", "compile"], {
+  const missing = await invoke(["plan", "compile", "--github"], {
     cwd,
     apiToken: undefined,
     fetchFunction: inaccessibleFetch(),
   });
   assertHandledFailure(missing, "authentication_required");
 
-  const rejected = await invoke(["plan", "compile"], {
+  const rejected = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(
@@ -697,7 +698,7 @@ test("missing and rejected credentials use the stable authentication error", asy
   assertHandledFailure(rejected, "authentication_required");
   assert.equal(errorEnvelope(rejected.stderr).status, 401);
 
-  const reconciliation = await invoke(["plan", "compile"], {
+  const reconciliation = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       async () => {
@@ -716,7 +717,7 @@ test("missing and rejected credentials use the stable authentication error", asy
 
 test("validated start rejections are distinct from unknown mutation outcomes", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const rejected = await invoke(["plan", "compile"], {
+  const rejected = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(412, "precondition_failed", "The Plan changed."),
@@ -736,7 +737,7 @@ test("validated start rejections are distinct from unknown mutation outcomes", a
     },
   });
 
-  const malformed = await invoke(["plan", "compile"], {
+  const malformed = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       new Response("canary-secret", { status: 500 }),
@@ -752,7 +753,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
     const cwd = remoteDirectory(context, "https://api.example.test");
     /** @type {FetchCall[]} */
     const calls = [];
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       fetchFunction: sequenceFetch(
         [
@@ -775,7 +776,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
   }
 
   const cwd = remoteDirectory(context, "https://api.example.test");
-  const unresolved = await invoke(["plan", "compile"], {
+  const unresolved = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       problemResponse(503, "publication_delayed", "Publication is delayed."),
@@ -797,7 +798,7 @@ test("validated timeout and server errors reconcile without replaying the PUT", 
 
 test("polling distinguishes unavailable and invalid status responses", async (context) => {
   const unavailableCwd = remoteDirectory(context, "https://api.example.test");
-  const unavailable = await invoke(["plan", "compile"], {
+  const unavailable = await invoke(["plan", "compile", "--github"], {
     cwd: unavailableCwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -828,7 +829,7 @@ First Draft: Compiling application...
     ...publicationBody("provisioning_repository"),
     canary: "canary-secret",
   };
-  const invalid = await invoke(["plan", "compile"], {
+  const invalid = await invoke(["plan", "compile", "--github"], {
     cwd: invalidCwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -880,7 +881,7 @@ test("polling rejects replacement identities, regressions, and repository mutati
 
   for (const { initial, changed } of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(initial, 201),
@@ -899,7 +900,7 @@ test("polling rejects replacement identities, regressions, and repository mutati
 test("the bounded wait reports its last validated status", async (context) => {
   const cwd = remoteDirectory(context, "https://api.example.test");
   let clock = 0;
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     fetchFunction: sequenceFetch([
       jsonResponse(publicationBody("compiling"), 201),
@@ -963,7 +964,7 @@ test("terminal progress distinguishes Compilation outcomes from later GitHub out
 
   for (const [status, expectedError, changes, terminalProgress] of cases) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(publicationBody(status, changes), 201),
@@ -988,7 +989,7 @@ ${compiled ? "First Draft: Application compiled.\n" : ""}First Draft: ${terminal
 
   for (const status of ["failed", "cancelled"]) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(
@@ -1154,7 +1155,7 @@ test("exact response shapes and coherent terminal projections are required", asy
 
   for (const [index, body] of invalidBodies.entries()) {
     const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       fetchFunction: sequenceFetch([
         jsonResponse(body, 201),

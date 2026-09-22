@@ -101,38 +101,27 @@ test("ordinary pre-1.0 versions use the approval-gated distribution channel", ()
     access: "public",
     provenance: true,
     registry: "https://registry.npmjs.org/",
-    tag: "next",
+    tag: "latest",
   });
 });
 
-test("stable release completion requires qualified latest promotion", () => {
+test("approved releases publish directly to latest and preserve immutable versions", () => {
   assert.match(
     agentInstructions,
-    /publication under `next` as candidate availability, not a completed stable release[\s\S]*?explicitly named release-specific qualification[\s\S]*?separately approved[\s\S]*?npm's `latest`/,
+    /Publish approved versions directly to `latest`/,
   );
   assert.match(
     releasingGuide,
-    /Release-specific qualification means the exact gate named for that candidate; it does not imply unrelated or full[\s\S]*?service qualification/,
+    /publication reuses successful CI for the exact source/,
   );
-  assert.match(
-    releaseHistory,
-    /Later on August 7, 2026,[\s\S]*?`next`, while `latest`[\s\S]*?continued to identify `0\.1\.0-alpha\.2`[\s\S]*?On August 12, 2026,[\s\S]*?selected bounded CLI `0\.1\.0` user-journey smoke passed[\s\S]*?separate promotion approval[\s\S]*?both `next` and `latest` then identified ordinary version `0\.1\.0`[\s\S]*?Full\s+v14 service qualification remained separate and incomplete/,
-  );
-  assert.match(
-    releasingGuide,
-    /Until promotion, `latest` remains the supported stable release; a distinct `next` candidate\s+is supported only for its named qualification\. When both tags identify one version, that version fills both roles\./,
-  );
+  assert.match(releasingGuide, /approval already given for that scope/);
   assert.match(
     securityGuide,
-    /stable release currently identified by npm's `latest` tag receives security fixes[\s\S]*?different version under the approval-gated `next` tag is supported only for its explicitly named release-specific[\s\S]*?does not displace the stable release before separate promotion approval[\s\S]*?When `next` and `latest`\s+identify the same version, that release fills both roles/,
+    /release currently identified by npm's `latest` tag receives security fixes/,
   );
   assert.match(
     releaseHistory,
     /Protected tag `v0\.1\.0` and package version `0\.1\.0` were consumed and immutable/,
-  );
-  assert.match(
-    releaseHistory,
-    /Package version `0\.2\.1` and protected tag `v0\.2\.1` are consumed and immutable[\s\S]*?As observed on August 29, 2026,[\s\S]*?current-directory root-output[\s\S]*?`4352f64baf673ad93457e8bc84273e9d1d9a9501`[\s\S]*?`b43ba6de98e27328e548cc3410ba9f39dfa9fcee`[\s\S]*?was not part of those registry bytes/,
   );
   const consumedVersions = [
     ...releaseHistory.matchAll(
@@ -146,7 +135,7 @@ test("stable release completion requires qualified latest promotion", () => {
   );
   assert.match(
     releasingGuide,
-    /If either identity is already[\s\S]*?consumed, prepare the next version required by the pre-1\.0 policy rather than moving or reusing it/,
+    /If either identity is already\s+consumed, prepare the next version/,
   );
   assert.doesNotMatch(
     `${readme}\n${releasingGuide}`,
@@ -154,13 +143,27 @@ test("stable release completion requires qualified latest promotion", () => {
   );
   assert.doesNotMatch(
     releasingGuide,
-    /npm trust github '@firstdraft\.com\/cli'/,
-    "routine release instructions must not recreate trusted publishing",
+    /npm trust github|npm access grant|npm whoami|npm trust list/,
   );
+});
+
+test("publication reuses successful exact-source CI instead of rerunning the suite", () => {
+  const verifyJob = workflowJob(publishWorkflow, "verify");
+  assert.match(verifyJob, /actions: read/);
+  assert.match(verifyJob, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(
+    verifyJob,
+    /gh run list --repo "\$GITHUB_REPOSITORY" --workflow ci\.yml/,
+  );
+  assert.match(
+    verifyJob,
+    /--branch main --event push --commit "\$release_sha" --status success/,
+  );
+  assert.match(verifyJob, /test -n "\$ci_url"/);
+  assert.match(verifyJob, /npm run pack:check/);
   assert.doesNotMatch(
-    releasingGuide,
-    /npm access grant/,
-    "routine release instructions must not mutate package access",
+    publishWorkflow,
+    /npm ci|npm audit|npm run check|npm test/,
   );
 });
 
@@ -180,7 +183,7 @@ test("OIDC publication repeats every release source check", () => {
     (line) => line === npmApprovalGate,
   );
   const publishCommand =
-    "npm publish --access public --tag next --provenance --ignore-scripts";
+    "npm publish --access public --tag latest --provenance --ignore-scripts";
   const publishCommandIndex = publishJob.indexOf(publishCommand);
   const publishInvocation = "npm publish";
   const oidcPermission = "\n      id-token: write\n";

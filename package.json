@@ -1,6 +1,6 @@
 {
   "name": "@firstdraft.com/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Command-line interface for First Draft",
   "license": "MIT",
   "type": "module",
@@ -29,7 +29,7 @@
     "access": "public",
     "provenance": true,
     "registry": "https://registry.npmjs.org/",
-    "tag": "next"
+    "tag": "latest"
   },
   "scripts": {
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run pack:check && npm run pack:smoke",

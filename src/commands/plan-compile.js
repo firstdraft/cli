@@ -80,7 +80,7 @@ export class PlanCompileAnalysisInvalidError extends Error {
  *
  * @param {CompilePlanOptions} options
  */
-export async function compilePlan({
+export async function compilePlanToGitHub({
   cwd,
   apiUrl,
   fetchFunction,
@@ -134,8 +134,8 @@ export async function compilePlan({
 /**
  * Submit and analyze the exact current local Plan, then start one direct
  * Compilation and materialize its verified artifact into an absent directory
- * or the eligible current directory. GitHub Publication remains the no-output
- * mode owned by compilePlan.
+ * or the eligible current directory. GitHub Publication is the explicit
+ * --github mode owned by compilePlanToGitHub.
  *
  * @param {CompilePlanToDirectoryOptions} options
  */

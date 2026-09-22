@@ -3,9 +3,9 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.3.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.4.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.3.x`
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.4.x`
 requires the service's `0.4.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
@@ -18,7 +18,8 @@ semantics and [release history](release-history.md) for the transition from prer
 | `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities    |
 | `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                  |
 | `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis          |
-| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize or publish              |
+| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder   |
+| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub           |
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                       |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation   |
 
@@ -134,14 +135,20 @@ a bounded number of times because the command sends only `GET` requests. See
 
 ## Compile the current Plan
 
-To compile into a local application directory, run:
+Compile into the current local folder:
 
 ```sh
-firstdraft plan compile --output ./application
+firstdraft plan compile
 ```
 
+This is equivalent to `firstdraft plan compile --output .`. Use `--output ./application` for another absent
+directory, or `--github` to publish to a private GitHub repository. `--github` and `--output` are mutually exclusive.
+No GitHub connection, repository clone, or push is required for local compilation. Compilation runs on the First
+Draft service; output and the application runtime are local. CLI `0.3.x` used GitHub Publication as its default;
+scripts that require that behavior must add `--github` when upgrading to `0.4.x`.
+
 Both `plan compile` modes first push the exact current bytes in
-`.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and saves the accepted ETag using the same
+`.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and save the accepted ETag using the same
 contract as `plan push`. It then waits up to two minutes for an analysis whose graph version and
 `head_source_sha256` exactly match that accepted push, polling past a terminal result retained for an older Head.
 Invalid JSON, schema diagnostics, semantic diagnostics, a failed analysis, a superseded analysis, or a recurring
@@ -154,21 +161,21 @@ the accepted source SHA-256 from the saved ETag, hashes the current local bytes,
 
 ### Materialize a direct Compilation
 
-With `--output`, the CLI accepts either an explicit absent destination beneath an existing real directory or a path
+Without `--github`, the CLI accepts either an explicit absent destination beneath an existing real directory or a path
 that resolves to the physical current directory. It validates either destination before pushing the Plan. An absent
 destination is checked again after analysis; root adoption instead holds its owned lock and performs the exact
 pre-move identity recheck described below. Other existing destinations remain invalid, so
 `--output ./application` retains its absent-directory contract.
 
-The nested archive layout below describes the unreleased `0.3.0` candidate.
+The nested archive layout below is shared by CLI `0.3.x` and `0.4.x`.
 [Published CLI `0.2.2`](release-history.md#022-publication-and-registry-observation) archives at top-level `design/`;
 existing applications are not migrated automatically.
 
-`--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
+The default `--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
 another spelling that resolves to that same physical directory select the same mode. It works at any real current
 directory that meets the preconditions below and does not recognize Drawing Board or another repository layout
-specially. This first root-adoption contract supports POSIX filesystems; Windows retains absent-directory output
-and refuses root adoption as `root_platform_unsupported`. Before starting Compilation, the CLI requires:
+specially. Root adoption supports POSIX filesystems; on Windows, use `--output ./application` because current-folder
+output returns `root_platform_unsupported`. Before starting Compilation, the CLI requires:
 
 - the current directory to be a real, writable, non-filesystem-root directory;
 - no existing `.firstdraft/design` archive or top-level `.firstdraft-root-output` transaction path, including
@@ -274,10 +281,10 @@ only.
 
 ### Publish through GitHub
 
-Without `--output`, the existing GitHub Publication journey remains unchanged:
+Use the explicit GitHub option for the Publication journey:
 
 ```sh
-firstdraft plan compile
+firstdraft plan compile --github
 ```
 
 Invoking this form authorizes the internal GitHub Publication lifecycle. The command writes stable human-readable
@@ -312,8 +319,8 @@ exact Plan push and valid Analysis.
 ## Inspect a retained Compilation
 
 These lower-level commands are for callers that already hold a retained Compilation ID from authenticated API
-metadata or operational tooling. The no-output `plan compile` form prints only the final repository URL, while
-`plan compile --output` waits for and downloads its own direct Compilation:
+metadata or operational tooling. `plan compile --github` prints only the final repository URL, while the default
+`plan compile` form waits for and downloads its own direct Compilation:
 
 ```sh
 firstdraft compilation status 01900000-0000-7000-8000-000000000001

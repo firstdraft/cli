@@ -76,7 +76,7 @@ test("plan compile submits exact bytes, waits for valid analysis, and publishes 
   });
   const apiUrl = await listen(context, server);
   const cwd = localDirectory(context, PLAN_SOURCE);
-  const result = await invoke(["plan", "compile"], { cwd, apiUrl });
+  const result = await invoke(["plan", "compile", "--github"], { cwd, apiUrl });
 
   assert.equal(result.status, 0);
   assert.equal(result.stderr, SUCCESS_PROGRESS);
@@ -205,7 +205,7 @@ test("plan compile may push unchanged bytes before analysis and Publication", as
   /** @type {unknown[]} */
   const order = [];
   const expected = publicationBody();
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     planCompilePush: async (/** @type {{cwd: string}} */ options) => {
       order.push(["push", options.cwd]);
@@ -335,90 +335,95 @@ test("plan compile root output locks before push and releases after invalid anal
   );
 });
 
-test("plan compile root output materializes directly without Publication", async (context) => {
-  if (process.platform === "win32") return context.skip();
-  const cwd = localDirectory(context, PLAN_SOURCE, {
-    api_url: "https://api.example.test",
-    foundation_plan_etag: ETAG,
-  });
-  writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
-  const artifact = directArtifactFixture(true);
-  /** @type {{input: string | URL | Request, init: RequestInit}[]} */
-  const calls = [];
-  const result = await invoke(["plan", "compile", "--output", "."], {
-    cwd,
-    planCompilePush: successfulPush,
-    planCompileReadStatus: async () => ({
-      status: 200,
-      body: analysisBody("valid"),
-    }),
-    planCompilePublish: async () => {
-      throw new Error("Publication must remain untouched");
-    },
-    fetchFunction: sequenceFetch(
-      [
-        jsonResponse(directCompilationBody("succeeded", artifact), 202, {
-          Location: directCompilationPath(),
-        }),
-        new Response(artifact.source, {
-          status: 200,
-          headers: {
-            "Content-Type": ARTIFACT_MEDIA_TYPE,
-            "Content-Length": String(artifact.source.byteLength),
-            "Cache-Control": "no-store, no-transform",
-            ETag: `"sha256:${artifact.sha256}"`,
-          },
-        }),
-      ],
-      calls,
-    ),
-  });
+for (const outputArgs of [[], ["--output", "."]]) {
+  test(`plan compile ${outputArgs.join(" ")} materializes root output without Publication`, async (context) => {
+    if (process.platform === "win32") return context.skip();
+    const cwd = localDirectory(context, PLAN_SOURCE, {
+      api_url: "https://api.example.test",
+      foundation_plan_etag: ETAG,
+    });
+    writeFileSync(path.join(cwd, "product-notes.md"), "Design notes\n");
+    const artifact = directArtifactFixture(true);
+    /** @type {{input: string | URL | Request, init: RequestInit}[]} */
+    const calls = [];
+    const result = await invoke(["plan", "compile", ...outputArgs], {
+      cwd,
+      planCompilePush: successfulPush,
+      planCompileReadStatus: async () => ({
+        status: 200,
+        body: analysisBody("valid"),
+      }),
+      planCompilePublish: async () => {
+        throw new Error("Publication must remain untouched");
+      },
+      fetchFunction: sequenceFetch(
+        [
+          jsonResponse(directCompilationBody("succeeded", artifact), 202, {
+            Location: directCompilationPath(),
+          }),
+          new Response(artifact.source, {
+            status: 200,
+            headers: {
+              "Content-Type": ARTIFACT_MEDIA_TYPE,
+              "Content-Length": String(artifact.source.byteLength),
+              "Cache-Control": "no-store, no-transform",
+              ETag: `"sha256:${artifact.sha256}"`,
+            },
+          }),
+        ],
+        calls,
+      ),
+    });
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(
-    calls.map((call) => [call.init.method, String(call.input)]),
-    [
-      ["POST", `https://api.example.test${compilationCollectionPath()}`],
-      ["GET", `https://api.example.test${directArtifactPath()}`],
-    ],
-  );
-  assert.equal(
-    readFileSync(path.join(cwd, "README.md"), "utf8"),
-    "Movie Catalog\n",
-  );
-  assert.equal(
-    readFileSync(path.join(cwd, ".firstdraft/design/product-notes.md"), "utf8"),
-    "Design notes\n",
-  );
-  assert.equal(
-    readFileSync(
-      path.join(cwd, ".firstdraft/design/.firstdraft/foundation-plan.json"),
-      "utf8",
-    ),
-    PLAN_SOURCE.toString("utf8"),
-  );
-  assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
-  const output = JSON.parse(result.stdout).output;
-  assert.equal(output.path, realpathSync(cwd));
-  assert.equal(
-    output.root_adoption.design_path,
-    path.join(realpathSync(cwd), ".firstdraft/design"),
-  );
-  assert.equal(output.root_adoption.moved_entry_count, 2);
-  assert.equal(
-    readFileSync(
-      path.join(cwd, ".firstdraft/submitted-foundation-plan.json"),
-      "utf8",
-    ),
-    PLAN_SOURCE.toString("utf8"),
-  );
-  assert.equal(
-    readFileSync(path.join(cwd, ".firstdraft/gaps.json"), "utf8"),
-    '{"gaps":[]}\n',
-  );
-  assert.equal(existsSync(path.join(cwd, ".firstdraft/state.json")), false);
-  assert.equal(existsSync(path.join(cwd, "design")), false);
-});
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      calls.map((call) => [call.init.method, String(call.input)]),
+      [
+        ["POST", `https://api.example.test${compilationCollectionPath()}`],
+        ["GET", `https://api.example.test${directArtifactPath()}`],
+      ],
+    );
+    assert.equal(
+      readFileSync(path.join(cwd, "README.md"), "utf8"),
+      "Movie Catalog\n",
+    );
+    assert.equal(
+      readFileSync(
+        path.join(cwd, ".firstdraft/design/product-notes.md"),
+        "utf8",
+      ),
+      "Design notes\n",
+    );
+    assert.equal(
+      readFileSync(
+        path.join(cwd, ".firstdraft/design/.firstdraft/foundation-plan.json"),
+        "utf8",
+      ),
+      PLAN_SOURCE.toString("utf8"),
+    );
+    assert.equal(existsSync(path.join(cwd, ROOT_TRANSACTION_NAME)), false);
+    const output = JSON.parse(result.stdout).output;
+    assert.equal(output.path, realpathSync(cwd));
+    assert.equal(
+      output.root_adoption.design_path,
+      path.join(realpathSync(cwd), ".firstdraft/design"),
+    );
+    assert.equal(output.root_adoption.moved_entry_count, 2);
+    assert.equal(
+      readFileSync(
+        path.join(cwd, ".firstdraft/submitted-foundation-plan.json"),
+        "utf8",
+      ),
+      PLAN_SOURCE.toString("utf8"),
+    );
+    assert.equal(
+      readFileSync(path.join(cwd, ".firstdraft/gaps.json"), "utf8"),
+      '{"gaps":[]}\n',
+    );
+    assert.equal(existsSync(path.join(cwd, ".firstdraft/state.json")), false);
+    assert.equal(existsSync(path.join(cwd, "design")), false);
+  });
+}
 
 test("plan compile --output rejects an existing destination before Plan mutation", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE);
@@ -810,10 +815,7 @@ test("direct Compilation timeout names read-only retained-ID recovery", async (c
   assert.equal(envelope.current.compilation.id, COMPILATION_ID);
   assert.equal(envelope.current.compilation.status, "queued");
   assert.match(envelope.detail, /firstdraft compilation status/);
-  assert.match(
-    envelope.detail,
-    /do not rerun 'firstdraft plan compile --output'/,
-  );
+  assert.match(envelope.detail, /do not rerun 'firstdraft plan compile'/);
   assert.equal(calls.length, 1);
 });
 
@@ -825,7 +827,7 @@ test("plan compile waits past a terminal analysis for the prior graph version", 
   /** @type {unknown[]} */
   const calls = [];
   let publications = 0;
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     planCompilePush: async () => ({
       status: 200,
@@ -859,7 +861,7 @@ test("plan compile rejects an older Head at the accepted graph version", async (
   });
   const olderHead = "0".repeat(64);
   let publications = 0;
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     planCompilePush: successfulPush,
     fetchFunction: sequenceFetch([
@@ -887,7 +889,7 @@ test("invalid JSON and schema diagnostics stop before analysis or Publication", 
     const cwd = localDirectory(context, source);
     /** @type {unknown[]} */
     const calls = [];
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       apiUrl: "https://api.example.test",
       fetchFunction: sequenceFetch(
@@ -921,7 +923,7 @@ test("semantic and failed analysis stop before Publication with structured statu
     });
     let publications = 0;
     const current = analysisBody(status);
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       planCompilePush: successfulPush,
       planCompileReadStatus: async () => ({ status: 200, body: current }),
@@ -955,7 +957,7 @@ test("recurring diagnostics remain repairable and never trigger Publication", as
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await invoke(["plan", "compile"], options);
+    const result = await invoke(["plan", "compile", "--github"], options);
     assertHandledFailure(result, "plan_not_valid");
     assert.equal(
       errorEnvelope(result.stderr).current.analysis.diagnostics[0].code,
@@ -971,7 +973,7 @@ test("the final local-byte check stops a stale analyzed Plan before Publication"
     foundation_plan_etag: ETAG,
   });
   let networkRequests = 0;
-  const result = await invoke(["plan", "compile"], {
+  const result = await invoke(["plan", "compile", "--github"], {
     cwd,
     planCompilePush: successfulPush,
     planCompileReadStatus: async () => {
@@ -1006,7 +1008,7 @@ test("the final local-byte check stops a stale analyzed Plan before Publication"
 
 test("push ambiguity, analysis failures, and rejected reads have distinct errors", async (context) => {
   const pushCwd = localDirectory(context, PLAN_SOURCE);
-  const push = await invoke(["plan", "compile"], {
+  const push = await invoke(["plan", "compile", "--github"], {
     cwd: pushCwd,
     apiUrl: "https://api.example.test",
     fetchFunction: async () => {
@@ -1039,7 +1041,7 @@ test("push ambiguity, analysis failures, and rejected reads have distinct errors
   ];
   for (const [response, error] of analysisFailures) {
     const cwd = localDirectory(context, PLAN_SOURCE);
-    const result = await invoke(["plan", "compile"], {
+    const result = await invoke(["plan", "compile", "--github"], {
       cwd,
       apiUrl: "https://api.example.test",
       fetchFunction: sequenceFetch([
@@ -1072,6 +1074,8 @@ test("help and invalid direct-output syntax have no prerequisites", async () => 
     ["plan", "compile", "--output"],
     ["plan", "compile", "--output", "one", "--output", "two"],
     ["plan", "compile", "application"],
+    ["plan", "compile", "--github", "--output", "."],
+    ["plan", "compile", "--output", "app", "--github"],
   ]) {
     const invalid = await invoke(argv, {
       cwd: process.cwd(),
