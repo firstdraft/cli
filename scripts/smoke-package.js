@@ -613,7 +613,7 @@ async function exercisePackedCompilation(projectDirectory) {
     );
 
     const compiled = await spawnPackedCliAsync(
-      ["plan", "compile"],
+      ["plan", "compile", "--github"],
       projectDirectory,
     );
     assert.deepEqual(compiled, {
@@ -681,7 +681,7 @@ First Draft: Application compiled.
     }
 
     const rootOutput = await spawnPackedCliAsync(
-      ["plan", "compile", "--output", "."],
+      ["plan", "compile"],
       projectDirectory,
     );
     const expectedCompilationStarts = process.platform === "win32" ? 1 : 2;

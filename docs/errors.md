@@ -22,11 +22,11 @@ phase-specific recovery:
 - `phase: "push"` means the Plan mutation may have been accepted. Stop and reconcile local Head state. Until First
   Draft has a Foundation Plan Head reconciliation endpoint, an accepted request whose response cannot be verified
   may require manual recovery. Do not construct an ETag from the Plan digest or trust an unverified response.
-- `phase: "compilation"` means a direct `--output` Compilation may have started, but its retained identity is unknown.
+- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started, but its retained identity is unknown.
   The CLI never repeats that `POST`. Do not start another Compilation until the Project is reconciled through First
   Draft or an operator can identify the retained work.
 - `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
-  commands. After the prior invocation exits, wait and rerun `plan compile` with unchanged Plan bytes to safely
+  commands. After the prior invocation exits, wait and rerun `plan compile --github` with unchanged Plan bytes to safely
   reconcile or resume the retained singleton.
 
 `plan push` also reports `request_outcome_unknown` if a failure happens after sending its request. Local state remains
@@ -45,12 +45,12 @@ will not repair it.
 Only the lower-level `compilation status <compilation-id>` command is read-only. Its
 `compilation_status_unavailable` result is safe to retry a bounded number of times;
 `invalid_compilation_status` requires contract reconciliation. A wait stops rather than following a changed
-analysis or Compilation identity. This read-only retry guidance does not apply to `plan compile --output`, which
+analysis or Compilation identity. This read-only retry guidance does not apply to `plan compile`, which
 starts a new Compilation after analysis.
 
 ## Direct Compilation recovery
 
-Do not blindly rerun `plan compile --output` after its Compilation start was accepted or may have been accepted.
+Do not blindly rerun `plan compile` after its Compilation start was accepted or may have been accepted.
 That command creates new work; it is not a retained-Compilation reconciliation command.
 
 If `request_outcome_unknown` reports `phase: "compilation"`, the start request did not yield a validated retained
@@ -85,7 +85,7 @@ operation is safe to remove. After successful adoption, run retained status and 
 
 After `compilation_wait_timed_out`, retained work may still continue. Use
 `firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun
-`plan compile --output`. `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry the
+`plan compile`. `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry the
 validated `current` projection appropriate to their stopping boundary. Authentication recovery may refresh the
 credential, but it must continue from the retained ID rather than starting another Compilation.
 
@@ -95,7 +95,7 @@ The Publication is a Project singleton. If its initial conditional `PUT` is ambi
 read-only singleton `GET` and never automatically repeats the mutation in that invocation.
 
 After `publication_status_unavailable` or `publication_wait_timed_out`, retained work may still continue. Do not run
-concurrent Compile commands. Wait, then rerun `plan compile` with unchanged Plan bytes; the conditional request
+concurrent Compile commands. Wait, then rerun `plan compile --github` with unchanged Plan bytes; the conditional request
 safely reconciles or resumes the same retained singleton without creating another Compilation, repository, or push.
 The same recovery applies when an invocation exits after an unresolved Publication start.
 
@@ -123,10 +123,10 @@ stopped without following the replacement.
 | Analysis waits                               | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                    |
 | `plan compile`                               | `plan_not_valid`                                                                                   |    1 | Analysis completed without `valid`; `current` contains diagnostics and status.                         |
 | `plan compile`                               | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                     |
-| `plan compile --output`                      | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.              |
-| `plan compile --output`                      | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                            |
-| `plan compile`                               | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                   |
-| `plan compile`                               | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                    |
+| `plan compile`                               | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.              |
+| `plan compile`                               | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                            |
+| `plan compile --github`                      | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                   |
+| `plan compile --github`                      | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                    |
 | `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                  |
 | `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                |
 | `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                              |

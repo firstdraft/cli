@@ -4,9 +4,13 @@ firstdraft is the command-line client shared by First Draft agents and automatio
 files, calls the versioned Service API, exposes reviewed analysis and GapSets, materializes verified Compilations,
 and coordinates private GitHub publication.
 
-Trying First Draft as a tester? Start with the
-[Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft), which installs a
-compatible CLI and Skill together.
+Start with the [local development guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e):
+install the CLI and Skill, then compile into your current folder with `firstdraft plan compile --output .`. No Drawing Board
+clone or GitHub push is required. The [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft)
+is the Codespaces fallback.
+
+CLI 0.4 makes `--output .` the default. Keep the explicit flag with CLI 0.3, whose zero-flag command selects GitHub
+publication.
 
 ## What this repository owns
 
@@ -17,7 +21,7 @@ compatible CLI and Skill together.
 - retained Compilation inspection and artifact download;
 - terminal output, exit status, and recovery contracts;
 - the dependency-free npm package; and
-- package provenance and release promotion.
+- package provenance and publication.
 
 The Service owns Foundation Plan meaning and server-side lifecycle. Skills own the agent conversation. This
 repository owns the exact command and transport behavior between them.
@@ -29,7 +33,7 @@ repository owns the exact command and transport behavior between them.
 | Change the CLI                       | [Agent instructions](https://github.com/firstdraft/cli/blob/main/AGENTS.md), then [documentation map](docs/README.md) |
 | Find a command or output contract    | [Command reference](docs/commands.md)                                                                                 |
 | Interpret an error or recover safely | [Errors and recovery](docs/errors.md)                                                                                 |
-| Prepare or promote a package         | [Release runbook](RELEASING.md)                                                                                       |
+| Prepare or publish a package         | [Release runbook](RELEASING.md)                                                                                       |
 | Inspect dated package observations   | [Release history](docs/release-history.md)                                                                            |
 | Report a vulnerability               | [Security policy](SECURITY.md)                                                                                        |
 
@@ -84,7 +88,7 @@ npm install --global @firstdraft.com/cli
 ```
 
 Pin an exact compatible version when a repeatable installation matters; [RELEASING.md](RELEASING.md) owns channel
-and promotion meaning.
+and release meaning.
 
 The published package:
 
@@ -101,6 +105,5 @@ including the release runbook and dated release history, ships with the package.
 
 ## Release boundary
 
-Merging source is not package publication. Publishing a candidate, moving npm dist-tags, coordinating the Skills
-package, and promoting a stable release are distinct steps in [RELEASING.md](RELEASING.md). Verify the exact packed
-digest and Service compatibility before any promotion.
+Merging source is not package publication. An approved coordinated release publishes directly to `latest`, reusing
+successful CI for the exact source. [RELEASING.md](RELEASING.md) owns the short release and recovery procedure.

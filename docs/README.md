@@ -3,15 +3,16 @@
 Use this page to find the narrowest authoritative document for a task. Runtime source and tests remain the final
 evidence for implemented behavior; if they contradict a document, surface the contradiction instead of guessing.
 
-| If the task concerns...                                                                | Read first                                                                                       |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Beginner tester journey                                                                | [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft) |
-| Direct CLI installation, repository orientation, or package contract                   | [Root README](../README.md)                                                                      |
-| Commands, options, environment variables, API behavior, output, or materialization     | [Command reference](commands.md)                                                                 |
-| Stable errors, exit codes, retry safety, ambiguous outcomes, or local recovery         | [Errors and recovery](errors.md)                                                                 |
-| Version policy, release preparation, publication, verification, rollback, or promotion | [Release policy and runbook](../RELEASING.md)                                                    |
-| What was observed for an earlier tag, package, or dist-tag                             | [Release history](release-history.md)                                                            |
-| Vulnerability reporting                                                                | [Security policy](../SECURITY.md)                                                                |
+| Task                             | Read first                                                                                       |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Local app development            | [Local guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e)              |
+| Codespaces fallback              | [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft) |
+| Installation or package contract | [Root README](../README.md)                                                                      |
+| Commands, API, or output         | [Command reference](commands.md)                                                                 |
+| Errors and recovery              | [Errors and recovery](errors.md)                                                                 |
+| Versioning and publication       | [Release policy and runbook](../RELEASING.md)                                                    |
+| Dated release observations       | [Release history](release-history.md)                                                            |
+| Vulnerability reporting          | [Security policy](../SECURITY.md)                                                                |
 
 ## Authority boundaries
 
@@ -21,7 +22,7 @@ evidence for implemented behavior; if they contradict a document, surface the co
 - [errors.md](errors.md) owns handled-error interpretation and recovery guidance.
 - [RELEASING.md](../RELEASING.md) owns living release policy and the operator runbook.
 - [release-history.md](release-history.md) preserves dated release observations. Recheck live tags, package versions,
-  dist-tags, access, and trusted-publisher state before relying on them operationally.
+  and dist-tags before relying on them operationally; publisher configuration is checked when it changes or fails.
 - The source repository's `AGENTS.md` routes agent work; it should stay compact rather than duplicate these documents.
 
 ## Retrieval quality
