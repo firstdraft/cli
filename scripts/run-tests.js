@@ -9,9 +9,13 @@ process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 const testFiles = findTestFiles("test");
 assert.notEqual(testFiles.length, 0, "No test files found");
 
-const result = spawnSync(process.execPath, ["--test", ...testFiles], {
-  stdio: "inherit",
-});
+const result = spawnSync(
+  process.execPath,
+  ["--test", ...process.argv.slice(2), ...testFiles],
+  {
+    stdio: "inherit",
+  },
+);
 
 if (result.error) {
   throw result.error;

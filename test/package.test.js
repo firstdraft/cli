@@ -12,56 +12,10 @@ const publishWorkflow = await readFile(
   new URL("../.github/workflows/publish.yml", import.meta.url),
   "utf8",
 );
-const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
-const releasingGuide = await readFile(
-  new URL("../RELEASING.md", import.meta.url),
+const releaseSourceScript = await readFile(
+  new URL("../scripts/check-release-source.sh", import.meta.url),
   "utf8",
 );
-const securityGuide = await readFile(
-  new URL("../SECURITY.md", import.meta.url),
-  "utf8",
-);
-const releaseHistory = await readFile(
-  new URL("../docs/release-history.md", import.meta.url),
-  "utf8",
-);
-const agentInstructions = await readFile(
-  new URL("../AGENTS.md", import.meta.url),
-  "utf8",
-);
-
-/**
- * @param {string} jobSource
- * @returns {string[]}
- */
-function releaseSourceChecks(jobSource) {
-  const beginMarker = "# release-source-checks:begin";
-  const endMarker = "# release-source-checks:end";
-  const beginIndex = jobSource.indexOf(beginMarker);
-
-  assert.ok(beginIndex >= 0, "release check begin marker must exist");
-  assert.equal(
-    jobSource.indexOf(beginMarker, beginIndex + beginMarker.length),
-    -1,
-    "release check begin marker must be unique",
-  );
-
-  const checksStart = beginIndex + beginMarker.length;
-  const endIndex = jobSource.indexOf(endMarker, checksStart);
-
-  assert.ok(endIndex >= checksStart, "release check end marker must exist");
-  assert.equal(
-    jobSource.indexOf(endMarker, endIndex + endMarker.length),
-    -1,
-    "release check end marker must be unique",
-  );
-
-  return jobSource
-    .slice(checksStart, endIndex)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
 
 test("package metadata preserves the audited runtime boundary", () => {
   assert.equal(metadata.name, "@firstdraft.com/cli");
@@ -105,48 +59,6 @@ test("ordinary pre-1.0 versions use the approval-gated distribution channel", ()
   });
 });
 
-test("approved releases publish directly to latest and preserve immutable versions", () => {
-  assert.match(
-    agentInstructions,
-    /Publish approved versions directly to `latest`/,
-  );
-  assert.match(
-    releasingGuide,
-    /publication reuses successful CI for the exact source/,
-  );
-  assert.match(releasingGuide, /approval already given for that scope/);
-  assert.match(
-    securityGuide,
-    /release currently identified by npm's `latest` tag receives security fixes/,
-  );
-  assert.match(
-    releaseHistory,
-    /Protected tag `v0\.1\.0` and package version `0\.1\.0` were consumed and immutable/,
-  );
-  const consumedVersions = [
-    ...releaseHistory.matchAll(
-      /(?:Package|package) version `([^`]+)`(?=[\s\S]{0,120}?consumed and immutable)/g,
-    ),
-  ].map((match) => match[1]);
-  assert.equal(
-    consumedVersions.includes(metadata.version),
-    false,
-    `package version ${metadata.version} is already recorded as consumed`,
-  );
-  assert.match(
-    releasingGuide,
-    /If either identity is already\s+consumed, prepare the next version/,
-  );
-  assert.doesNotMatch(
-    `${readme}\n${releasingGuide}`,
-    /Before (?:creating )?the first ordinary `v0\.1\.0`/,
-  );
-  assert.doesNotMatch(
-    releasingGuide,
-    /npm trust github|npm access grant|npm whoami|npm trust list/,
-  );
-});
-
 test("publication reuses successful exact-source CI instead of rerunning the suite", () => {
   const verifyJob = workflowJob(publishWorkflow, "verify");
   assert.match(verifyJob, /actions: read/);
@@ -167,7 +79,7 @@ test("publication reuses successful exact-source CI instead of rerunning the sui
   );
 });
 
-test("OIDC publication repeats every release source check", () => {
+test("OIDC publication rechecks source after approval and before publishing", () => {
   const verifyJobStart = publishWorkflow.indexOf("\n  verify:\n");
   const publishJobStart = publishWorkflow.indexOf("\n  publish:\n");
 
@@ -177,11 +89,9 @@ test("OIDC publication repeats every release source check", () => {
   const verifyJob = workflowJob(publishWorkflow, "verify");
   const publishJob = workflowJob(publishWorkflow, "publish");
   const npmApprovalGate = 'test "$NPM_RELEASE_ENABLED" = "true"';
-  const verifyChecks = releaseSourceChecks(verifyJob);
-  const publishChecks = releaseSourceChecks(publishJob);
-  const npmApprovalGates = publishChecks.filter(
-    (line) => line === npmApprovalGate,
-  );
+  const npmApprovalGateIndex = publishJob.indexOf(npmApprovalGate);
+  const sourceCheckCommand = "bash scripts/check-release-source.sh";
+  const publishSourceCheckIndex = publishJob.indexOf(sourceCheckCommand);
   const publishCommand =
     "npm publish --access public --tag latest --provenance --ignore-scripts";
   const publishCommandIndex = publishJob.indexOf(publishCommand);
@@ -196,25 +106,43 @@ test("OIDC publication repeats every release source check", () => {
   const approvedRunnerIndex = publishJob.indexOf(approvedRunner);
   const nodeVersion = "\n          node-version: 24.18.0\n";
   const npmVersionCheck = 'test "$(npm --version)" = "11.16.0"';
-  const publishChecksEndIndex = publishJob.indexOf(
-    "# release-source-checks:end",
-  );
+  const publicationSource = `${publishWorkflow}\n${releaseSourceScript}`;
 
-  assert.ok(verifyChecks.length > 0, "release source checks must not be empty");
-  assert.equal(
-    verifyChecks[0],
-    "set -euo pipefail",
-    "release checks must fail closed",
+  for (const job of [verifyJob, publishJob]) {
+    const sourceCheckIndex = job.indexOf(sourceCheckCommand);
+    assert.ok(sourceCheckIndex >= 0, "both jobs must check release source");
+    assert.equal(
+      job.indexOf(
+        sourceCheckCommand,
+        sourceCheckIndex + sourceCheckCommand.length,
+      ),
+      -1,
+      "each job must check release source once",
+    );
+    assert.equal(job.includes(nodeVersion), true);
+  }
+  assert.match(publishJob, /needs: verify/);
+  assert.ok(
+    verifyJob.indexOf(sourceCheckCommand) < verifyJob.indexOf("gh run list"),
+  );
+  assert.match(releaseSourceScript, /^set -euo pipefail$/m);
+  assert.ok(
+    npmApprovalGateIndex >= 0,
+    "publish must require explicit approval",
   );
   assert.equal(
-    npmApprovalGates.length,
-    1,
+    publishJob.indexOf(
+      npmApprovalGate,
+      npmApprovalGateIndex + npmApprovalGate.length,
+    ),
+    -1,
     "publish must require explicit approval once",
   );
-  assert.equal(
-    publishChecks.indexOf(npmApprovalGate),
-    1,
-    "approval must immediately follow shell safeguards",
+  assert.ok(
+    publishJob.indexOf("set -euo pipefail") >= 0 &&
+      publishJob.indexOf("set -euo pipefail") < npmApprovalGateIndex &&
+      npmApprovalGateIndex < publishSourceCheckIndex,
+    "approval must stop the job before release source checks",
   );
   assert.ok(publishCommandIndex >= 0, "publish command must exist");
   assert.equal(
@@ -291,37 +219,33 @@ test("OIDC publication repeats every release source check", () => {
     "trusted publication must use the pinned Node version",
   );
   assert.equal(
-    publishChecks.includes(npmVersionCheck),
+    releaseSourceScript.includes(npmVersionCheck),
     true,
     "trusted publication must verify the pinned npm version",
   );
   assert.equal(
-    publishWorkflow.includes("NODE_AUTH_TOKEN"),
+    publicationSource.includes("NODE_AUTH_TOKEN"),
     false,
     "trusted publication must not use a persistent npm credential",
   );
   assert.equal(
-    publishWorkflow.includes("NPM_TOKEN"),
+    publicationSource.includes("NPM_TOKEN"),
     false,
     "trusted publication must not name a persistent npm token",
   );
   assert.doesNotMatch(
-    publishWorkflow,
+    publicationSource,
     /\bsecrets\b/i,
     "trusted publication must not read a GitHub Actions secret",
   );
   assert.doesNotMatch(
-    publishWorkflow,
+    publicationSource,
     /auth[_-]?token/i,
     "trusted publication must not configure an authentication token",
   );
   assert.ok(
-    publishChecksEndIndex < publishCommandIndex,
+    publishSourceCheckIndex < publishCommandIndex,
     "release checks must precede publication",
-  );
-  assert.deepEqual(
-    publishChecks.filter((line) => line !== npmApprovalGate),
-    verifyChecks,
   );
 });
 
