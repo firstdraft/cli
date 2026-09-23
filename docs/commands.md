@@ -3,10 +3,10 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.4.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.5.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.4.x`
-requires the service's `0.4.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.5.x`
+requires the service's `0.5.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
 ## Command map
@@ -45,7 +45,7 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.20` Plan targeting `rails-sketch/2026-09` and a
+This creates an empty `firstdraft.foundation-plan.sketch/0.21` Plan targeting `rails-sketch/2026-09` and a
 client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
 without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
 existing `.firstdraft` path.
@@ -145,7 +145,7 @@ This is equivalent to `firstdraft plan compile --output .`. Use `--output ./appl
 directory, or `--github` to publish to a private GitHub repository. `--github` and `--output` are mutually exclusive.
 No GitHub connection, repository clone, or push is required for local compilation. Compilation runs on the First
 Draft service; output and the application runtime are local. CLI `0.3.x` used GitHub Publication as its default;
-scripts that require that behavior must add `--github` when upgrading to `0.4.x`.
+scripts that require that behavior must add `--github` when upgrading to `0.4.x` or later.
 
 Both `plan compile` modes first push the exact current bytes in
 `.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and save the accepted ETag using the same
@@ -167,7 +167,7 @@ destination is checked again after analysis; root adoption instead holds its own
 pre-move identity recheck described below. Other existing destinations remain invalid, so
 `--output ./application` retains its absent-directory contract.
 
-The nested archive layout below is shared by CLI `0.3.x` and `0.4.x`.
+The nested archive layout below is shared by CLI `0.3.x` and later.
 [Published CLI `0.2.2`](release-history.md#022-publication-and-registry-observation) archives at top-level `design/`;
 existing applications are not migrated automatically.
 
@@ -296,7 +296,7 @@ local paths, or environment values. Success writes exactly the validated private
 newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
 stderr document after the progress lines.
 
-The closed API `0.4.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.5.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -345,7 +345,7 @@ when a retained direct Compilation succeeded but an earlier root materialization
 never starts replacement work. An incomplete rollback leaves `.firstdraft-root-output` and requires journal
 reconciliation before this command can run again.
 
-Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.20` and target profile
+Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.21` and target profile
 `rails-sketch/2026-09`, in addition to matching the retained Compilation's provenance and verifying file integrity.
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 

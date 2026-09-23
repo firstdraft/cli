@@ -149,7 +149,7 @@ try {
       name: initializedPlan.application.name,
     },
     {
-      format: "firstdraft.foundation-plan.sketch/0.20",
+      format: "firstdraft.foundation-plan.sketch/0.21",
       target: { id: "rails", profile: "rails-sketch/2026-09" },
       key: "oscar_party",
       name: "Oscar Party",
@@ -399,7 +399,7 @@ async function exercisePackedCompilation(projectDirectory) {
         graph_version: 1,
         head_source_sha256: headSha256,
         foundation_plan: {
-          format: "firstdraft.foundation-plan.sketch/0.20",
+          format: "firstdraft.foundation-plan.sketch/0.21",
           sha256: foundationPlanSha256,
         },
         analysis: {
@@ -533,7 +533,7 @@ async function exercisePackedCompilation(projectDirectory) {
         {
           project: { id: projectId, graph_version: 1 },
           foundation_plan: {
-            format: "firstdraft.foundation-plan.sketch/0.20",
+            format: "firstdraft.foundation-plan.sketch/0.21",
             source_sha256: headSha256,
           },
           diagnostics: [],

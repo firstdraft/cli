@@ -16,10 +16,14 @@ release tag. An unpublished, untagged candidate can retain its proposed version 
 The published version may remain in source during documentation and test maintenance; recording its release history
 does not require preparing another version. Choose an unused version when preparing the next publication.
 
-CLI `0.4.x` makes `firstdraft plan compile` equivalent to `firstdraft plan compile --output .`; the former GitHub
-default becomes explicit `--github`. This is a breaking CLI change from `0.3.x`, without a Service API change.
-Both lines use API `0.4.x`, Plan `firstdraft.foundation-plan.sketch/0.20`, target `rails-sketch/2026-09`, and the
-`.firstdraft/design` root archive. Existing applications and old Plans are not migrated.
+CLI `0.5.x` requires API `0.5.x` and Plan `firstdraft.foundation-plan.sketch/0.21`. Plan `0.21` adds the authored
+`appearance.theme: "toggle"` choice and replaces the sole accepted `0.20` input format. The new API and CLI minor
+versions record that input and artifact compatibility break; they add no migration or compatibility bridge.
+The target stays `rails-sketch/2026-09`.
+
+Local output remains the default introduced in CLI `0.4.x`: `firstdraft plan compile` is equivalent to
+`firstdraft plan compile --output .`, with GitHub publication selected by explicit `--github`. The root archive
+remains `.firstdraft/design`. Existing applications and old Plans are not migrated.
 
 `release/compatibility.json` declares the package version, accepted API-contract range, and accepted Plan formats.
 It is source-only metadata, validated by the normal test suite and absent from the npm tarball. Coordinate the

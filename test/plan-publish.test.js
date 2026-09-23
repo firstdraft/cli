@@ -15,7 +15,7 @@ const ANALYSIS_ID = "01900000-0000-7000-8000-000000001004";
 const PUBLICATION_ID = "01900000-0000-7000-8000-000000001005";
 const OTHER_PUBLICATION_ID = "01900000-0000-7000-8000-000000001006";
 const PLAN_SOURCE = Buffer.from(
-  '{"format":"firstdraft.foundation-plan.sketch/0.20"}\n',
+  '{"format":"firstdraft.foundation-plan.sketch/0.21"}\n',
 );
 const HEAD_SHA256 = sha256(PLAN_SOURCE);
 const ETAG = `"sha256:${HEAD_SHA256}"`;
@@ -24,10 +24,9 @@ const CREATED_AT = "2026-08-01T12:00:00.000Z";
 const STARTED_AT = "2026-08-01T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-01T12:00:02.000Z";
 const RETRY_AT = "2026-08-07T16:15:00.000000Z";
-const ANALYZER_RELEASE =
-  "foundation-plan-rails/application-2026-09-19-conventions";
+const ANALYZER_RELEASE = "foundation-plan-rails/application-2026-09-22-theme";
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-19-conventions";
+  "foundation-plan-rails/compiler-application-2026-09-22-theme";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-09" };
 const ARTIFACT = {
   sha256: "1".repeat(64),
