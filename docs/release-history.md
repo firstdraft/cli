@@ -5,6 +5,22 @@ npm, GitHub, service, or qualification state. Before acting, recheck the registr
 compatibility declarations, trusted-publisher relationship, and named release-specific qualification by following
 the living [release policy and runbook](../RELEASING.md).
 
+## 0.4.0 local-output release
+
+- On September 23, 2026 UTC, protected tag `v0.4.0` published CLI `0.4.0` from
+  `a555f8d39862109b8c28b392c0439470e88f4ba8` directly to `latest` through
+  [GitHub trusted publishing](https://github.com/firstdraft/cli/actions/runs/35807891432).
+- `plan compile` now defaults to current-folder output, equivalent to `--output .`. GitHub Publication requires
+  `--github`. API compatibility remains `0.4.x`; this is a breaking CLI-default change from `0.3.x`.
+- npm SHA-1 is `65b6b960b9029cb8f2352273db9fb551132f2ac9`. Public exact-version installation reported `0.4.0`, and
+  registry signature and provenance verification passed. `latest` selected `0.4.0`; `next` remained `0.3.0`.
+- The packed candidate compiled a reviewed Reading List Plan against service `2bfdf6bf`, materialized 360 files at
+  the local root, and passed local Rails boot, browser creation, and source-edit refresh. Existing warnings and gaps
+  remained disclosed. No Codespace, GitHub Publication, native build, or Revyl session was part of this release smoke.
+- Plugin `0.4.0` bundles this exact CLI source. Its publication workflow matched all 27 files with the registry CLI.
+  The [plugin release record](https://github.com/firstdraft/skills/blob/main/evidence/2026-09-22-plugin-0.4.0-release.md)
+  records the companion package, catalog, and post-publication Drawing Board follow-up.
+
 ## 0.1.0 alpha publications
 
 - On July 31, 2026, npm rejected the unscoped `firstdraft` name for `v0.1.0-alpha.1` as too similar to the existing
