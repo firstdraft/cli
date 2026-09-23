@@ -16,8 +16,8 @@ release tag. An unpublished, untagged candidate can retain its proposed version 
 The published version may remain in source during documentation and test maintenance; recording its release history
 does not require preparing another version. Choose an unused version when preparing the next publication.
 
-CLI `0.5.x` requires API `0.5.x` and Plan `firstdraft.foundation-plan.sketch/0.21`. Plan `0.21` adds the authored
-`appearance.theme: "toggle"` choice and replaces the sole accepted `0.20` input format. The new API and CLI minor
+CLI `0.6.x` requires API `0.6.x` and Plan `firstdraft.foundation-plan.sketch/0.22`. Plan `0.22` adds the optional
+`application.pwa` boolean and replaces the sole accepted `0.21` input format. The new API and CLI minor
 versions record that input and artifact compatibility break; they add no migration or compatibility bridge.
 The target stays `rails-sketch/2026-09`.
 
