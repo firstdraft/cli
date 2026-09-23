@@ -3,10 +3,10 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.5.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.6.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.5.x`
-requires the service's `0.5.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.6.x`
+requires the service's `0.6.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
 ## Command map
@@ -45,7 +45,7 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.21` Plan targeting `rails-sketch/2026-09` and a
+This creates an empty `firstdraft.foundation-plan.sketch/0.22` Plan targeting `rails-sketch/2026-09` and a
 client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
 without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
 existing `.firstdraft` path.
@@ -53,6 +53,12 @@ existing `.firstdraft` path.
 Provide either `--name`, `--application-key`, or both. Name-only initialization derives a lower-snake key. Key-only
 initialization derives a humanized display name. Supplying both preserves both values exactly after validating them
 against the Foundation Plan schema.
+
+The initialized Plan omits `application.pwa`, which uses the Rails target's default of `true` for basic online
+installation and Add to Home Screen support. Set `"pwa": false` within `application` to omit generated installation
+metadata, or use `true` explicitly. The CLI sends the authored bytes unchanged, preserving omission versus either
+boolean. This choice does not add offline caching, Web Push, or a native build; a browser may still save an ordinary
+site when it is disabled. The CLI does not qualify browser or device installation.
 
 ### Generate an application key
 
@@ -296,7 +302,7 @@ local paths, or environment values. Success writes exactly the validated private
 newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
 stderr document after the progress lines.
 
-The closed API `0.5.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.6.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -345,7 +351,7 @@ when a retained direct Compilation succeeded but an earlier root materialization
 never starts replacement work. An incomplete rollback leaves `.firstdraft-root-output` and requires journal
 reconciliation before this command can run again.
 
-Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.21` and target profile
+Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.22` and target profile
 `rails-sketch/2026-09`, in addition to matching the retained Compilation's provenance and verifying file integrity.
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 

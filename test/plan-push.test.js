@@ -156,6 +156,35 @@ test("the initial push sends exact bytes and saves its origin and ETag", async (
   }
 });
 
+test("plan push preserves explicit PWA choices without rewriting the Plan", async (context) => {
+  for (const pwa of [true, false]) {
+    const cwd = await initializedDirectory(context);
+    const plan = JSON.parse(planSource(cwd).toString("utf8"));
+    plan.application.pwa = pwa;
+    const source = Buffer.from(`${JSON.stringify(plan, null, 2)}\n`);
+    writeFileSync(
+      path.join(cwd, ".firstdraft", "foundation-plan.json"),
+      source,
+    );
+    /** @type {FetchCall[]} */
+    const calls = [];
+
+    const result = await invoke(["plan", "push"], {
+      cwd,
+      apiUrl: API_URL,
+      fetchFunction: recordingFetch(
+        acceptedResponse(source, 201, FIRST_ETAG),
+        calls,
+      ),
+    });
+
+    assert.equal(result.status, 0);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]?.init?.body, source);
+    assert.deepEqual(planSource(cwd), source);
+  }
+});
+
 test("the initial push defaults to the First Draft production origin", async (context) => {
   const cwd = await initializedDirectory(context);
   const source = planSource(cwd);
@@ -1274,7 +1303,7 @@ function acceptedBody(source, diagnostics = []) {
   return {
     project: { id: PROJECT_ID, graph_version: 1 },
     foundation_plan: {
-      format: "firstdraft.foundation-plan.sketch/0.21",
+      format: "firstdraft.foundation-plan.sketch/0.22",
       source_sha256: sha256(source),
     },
     diagnostics,

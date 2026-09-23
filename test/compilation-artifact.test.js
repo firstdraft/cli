@@ -36,7 +36,7 @@ const SUBJECT_ID = "01900000-0000-7000-8000-000000000804";
 const HEAD_SHA256 = "1".repeat(64);
 const FOUNDATION_PLAN_SHA256 = "5".repeat(64);
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-22-theme";
+  "foundation-plan-rails/compiler-application-2026-09-23-pwa";
 const TARGET = { id: "rails", profile: "rails-sketch/2026-09" };
 const EXPECTED = {
   projectId: PROJECT_ID,
@@ -262,7 +262,7 @@ test("pins external provenance identities and validates nested metadata", () => 
     artifactFixture({
       provenance: {
         foundation_plan: {
-          format: "firstdraft.foundation-plan.sketch/0.20",
+          format: "firstdraft.foundation-plan.sketch/0.21",
           sha256: FOUNDATION_PLAN_SHA256,
         },
       },
