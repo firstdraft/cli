@@ -13,6 +13,8 @@ executes the same release decision. Do not ask for another conversational approv
 Before `1.0.0`, use ordinary `0.MINOR.PATCH` versions: increase `MINOR` for a breaking compatibility-line change and
 `PATCH` for a backward-compatible change within that line. Never reuse a published version or move a protected
 release tag. An unpublished, untagged candidate can retain its proposed version while its source changes.
+The published version may remain in source during documentation and test maintenance; recording its release history
+does not require preparing another version. Choose an unused version when preparing the next publication.
 
 CLI `0.4.x` makes `firstdraft plan compile` equivalent to `firstdraft plan compile --output .`; the former GitHub
 default becomes explicit `--github`. This is a breaking CLI change from `0.3.x`, without a Service API change.
@@ -56,6 +58,7 @@ The workflow requires a protected `v*` tag in `firstdraft/cli`, the matching `pa
 remote tag, and a commit in the first-parent history of protected `main`. It finds a successful `CI` push run for
 that exact SHA using `gh run list`, checks the package file allowlist, then rechecks mutable refs after environment
 approval. It does not install development dependencies, rerun tests or audit, or request interactive npm login.
+Both source checks invoke `scripts/check-release-source.sh`; the postapproval invocation must remain before publish.
 
 If CI is still running, let that run finish and rerun the failed publication verification job. Resolve failing
 checks in CI itself; publication does not start a duplicate suite. A source fix after tagging requires a new version.

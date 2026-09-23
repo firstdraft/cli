@@ -52,6 +52,12 @@ smoke test. To inspect the package manifest without writing a tarball:
 npm pack --dry-run --json --ignore-scripts
 ```
 
+Pass Node test options through `npm test` to focus a run while retaining discovery under `test/`:
+
+```sh
+npm test -- --test-name-pattern="publication"
+```
+
 To reproduce the length-delimited SHA-256 used by external evidence to identify packaged JavaScript runtime inputs
 (`package.json`, `bin/firstdraft.js`, and every `.js` file under `src/`), run:
 

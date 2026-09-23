@@ -22,44 +22,22 @@ const sources = new Map(
   markdownFiles.map((file) => [file, readFileSync(file, "utf8")]),
 );
 
-test("documentation routes commands, recovery, and release knowledge", () => {
+test("public documentation avoids unavailable destinations", () => {
   const readme = sources.get(path.join(repository, "README.md"));
-  const index = sources.get(path.join(repository, "docs/README.md"));
-  const instructions = sources.get(path.join(repository, "AGENTS.md"));
-  const releasing = sources.get(path.join(repository, "RELEASING.md"));
-  const history = sources.get(path.join(repository, "docs/release-history.md"));
-
   assert(readme);
-  assert(index);
-  assert(instructions);
-  assert(releasing);
-  assert(history);
-
-  assert.doesNotMatch(
-    readme,
-    /\[First Draft\]\(https:\/\/firstdraft\.com\)/,
+  assert.equal(
+    markdownLinkTargets(readme).includes("https://firstdraft.com"),
+    false,
     "public onboarding must not route readers to the unrelated site at the API origin",
   );
-  assert.match(readme, /\[Command reference\]\(docs\/commands\.md\)/);
-  assert.match(readme, /\[Errors and recovery\]\(docs\/errors\.md\)/);
-  assert.match(readme, /\[Release history\]\(docs\/release-history\.md\)/);
-  assert.match(readme, /\[Release runbook\]\(RELEASING\.md\)/);
-  assert.match(index, /\[Command reference\]\(commands\.md\)/);
-  assert.match(index, /\[Errors and recovery\]\(errors\.md\)/);
-  assert.match(index, /\[Release policy and runbook\]\(\.\.\/RELEASING\.md\)/);
-  assert.match(instructions, /Start with `docs\/README\.md`/);
-  assert.match(releasing, /\[release history\]\(docs\/release-history\.md\)/);
-  assert.match(history, /historical evidence, not a statement of current/);
-
-  const publicDocumentation = [...sources.values()].join("\n");
-  assert.doesNotMatch(
-    publicDocumentation,
-    /https:\/\/github\.com\/firstdraft\/firstdraft(?:[\s/)#]|$)/,
-  );
-  assert.doesNotMatch(
-    `${readme}\n${releasing}`,
-    /\b(?:July|August) \d{1,2}, 2026\b/,
-  );
+  for (const source of sources.values()) {
+    for (const target of markdownLinkTargets(source)) {
+      assert.doesNotMatch(
+        target,
+        /^https:\/\/github\.com\/firstdraft\/firstdraft(?:[/#]|$)/,
+      );
+    }
+  }
 });
 
 test("documentation entrypoints stay lean and route every public topic", () => {

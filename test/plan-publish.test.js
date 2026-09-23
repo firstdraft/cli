@@ -1015,6 +1015,14 @@ test("exact response shapes and coherent terminal projections are required", asy
     { ...publicationBody("succeeded"), canary: "canary-secret" },
     withoutPublicationProgress(publicationBody("succeeded")),
     publicationBody("succeeded", {
+      publication: { progress: null },
+    }),
+    publicationBody("succeeded", {
+      publication: {
+        progress: { phase: "completed", retry_count: 0, reason_code: null },
+      },
+    }),
+    publicationBody("succeeded", {
       publication: {
         progress: {
           ...defaultProgress("succeeded"),
@@ -1025,6 +1033,13 @@ test("exact response shapes and coherent terminal projections are required", asy
     publicationBody("succeeded", {
       publication: {
         progress: defaultProgress("succeeded", {
+          phase: "canary-secret",
+        }),
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: defaultProgress("provisioning_repository", {
           phase: "canary-secret",
         }),
       },
@@ -1040,6 +1055,14 @@ test("exact response shapes and coherent terminal projections are required", asy
       publication: {
         progress: defaultProgress("provisioning_repository", {
           retry_count: 1,
+        }),
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: defaultProgress("provisioning_repository", {
+          retry_count: 1,
+          reason_code: "github.api_unavailable",
         }),
       },
     }),
@@ -1077,6 +1100,46 @@ test("exact response shapes and coherent terminal projections are required", asy
       publication: {
         progress: {
           phase: "github_preflight",
+          retry_at: null,
+          retry_count: 8,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: "later",
+          retry_count: 1,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: RETRY_AT,
+          retry_count: 0,
+          reason_code: null,
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
+          retry_at: "2026-08-07T16:15:00Z",
+          retry_count: 1,
+          reason_code: "github.api_unavailable",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
           retry_at: "2026-08-07T16:15:00.000Z",
           retry_count: 1,
           reason_code: "github.api_unavailable",
@@ -1097,6 +1160,16 @@ test("exact response shapes and coherent terminal projections are required", asy
       publication: {
         progress: {
           phase: "github_preflight",
+          retry_at: null,
+          retry_count: 1,
+          reason_code: "github.canary-secret",
+        },
+      },
+    }),
+    publicationBody("provisioning_repository", {
+      publication: {
+        progress: {
+          phase: "github_preflight",
           retry_at: RETRY_AT,
           retry_count: 1,
           reason_code: "github.preflight_unavailable.canary-secret",
@@ -1105,6 +1178,9 @@ test("exact response shapes and coherent terminal projections are required", asy
     }),
     publicationBody("succeeded", {
       project: { head_source_sha256: "f".repeat(64) },
+    }),
+    publicationBody("succeeded", {
+      project: { id: PUBLICATION_ID },
     }),
     publicationBody("succeeded", {
       project: { graph_version: 7, head_source_sha256: "a".repeat(64) },
@@ -1120,7 +1196,15 @@ test("exact response shapes and coherent terminal projections are required", asy
       compilation: { head_source_sha256: "f".repeat(64) },
     }),
     publicationBody("succeeded", {
+      compilation: { graph_version: 2 },
+    }),
+    publicationBody("succeeded", {
       repository: { private: false },
+    }),
+    publicationBody("succeeded", {
+      repository: {
+        owner: { id: 123456, login: "octocat", type: "Organization" },
+      },
     }),
     publicationBody("succeeded", {
       repository: {
@@ -1148,23 +1232,68 @@ test("exact response shapes and coherent terminal projections are required", asy
     publicationBody("failed", {
       publication: { failure: null },
     }),
+    publicationBody("failed", {
+      compilation: { status: "running" },
+    }),
+    publicationBody("cancelled", {
+      compilation: { status: "queued" },
+    }),
     publicationBody("publishing", {
       publication: { completed_at: COMPLETED_AT },
     }),
   ];
 
-  for (const [index, body] of invalidBodies.entries()) {
-    const cwd = remoteDirectory(context, "https://api.example.test");
-    const result = await invoke(["plan", "compile", "--github"], {
-      cwd,
-      fetchFunction: sequenceFetch([
-        jsonResponse(body, 201),
-        problemResponse(404, "publication_not_found", `Missing ${index}.`),
-      ]),
-    });
+  for (const phase of ["creation", "polling"]) {
+    await context.test(phase, async (context) => {
+      for (const [index, body] of invalidBodies.entries()) {
+        const cwd = remoteDirectory(context, "https://api.example.test");
+        /** @type {FetchCall[]} */
+        const calls = [];
+        const responses =
+          phase === "creation"
+            ? [
+                jsonResponse(body, 201),
+                problemResponse(
+                  404,
+                  "publication_not_found",
+                  `Missing ${index}.`,
+                ),
+              ]
+            : [
+                jsonResponse(publicationBody("compiling"), 201),
+                jsonResponse(body),
+              ];
+        const result = await invoke(["plan", "compile", "--github"], {
+          cwd,
+          fetchFunction: sequenceFetch(responses, calls),
+          planPublishSleep: async () => {},
+        });
 
-    assertHandledFailure(result, "request_outcome_unknown");
-    assert.doesNotMatch(result.stderr, /canary-secret/);
+        assertHandledFailure(
+          result,
+          phase === "creation"
+            ? "request_outcome_unknown"
+            : "invalid_publication_status",
+        );
+        if (phase === "polling") {
+          const envelope = errorEnvelope(result.stderr);
+          assert.deepEqual(Object.keys(envelope).sort(), [
+            "detail",
+            "error",
+            "status",
+          ]);
+          assert.equal(envelope.status, 200);
+        }
+        assert.deepEqual(
+          calls.map(({ init }) => init?.method),
+          ["PUT", "GET"],
+        );
+        assert.equal(calls[1]?.init?.body, undefined);
+        assert.doesNotMatch(result.stderr, /canary-secret/);
+        assert.equal(result.stderr.includes(cwd), false);
+        assert.equal(result.stderr.includes(API_TOKEN), false);
+      }
+    });
   }
 });
 
