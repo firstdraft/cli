@@ -3,9 +3,9 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.6.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.7.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.6.x`
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.7.x`
 requires the service's `0.6.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
 semantics and [release history](release-history.md) for the transition from prereleases.
 
@@ -23,19 +23,49 @@ semantics and [release history](release-history.md) for the transition from prer
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                       |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation   |
 
-## Authenticate API commands
+## Select an environment and authenticate
 
-Create an API token in First Draft and provide it only through the environment when running a network command:
+Production at `https://firstdraft.com` is the default. Create a token at
+[First Draft](https://firstdraft.com/api-tokens) and provide it through `FIRSTDRAFT_API_TOKEN` when running a network
+command. Keep token values out of shell history and command arguments.
 
 ```sh
-export FIRSTDRAFT_API_TOKEN="your-token"
 firstdraft plan push
 ```
 
-`plan push`, `plan status`, `plan compile`, and `compilation` subcommands send the token as a Bearer credential on
-every API request. The CLI does not save it in `.firstdraft`, print it, or require it for local commands such as
-`plan init` and `generate`. Revoke the token in First Draft if it is exposed. A missing token, or First Draft's
-validated `401` problem response with the `authentication_required` code, produces that stable CLI error.
+For staging, create a separate token at [First Draft staging](https://staging.firstdraft.com/api-tokens), provide it
+through `FIRSTDRAFT_STAGING_API_TOKEN`, and select staging on the first remote command:
+
+```sh
+firstdraft --staging plan push
+firstdraft plan compile --staging
+```
+
+`--staging` may precede the command group or appear among a remote command's options. It selects
+`https://staging.firstdraft.com`. `plan init` and `generate` remain local; a global flag on a local command does not
+save an environment selection. The first successful push, including the push within `plan compile`, pins the API
+origin in `.firstdraft/state.json`.
+
+Existing Projects keep their pinned origin with or without the flag. A CLI upgrade does not migrate a Project or its
+credentials. A staging flag that disagrees with a Project's pin stops before any request.
+To work with another environment, initialize a separate project directory and submit the Plan there; do not edit
+the existing Project's private state to redirect it.
+
+`FIRSTDRAFT_API_URL` remains available for an initial custom HTTPS origin or loopback HTTP development server.
+`--staging` together with a different URL is an error; the equivalent normalized staging URL is allowed. Later
+pushes and compilation reject an override that differs from the pin. Read-only status and retained download
+commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflict with an explicit `--staging`.
+
+Every remote command selects credentials from its effective origin: the exact `https://staging.firstdraft.com`
+origin requires `FIRSTDRAFT_STAGING_API_TOKEN`; production and custom origins use `FIRSTDRAFT_API_TOKEN`. Neither
+token is a fallback for the other. This includes existing staging Projects and retained status or artifact reads,
+even when no flag is supplied. Upgrading from CLI `0.6.x` therefore requires moving the staging credential to
+`FIRSTDRAFT_STAGING_API_TOKEN`; production tokens stay in `FIRSTDRAFT_API_TOKEN`.
+
+The CLI sends the selected token as a Bearer credential on every API request. It does not save it in `.firstdraft`,
+print it, or require it for local commands. Revoke a token in the environment that issued it if it is exposed. A
+missing token, or First Draft's validated `401` problem response with the `authentication_required` code, produces
+that stable CLI error.
 
 ## Start a Foundation Plan
 
@@ -101,9 +131,9 @@ The command sends the exact bytes in `.firstdraft/foundation-plan.json`. The fir
 Project; later pushes replay the complete ETag saved in `.firstdraft/state.json` so a stale writer cannot replace a
 newer Plan. Successful responses and server diagnostics are printed as JSON for an agent to inspect.
 
-The initial API origin defaults to `https://firstdraft.com`. Set `FIRSTDRAFT_API_URL` to use another HTTPS origin or
-a loopback HTTP development server. The first successful push pins the normalized origin in local state, and a later
-override must match it.
+The first successful push pins the normalized API origin in local state. See
+[environment selection and authentication](#select-an-environment-and-authenticate) for production, staging, custom
+origins, and the credentials each requires.
 
 If a failure happens after sending the request, the CLI leaves local state unchanged. It never constructs an ETag
 from the Plan digest or trusts an ETag from a response it could not fully verify. Follow

@@ -7,7 +7,8 @@ import {
   isValidApplicationName,
 } from "./application-identity.js";
 import {
-  authenticatedFetch,
+  ApiAuthenticationRequiredError,
+  authenticateApiCommand,
   isAuthenticationProblem,
 } from "./api-authentication.js";
 import {
@@ -78,7 +79,7 @@ import { VERSION } from "./version.js";
 const ROOT_HELP = `First Draft CLI
 
 Usage:
-  firstdraft <command> [options]
+  firstdraft [--staging] <command> [options]
   firstdraft [options]
 
 Commands:
@@ -87,6 +88,7 @@ Commands:
   plan         Work with Foundation Plans
 
 Options:
+      --staging  Use staging for API commands (production is the default)
   -h, --help     Show help
   -V, --version  Show version
 `;
@@ -151,11 +153,13 @@ Usage:
   firstdraft plan push
 
 Options:
-  -h, --help  Show help
+      --staging  Use staging; reject a different saved origin
+  -h, --help     Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
-  FIRSTDRAFT_API_URL    Override the initial API origin
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Override the initial API origin
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
@@ -167,11 +171,13 @@ Usage:
   firstdraft plan status [--wait]
 
 Options:
-      --wait  Poll until the current analysis reaches a terminal status
-  -h, --help  Show help
+      --staging  Use staging; reject a different saved origin
+      --wait     Poll until the current analysis reaches a terminal status
+  -h, --help     Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
@@ -185,13 +191,15 @@ Usage:
   firstdraft plan compile --github
 
 Options:
+      --staging                      Use staging; reject a different saved origin
       --output <absent-directory|.>  Materialize here (default: .)
-      --github                      Publish to a private GitHub repository
+      --github                       Publish to a private GitHub repository
   -h, --help                         Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
-  FIRSTDRAFT_API_URL    Override the initial API origin
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
 and proceeds only when that analysis is valid. By default it materializes the
@@ -220,11 +228,13 @@ Usage:
   firstdraft compilation status <compilation-id> [--wait]
 
 Options:
-      --wait  Poll until the Compilation reaches a terminal status
-  -h, --help  Show help
+      --staging  Use staging; reject a different saved origin
+      --wait     Poll until the Compilation reaches a terminal status
+  -h, --help     Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
 Without --wait, the command makes exactly one metadata-only GET. With --wait,
 it polls the same retained Compilation for at most ten minutes. Failed and
@@ -237,11 +247,13 @@ Usage:
   firstdraft compilation download <compilation-id> --output <absent-path|.>
 
 Options:
+      --staging                 Use staging; reject a different saved origin
       --output <absent-path|.>  Materialize the generated application here
-  -h, --help                   Show help
+  -h, --help                    Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
 The command reads the retained Compilation once, requires it to have
 succeeded, downloads and verifies its exact artifact once, and atomically
@@ -286,15 +298,13 @@ const PLAN_INIT_FAILED_DETAIL =
 const PLAN_INIT_SUCCESS = "Initialized .firstdraft/foundation-plan.json.\n";
 const PLAN_PUSH_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan push --help' for usage.";
-const PLAN_PUSH_INVALID_CONFIGURATION_DETAIL =
-  "Invalid First Draft API configuration. Run 'firstdraft plan push --help' for usage.";
 const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.";
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
   "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
 const AUTHENTICATION_REQUIRED_DETAIL =
-  "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.";
+  "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.";
 const PLAN_STATUS_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan status --help' for usage.";
 const PLAN_STATUS_LOCAL_INPUT_UNREADABLE_DETAIL =
@@ -315,8 +325,6 @@ const PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan compile --help' for usage.";
 const PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.";
-const PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL =
-  "The configured API origin or saved Foundation Plan state is incompatible with compilation. No network request was made.";
 const PLAN_COMPILE_NOT_PUSHED_DETAIL =
   "The current Foundation Plan could not be associated with a pushed Project.";
 const PLAN_COMPILE_REQUEST_OUTCOME_UNKNOWN_DETAIL =
@@ -436,6 +444,7 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof import("./commands/compilation.js").compileAndDownload} [planCompileDownload]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
+ * @property {string} [stagingApiToken]
  */
 
 /**
@@ -465,6 +474,8 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {typeof import("./commands/compilation.js").compileAndDownload} [planCompileDownload]
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
+ * @property {string} [stagingApiToken]
+ * @property {boolean} [staging]
  */
 
 /**
@@ -476,7 +487,7 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  */
 
 /**
- * @typedef {Omit<CommandOptions, "cwd" | "createProjectId" | "createUuid" | "fileSystem" | "createTemporaryId" | "planStatusSleep" | "planStatusNow" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "apiUrl" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload"> & {cwd?: string, getCwd: () => string}} CompilationCommandOptions
+ * @typedef {Omit<CommandOptions, "cwd" | "createProjectId" | "createUuid" | "fileSystem" | "createTemporaryId" | "planStatusSleep" | "planStatusNow" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload"> & {cwd?: string, getCwd: () => string}} CompilationCommandOptions
  */
 
 /** @param {RunOptions} options */
@@ -507,7 +518,11 @@ export async function run({
   planCompileDownload,
   apiUrl = process.env.FIRSTDRAFT_API_URL,
   apiToken = process.env.FIRSTDRAFT_API_TOKEN,
+  stagingApiToken = process.env.FIRSTDRAFT_STAGING_API_TOKEN,
 }) {
+  const staging = argv[0] === "--staging";
+  if (staging) argv = argv.slice(1);
+
   if (argv[0] === "generate") {
     return runGenerate({
       argv: argv.slice(1),
@@ -544,6 +559,8 @@ export async function run({
       planCompileDownload,
       apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -559,7 +576,10 @@ export async function run({
       createRequestSignal,
       compilationSleep,
       compilationNow,
+      apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -636,6 +656,8 @@ async function runPlan({
   planCompileDownload,
   apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   if (argv[0] === "init") {
     return runPlanInit({
@@ -660,6 +682,8 @@ async function runPlan({
       createRequestSignal,
       apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -674,7 +698,10 @@ async function runPlan({
       createRequestSignal,
       planStatusSleep,
       planStatusNow,
+      apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -700,6 +727,8 @@ async function runPlan({
       planCompileDownload,
       apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -743,7 +772,10 @@ async function runCompilation({
   createRequestSignal,
   compilationSleep,
   compilationNow,
+  apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   if (argv[0] === "status") {
     return runCompilationStatus({
@@ -756,7 +788,10 @@ async function runCompilation({
       createRequestSignal,
       compilationSleep,
       compilationNow,
+      apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -769,7 +804,10 @@ async function runCompilation({
       fetchFunction,
       planPushFileSystem,
       createRequestSignal,
+      apiUrl,
       apiToken,
+      stagingApiToken,
+      staging,
     });
   }
 
@@ -802,7 +840,7 @@ async function runCompilation({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
  */
 async function runCompilationStatus({
   argv,
@@ -814,12 +852,16 @@ async function runCompilationStatus({
   createRequestSignal,
   compilationSleep,
   compilationNow,
+  apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
       options: {
+        staging: { type: "boolean" },
         wait: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
@@ -851,18 +893,23 @@ async function runCompilationStatus({
     return 2;
   }
 
-  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
-  if (authorizedFetch === null) {
-    writeAuthenticationRequired(stderr);
-    return 1;
-  }
-
   try {
+    const authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
     const result = await readCompilation({
       cwd,
       compilationId,
       wait: parsed.values.wait,
-      fetchFunction: authorizedFetch,
+      fetchFunction: authentication.fetchFunction,
       fileSystem: planPushFileSystem,
       createRequestSignal,
       sleep: compilationSleep,
@@ -878,7 +925,7 @@ async function runCompilationStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
  */
 async function runCompilationDownload({
   argv,
@@ -888,12 +935,16 @@ async function runCompilationDownload({
   fetchFunction,
   planPushFileSystem,
   createRequestSignal,
+  apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
       options: {
+        staging: { type: "boolean" },
         output: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
@@ -931,18 +982,23 @@ async function runCompilationDownload({
     return 2;
   }
 
-  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
-  if (authorizedFetch === null) {
-    writeAuthenticationRequired(stderr);
-    return 1;
-  }
-
   try {
+    const authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
     const result = await downloadCompilation({
       cwd,
       compilationId,
       output,
-      fetchFunction: authorizedFetch,
+      fetchFunction: authentication.fetchFunction,
       fileSystem: planPushFileSystem,
       createRequestSignal,
     });
@@ -1027,6 +1083,19 @@ function writeCompilationInvalidArguments(writer, detail) {
  * @param {boolean} [throwUnknown]
  */
 function writeCompilationReadError(writer, error, throwUnknown = true) {
+  if (error instanceof ApiAuthenticationRequiredError) {
+    writeAuthenticationRequired(writer);
+    return 1;
+  }
+
+  if (error instanceof PlanPushConfigurationError) {
+    writeJson(writer, {
+      error: "invalid_configuration",
+      detail: error.message,
+    });
+    return 2;
+  }
+
   if (error instanceof PlanPushLocalError) {
     writeJson(writer, {
       error: "local_input_unreadable",
@@ -1227,7 +1296,7 @@ function runGenerateApplicationKey({ argv, stdout, stderr }) {
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
  */
 async function runPlanPush({
   argv,
@@ -1240,11 +1309,16 @@ async function runPlanPush({
   createRequestSignal,
   apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
-      options: { help: { type: "boolean", short: "h" } },
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
       allowPositionals: false,
       strict: true,
       tokens: true,
@@ -1264,27 +1338,37 @@ async function runPlanPush({
     return 0;
   }
 
-  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
-  if (authorizedFetch === null) {
-    writeAuthenticationRequired(stderr);
-    return 1;
-  }
-
   let result;
   try {
+    const authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
     result = await pushPlan({
       cwd,
-      apiUrl,
-      fetchFunction: authorizedFetch,
+      apiUrl: authentication.apiUrl,
+      fetchFunction: authentication.fetchFunction,
       fileSystem: planPushFileSystem,
       createTemporaryId,
       createRequestSignal,
     });
   } catch (error) {
+    if (error instanceof ApiAuthenticationRequiredError) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+
     if (error instanceof PlanPushConfigurationError) {
       writeJson(stderr, {
         error: "invalid_configuration",
-        detail: PLAN_PUSH_INVALID_CONFIGURATION_DETAIL,
+        detail: error.message,
       });
       return 2;
     }
@@ -1357,7 +1441,7 @@ async function runPlanPush({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
  */
 async function runPlanStatus({
   argv,
@@ -1369,12 +1453,16 @@ async function runPlanStatus({
   createRequestSignal,
   planStatusSleep,
   planStatusNow,
+  apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
       options: {
+        staging: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         wait: { type: "boolean" },
       },
@@ -1397,24 +1485,42 @@ async function runPlanStatus({
     return 0;
   }
 
-  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
-  if (authorizedFetch === null) {
-    writeAuthenticationRequired(stderr);
-    return 1;
-  }
-
   let result;
   try {
+    const authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
     result = await readPlanStatus({
       cwd,
       wait: parsed.values.wait,
-      fetchFunction: authorizedFetch,
+      fetchFunction: authentication.fetchFunction,
       fileSystem: planPushFileSystem,
       createRequestSignal,
       sleep: planStatusSleep,
       now: planStatusNow,
     });
   } catch (error) {
+    if (error instanceof ApiAuthenticationRequiredError) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+
+    if (error instanceof PlanPushConfigurationError) {
+      writeJson(stderr, {
+        error: "invalid_configuration",
+        detail: error.message,
+      });
+      return 2;
+    }
+
     if (error instanceof PlanPushLocalError) {
       writeJson(stderr, {
         error: "local_input_unreadable",
@@ -1499,7 +1605,7 @@ async function runPlanStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
  */
 async function runPlanCompile({
   argv,
@@ -1522,11 +1628,14 @@ async function runPlanCompile({
   planCompileDownload,
   apiUrl,
   apiToken,
+  stagingApiToken,
+  staging,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
       options: {
+        staging: { type: "boolean" },
         output: { type: "string" },
         github: { type: "boolean" },
         help: { type: "boolean", short: "h" },
@@ -1559,17 +1668,28 @@ async function runPlanCompile({
     return 2;
   }
 
-  const authorizedFetch = authenticatedFetch(fetchFunction, apiToken);
-  if (authorizedFetch === null) {
-    writeAuthenticationRequired(stderr);
-    return 1;
+  let authentication;
+  try {
+    authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+  } catch (error) {
+    return writePlanCompileError(stderr, error);
   }
 
   const reportProgress = createPlanCompileProgressReporter(stderr);
   const shared = {
     cwd,
-    apiUrl,
-    fetchFunction: authorizedFetch,
+    apiUrl: authentication.apiUrl,
+    fetchFunction: authentication.fetchFunction,
     fileSystem: planPushFileSystem,
     createTemporaryId,
     createRequestSignal,
@@ -1615,10 +1735,15 @@ async function runPlanCompile({
 
 /** @param {Writer} writer @param {unknown} error */
 function writePlanCompileError(writer, error) {
+  if (error instanceof ApiAuthenticationRequiredError) {
+    writeAuthenticationRequired(writer);
+    return 1;
+  }
+
   if (error instanceof PlanPushConfigurationError) {
     writeJson(writer, {
       error: "invalid_configuration",
-      detail: PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL,
+      detail: error.message,
     });
     return 2;
   }
@@ -1766,7 +1891,8 @@ function writePlanCompileError(writer, error) {
   if (compilationError instanceof CompilationLocalStateError) {
     writeJson(writer, {
       error: "invalid_configuration",
-      detail: PLAN_COMPILE_INCOMPATIBLE_STATE_DETAIL,
+      detail:
+        "The configured API origin or saved Foundation Plan state is incompatible with compilation. No network request was made.",
     });
     return 2;
   }

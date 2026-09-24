@@ -16,10 +16,11 @@ release tag. An unpublished, untagged candidate can retain its proposed version 
 The published version may remain in source during documentation and test maintenance; recording its release history
 does not require preparing another version. Choose an unused version when preparing the next publication.
 
-CLI `0.6.x` requires API `0.6.x` and Plan `firstdraft.foundation-plan.sketch/0.22`. Plan `0.22` adds the optional
-`application.pwa` boolean and replaces the sole accepted `0.21` input format. The new API and CLI minor
-versions record that input and artifact compatibility break; they add no migration or compatibility bridge.
-The target stays `rails-sketch/2026-09`.
+CLI `0.7.x` requires API `0.6.x` and Plan `firstdraft.foundation-plan.sketch/0.22`. CLI `0.7.0` adds `--staging`
+and requires `FIRSTDRAFT_STAGING_API_TOKEN` for the staging origin, including existing pinned Projects. This token
+configuration change warrants a new CLI minor version; the API and Plan contracts stay unchanged. Production
+remains the default and uses `FIRSTDRAFT_API_TOKEN`, as do custom origins. No Project is migrated. The target stays
+`rails-sketch/2026-09`.
 
 Local output remains the default introduced in CLI `0.4.x`: `firstdraft plan compile` is equivalent to
 `firstdraft plan compile --output .`, with GitHub publication selected by explicit `--github`. The root archive
@@ -34,7 +35,9 @@ not authorization or runtime proof. Its closed `firstdraft.release-compatibility
 ## Prepare before merge
 
 1. Update `package.json`, `package-lock.json`, and `release/compatibility.json`, and align the Skills CLI requirement.
-2. Update the command, error, and Skill guidance affected by the change. Preserve dated release evidence.
+2. Update the command, error, and Skill guidance affected by the change. When onboarding changes, coordinate the
+   [local guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e) publication from the Service's
+   `docs/guides/local-app.md` before the new CLI reaches `latest`. Preserve dated release evidence.
 3. Run focused checks while developing and the repository's required CI for the merge candidate. For a fresh
    checkout, the complete local check is `npm ci --ignore-scripts`, `npm audit`, then `npm run check`.
 4. Review and merge the change. Wait for the existing `CI` workflow to pass for the selected `main` SHA; publication

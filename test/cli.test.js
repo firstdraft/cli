@@ -11,7 +11,7 @@ import { VERSION } from "../src/version.js";
 const HELP = `First Draft CLI
 
 Usage:
-  firstdraft <command> [options]
+  firstdraft [--staging] <command> [options]
   firstdraft [options]
 
 Commands:
@@ -20,6 +20,7 @@ Commands:
   plan         Work with Foundation Plans
 
 Options:
+      --staging  Use staging for API commands (production is the default)
   -h, --help     Show help
   -V, --version  Show version
 `;

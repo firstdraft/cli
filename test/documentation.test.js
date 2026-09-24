@@ -28,7 +28,7 @@ test("public documentation avoids unavailable destinations", () => {
   assert.equal(
     markdownLinkTargets(readme).includes("https://firstdraft.com"),
     false,
-    "public onboarding must not route readers to the unrelated site at the API origin",
+    "public onboarding must route readers to a guide rather than the API landing page",
   );
   for (const source of sources.values()) {
     for (const target of markdownLinkTargets(source)) {
