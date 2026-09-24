@@ -75,9 +75,10 @@ To exercise the checkout directly:
 node bin/firstdraft.js --help
 ```
 
-Remote commands read FIRSTDRAFT_API_TOKEN from the environment. See
-[Push a Foundation Plan](docs/commands.md#push-a-foundation-plan) for FIRSTDRAFT_API_URL and origin pinning. Keep
-tokens out of arguments, shell history, fixtures, snapshots, and logs.
+Remote commands default to production and read `FIRSTDRAFT_API_TOKEN`. Use `firstdraft --staging plan compile`
+and a separate `FIRSTDRAFT_STAGING_API_TOKEN` for staging. Existing Projects retain their saved origin. See
+[environment selection](docs/commands.md#select-an-environment-and-authenticate) for custom URLs and credential
+isolation. Keep tokens out of arguments, shell history, fixtures, snapshots, and logs.
 
 ## Package contract
 

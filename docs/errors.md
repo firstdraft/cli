@@ -14,6 +14,18 @@ errors, or unvalidated response bodies. `local_state_not_saved` is the sole exce
 its `recovery_state` is required to repair the accepted ETag locally. Root-level and command-group usage failures
 remain human-readable text on standard error with exit 2. Unexpected programming defects remain loud.
 
+## Environment and credential errors
+
+`invalid_configuration` stops before a request when `--staging` conflicts with `FIRSTDRAFT_API_URL` or a Project's
+saved origin. Push and Compile also reject any URL override that differs from that pin. Unset the conflicting
+override or use a separate initialized project directory for the other environment; do not redirect existing
+private Project state. Status and retained download commands continue using their pin.
+
+`authentication_required` means the selected environment's token is missing or rejected. Staging requires
+`FIRSTDRAFT_STAGING_API_TOKEN`, including old staging Projects with no flag. Production and custom origins require
+`FIRSTDRAFT_API_TOKEN`. The CLI never substitutes one for the other. Obtain or refresh the credential from the
+same environment, then follow the command's recovery instructions below.
+
 ## Ambiguous mutations
 
 `plan compile` supplies `phase: "push" | "compilation" | "publication"` when `request_outcome_unknown` requires
@@ -110,7 +122,7 @@ stopped without following the replacement.
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | ------------------------------------------------------------------------------------------------------ |
 | Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                               |
 | `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                            |
-| `plan push`, `plan compile`                  | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                        |
+| Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                        |
 | Network commands                             | `authentication_required`                                                                          |    1 | The token is missing or First Draft returned a validated authentication problem.                       |
 | Plan commands, `compilation *`               | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                                |
 | Status, Compile, Compilation commands        | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                         |

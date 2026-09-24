@@ -256,6 +256,7 @@ try {
       "Invalid arguments. Run 'firstdraft compilation status --help' for usage.",
   });
 
+  exercisePackedEnvironmentSelection(temporaryDirectory);
   await exercisePackedCompilation(projectDirectory);
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -291,12 +292,19 @@ function spawnNpm(arguments_, cwd = process.cwd()) {
 /**
  * @param {string[]} arguments_
  * @param {string} [cwd]
+ * @param {Record<string, string>} [environment]
  */
-function spawnPackedCli(arguments_, cwd = process.cwd()) {
+function spawnPackedCli(arguments_, cwd = process.cwd(), environment = {}) {
   return spawnSync(process.execPath, [packedExecutable, ...arguments_], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, FIRSTDRAFT_API_TOKEN: apiToken },
+    env: {
+      ...process.env,
+      FIRSTDRAFT_API_URL: undefined,
+      FIRSTDRAFT_API_TOKEN: apiToken,
+      FIRSTDRAFT_STAGING_API_TOKEN: "",
+      ...environment,
+    },
   });
 }
 
@@ -307,7 +315,12 @@ function spawnPackedCli(arguments_, cwd = process.cwd()) {
 async function spawnPackedCliAsync(arguments_, cwd) {
   const child = spawn(process.execPath, [packedExecutable, ...arguments_], {
     cwd,
-    env: { ...process.env, FIRSTDRAFT_API_TOKEN: apiToken },
+    env: {
+      ...process.env,
+      FIRSTDRAFT_API_URL: undefined,
+      FIRSTDRAFT_API_TOKEN: apiToken,
+      FIRSTDRAFT_STAGING_API_TOKEN: "",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -323,6 +336,41 @@ async function spawnPackedCliAsync(arguments_, cwd) {
   const [status, signal] = await once(child, "close");
   assert.equal(signal, null);
   return { status, stdout, stderr };
+}
+
+/** @param {string} temporaryDirectory */
+function exercisePackedEnvironmentSelection(temporaryDirectory) {
+  const cwd = path.join(temporaryDirectory, "staging-project");
+  mkdirSync(cwd);
+  const initialized = spawnPackedCli(
+    ["plan", "init", "--name", "Staging Project"],
+    cwd,
+  );
+  assert.equal(initialized.status, 0);
+
+  const missing = spawnPackedCli(["--staging", "plan", "push"], cwd);
+  assert.equal(missing.status, 1);
+  assert.equal(JSON.parse(missing.stderr).error, "authentication_required");
+  assert.match(missing.stderr, /FIRSTDRAFT_STAGING_API_TOKEN/);
+
+  const conflict = spawnPackedCli(["plan", "push", "--staging"], cwd, {
+    FIRSTDRAFT_API_URL: "http://127.0.0.1:1",
+    FIRSTDRAFT_STAGING_API_TOKEN: "canary-staging-token",
+  });
+  assert.equal(conflict.status, 2);
+  assert.equal(JSON.parse(conflict.stderr).error, "invalid_configuration");
+  assert.match(conflict.stderr, /--staging conflicts with FIRSTDRAFT_API_URL/);
+  assert.doesNotMatch(conflict.stderr, /canary/);
+
+  const statePath = path.join(cwd, ".firstdraft", "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.api_url = "https://staging.firstdraft.com";
+  state.foundation_plan_etag = '"retained-staging-head"';
+  writeFileSync(statePath, `${JSON.stringify(state)}\n`);
+  const retained = spawnPackedCli(["plan", "status"], cwd);
+  assert.equal(retained.status, 1);
+  assert.equal(JSON.parse(retained.stderr).error, "authentication_required");
+  assert.match(retained.stderr, /FIRSTDRAFT_STAGING_API_TOKEN/);
 }
 
 /** @param {string} projectDirectory */

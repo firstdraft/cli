@@ -42,11 +42,13 @@ Usage:
   firstdraft plan status [--wait]
 
 Options:
-      --wait  Poll until the current analysis reaches a terminal status
-  -h, --help  Show help
+      --staging  Use staging; reject a different saved origin
+      --wait     Poll until the current analysis reaches a terminal status
+  -h, --help     Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
@@ -665,7 +667,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
   assert.deepEqual(JSON.parse(missing.stderr), {
     error: "authentication_required",
     detail:
-      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
   });
   assert.equal(missing.status, 1);
   assert.equal(requests, 0);
@@ -686,7 +688,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
   assert.deepEqual(JSON.parse(rejected.stderr), {
     error: "authentication_required",
     detail:
-      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
     status: 401,
     response: {
       type: "about:blank",

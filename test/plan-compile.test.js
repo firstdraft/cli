@@ -98,6 +98,57 @@ test("plan compile submits exact bytes, waits for valid analysis, and publishes 
   );
 });
 
+test("staging compilation keeps its own credential through push, analysis, start, and artifact", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE);
+  const artifact = directArtifactFixture();
+  const token = "canary-staging-token";
+  const responses = [
+    jsonResponse(acceptedPlanBody(), 201, { ETag: ETAG }),
+    jsonResponse(analysisBody("valid")),
+    jsonResponse(directCompilationBody("succeeded", artifact), 202, {
+      Location: directCompilationPath(),
+    }),
+    new Response(artifact.source, {
+      headers: {
+        "Content-Type": ARTIFACT_MEDIA_TYPE,
+        "Content-Length": String(artifact.source.byteLength),
+        "Cache-Control": "no-store, no-transform",
+        ETag: `"sha256:${artifact.sha256}"`,
+      },
+    }),
+  ];
+  const result = await invoke(
+    ["plan", "compile", "--staging", "--output", "application"],
+    {
+      cwd,
+      stagingApiToken: token,
+      fetchFunction: async (
+        /** @type {string | URL | Request} */ input,
+        /** @type {RequestInit | undefined} */ init,
+      ) => {
+        assert.equal(
+          new URL(String(input)).origin,
+          "https://staging.firstdraft.com",
+        );
+        assert.equal(
+          new Headers(init?.headers).get("authorization"),
+          `Bearer ${token}`,
+        );
+        const response = responses.shift();
+        assert(response);
+        return response;
+      },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(responses.length, 0);
+  assert.equal(
+    readFileSync(path.join(cwd, "application", "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+  assert.doesNotMatch(result.stdout + result.stderr, /canary/);
+});
+
 test("plan compile --output completes the HTTP journey without GitHub Publication", async (context) => {
   /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
   const requests = [];
@@ -1051,6 +1102,17 @@ test("push ambiguity, analysis failures, and rejected reads have distinct errors
     assertHandledFailure(result, error);
     assert.doesNotMatch(result.stderr, /canary|network failure/);
   }
+});
+
+test("local output preflight rejects an existing directory before reading Plan state", async (context) => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "firstdraft-output-preflight-"));
+  context.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(path.join(cwd, "existing"));
+  const result = await invoke(["plan", "compile", "--output", "existing"], {
+    cwd,
+    fetchFunction: async () => assert.fail("No request should be sent"),
+  });
+  assertHandledFailure(result, "invalid_output_path", 2);
 });
 
 test("help and invalid direct-output syntax have no prerequisites", async () => {

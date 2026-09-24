@@ -1,3 +1,6 @@
+import { ApiAuthenticationRequiredError } from "./api-authentication.js";
+import { PlanStateConfigurationError } from "./plan-state.js";
+
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 export class FirstDraftNetworkError extends Error {
@@ -28,6 +31,11 @@ export async function sendRequest(fetchFunction, endpoint, request) {
   try {
     return await fetchFunction(endpoint, request);
   } catch (error) {
+    if (
+      error instanceof PlanStateConfigurationError ||
+      error instanceof ApiAuthenticationRequiredError
+    )
+      throw error;
     if (!(error instanceof Error)) throw error;
 
     throw new FirstDraftNetworkError("The First Draft request failed.", {

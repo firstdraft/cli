@@ -216,6 +216,51 @@ test("compilation status has a bounded wait and validates exact response shapes"
   }
 });
 
+test("a retained staging download authenticates metadata and artifact from its pin", async (context) => {
+  const cwd = remoteDirectory(context);
+  const statePath = path.join(cwd, ".firstdraft", "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  state.api_url = "https://staging.firstdraft.com";
+  writeFileSync(statePath, `${JSON.stringify(state)}\n`);
+  const token = "canary-staging-token";
+  const fixture = artifactFixture();
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const result = await invoke(
+    ["compilation", "download", COMPILATION_ID, "--output", "application"],
+    {
+      cwd,
+      apiUrl: "https://firstdraft.com",
+      stagingApiToken: token,
+      fetchFunction: sequenceFetch(
+        [
+          jsonResponse(compilationBody("succeeded", { artifact: fixture })),
+          artifactResponse(fixture),
+        ],
+        calls,
+      ),
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(calls.length, 2);
+  for (const { input, init } of calls) {
+    assert.equal(
+      new URL(String(input)).origin,
+      "https://staging.firstdraft.com",
+    );
+    assert.equal(
+      new Headers(init?.headers).get("authorization"),
+      `Bearer ${token}`,
+    );
+  }
+  assert.equal(
+    readFileSync(path.join(cwd, "application", "README.md"), "utf8"),
+    "Movie Catalog\n",
+  );
+  assert.doesNotMatch(result.stdout + result.stderr, /canary/);
+});
+
 test("compilation download distinguishes Head and Plan provenance without starting work", async (context) => {
   const cwd = remoteDirectory(context);
   const fixture = artifactFixture();

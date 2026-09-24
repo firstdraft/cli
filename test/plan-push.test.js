@@ -39,11 +39,13 @@ Usage:
   firstdraft plan push
 
 Options:
-  -h, --help  Show help
+      --staging  Use staging; reject a different saved origin
+  -h, --help     Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
-  FIRSTDRAFT_API_URL    Override the initial API origin
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Override the initial API origin
 
 The first successful push saves its API origin in .firstdraft/state.json.
 Later pushes reject a different origin.
@@ -54,8 +56,7 @@ const PLAN_PUSH_INVALID_ARGUMENTS_ERROR = jsonOutput({
 });
 const PLAN_PUSH_CONFIGURATION_ERROR = jsonOutput({
   error: "invalid_configuration",
-  detail:
-    "Invalid First Draft API configuration. Run 'firstdraft plan push --help' for usage.",
+  detail: "The API URL is invalid.",
 });
 const PLAN_PUSH_LOCAL_ERROR = jsonOutput({
   error: "local_input_unreadable",
@@ -185,6 +186,30 @@ test("plan push preserves explicit PWA choices without rewriting the Plan", asyn
   }
 });
 
+test("a first staging push pins staging and uses its separate credential", async (context) => {
+  const stagingToken = "canary-staging-token";
+  const cwd = await initializedDirectory(context);
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const result = await invoke(["--staging", "plan", "push"], {
+    cwd,
+    stagingApiToken: stagingToken,
+    fetchFunction: recordingFetch(
+      acceptedResponse(planSource(cwd), 201, FIRST_ETAG),
+      calls,
+    ),
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readState(cwd).api_url, "https://staging.firstdraft.com");
+  assert.equal(calls.length, 1);
+  assert.equal(
+    new Headers(calls[0]?.init?.headers).get("authorization"),
+    `Bearer ${stagingToken}`,
+  );
+  assert.doesNotMatch(JSON.stringify(readState(cwd)), /canary/);
+});
+
 test("the initial push defaults to the First Draft production origin", async (context) => {
   const cwd = await initializedDirectory(context);
   const source = planSource(cwd);
@@ -264,7 +289,10 @@ test("a saved origin may be repeated but never changed", async (context) => {
   assert.deepEqual(different, {
     status: 2,
     stdout: "",
-    stderr: PLAN_PUSH_CONFIGURATION_ERROR,
+    stderr: jsonOutput({
+      error: "invalid_configuration",
+      detail: "The configured API URL does not match local state.",
+    }),
   });
   assert.doesNotMatch(different.stderr, /canary-secret/);
   assert.notDeepEqual(stateSource(cwd), before);
@@ -493,7 +521,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
     assert.deepEqual(JSON.parse(missing.stderr), {
       error: "authentication_required",
       detail:
-        "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+        "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
     });
     assert.equal(missing.status, 1);
   }
@@ -516,7 +544,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
   assert.deepEqual(JSON.parse(rejected.stderr), {
     error: "authentication_required",
     detail:
-      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN to an active API token.",
+      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
     status: 401,
     response: {
       type: "about:blank",

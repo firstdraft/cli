@@ -14,6 +14,12 @@ const result = spawnSync(
   ["--test", ...process.argv.slice(2), ...testFiles],
   {
     stdio: "inherit",
+    env: {
+      ...process.env,
+      FIRSTDRAFT_API_URL: undefined,
+      FIRSTDRAFT_API_TOKEN: undefined,
+      FIRSTDRAFT_STAGING_API_TOKEN: undefined,
+    },
   },
 );
 

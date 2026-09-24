@@ -88,13 +88,15 @@ Usage:
   firstdraft plan compile --github
 
 Options:
+      --staging                      Use staging; reject a different saved origin
       --output <absent-directory|.>  Materialize here (default: .)
-      --github                      Publish to a private GitHub repository
+      --github                       Publish to a private GitHub repository
   -h, --help                         Show help
 
 Environment:
-  FIRSTDRAFT_API_TOKEN  Authenticate API requests
-  FIRSTDRAFT_API_URL    Override the initial API origin
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Override the initial API origin
 
 The command submits the exact current whole-file Plan, waits for its analysis,
 and proceeds only when that analysis is valid. By default it materializes the
