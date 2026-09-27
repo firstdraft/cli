@@ -149,8 +149,8 @@ try {
       name: initializedPlan.application.name,
     },
     {
-      format: "firstdraft.foundation-plan.sketch/0.22",
-      target: { id: "rails", profile: "rails-sketch/2026-09" },
+      format: "firstdraft.foundation-plan.sketch/0.23",
+      target: { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" },
       key: "oscar_party",
       name: "Oscar Party",
     },
@@ -389,10 +389,13 @@ async function exercisePackedCompilation(projectDirectory) {
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
   const analyzerRelease =
-    "foundation-plan-rails/application-2026-09-19-conventions";
+    "foundation-plan-rails/application-2026-09-27-bookmark-assets";
   const compilerRelease =
-    "foundation-plan-rails/compiler-application-2026-09-23-pwa";
-  const target = { id: "rails", profile: "rails-sketch/2026-09" };
+    "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+  const target = {
+    id: "rails",
+    profile: "rails-sketch/2026-09-bookmark-assets",
+  };
   const gapSet = {
     format: "firstdraft.foundation-gaps/2",
     source: { sha256: headSha256 },
@@ -447,12 +450,13 @@ async function exercisePackedCompilation(projectDirectory) {
         graph_version: 1,
         head_source_sha256: headSha256,
         foundation_plan: {
-          format: "firstdraft.foundation-plan.sketch/0.22",
+          format: "firstdraft.foundation-plan.sketch/0.23",
           sha256: foundationPlanSha256,
         },
         analysis: {
           id: analysisId,
-          release: "foundation-plan-rails/application-2026-09-19-conventions",
+          release:
+            "foundation-plan-rails/application-2026-09-27-bookmark-assets",
         },
         compiler_release: compilerRelease,
         target,
@@ -581,7 +585,7 @@ async function exercisePackedCompilation(projectDirectory) {
         {
           project: { id: projectId, graph_version: 1 },
           foundation_plan: {
-            format: "firstdraft.foundation-plan.sketch/0.22",
+            format: "firstdraft.foundation-plan.sketch/0.23",
             source_sha256: headSha256,
           },
           diagnostics: [],
