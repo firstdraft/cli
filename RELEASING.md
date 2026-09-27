@@ -16,15 +16,19 @@ release tag. An unpublished, untagged candidate can retain its proposed version 
 The published version may remain in source during documentation and test maintenance; recording its release history
 does not require preparing another version. Choose an unused version when preparing the next publication.
 
-CLI `0.7.x` requires API `0.6.x` and Plan `firstdraft.foundation-plan.sketch/0.22`. CLI `0.7.0` adds `--staging`
-and requires `FIRSTDRAFT_STAGING_API_TOKEN` for the staging origin, including existing pinned Projects. This token
-configuration change warrants a new CLI minor version; the API and Plan contracts stay unchanged. Production
-remains the default and uses `FIRSTDRAFT_API_TOKEN`, as do custom origins. No Project is migrated. The target stays
-`rails-sketch/2026-09`.
+CLI `0.8.x` requires API `0.7.x`, Plan `firstdraft.foundation-plan.sketch/0.23`, and target
+`rails-sketch/2026-09-bookmark-assets`. This breaking contract retires `application.pwa`; the Rails target retains
+ordinary bookmark assets and metadata without a Plan switch. Earlier Plan formats and target profiles are not
+accepted for artifact materialization. Existing applications and old Plans are not migrated.
+
+Before publishing CLI `0.8.0`, align the Service and Skills companions for the bookmark-assets contract. Source
+checks and packed-package smokes do not establish a published or deployed tuple. Staging continues to require
+`FIRSTDRAFT_STAGING_API_TOKEN`, including existing pinned Projects. Production remains the default and uses
+`FIRSTDRAFT_API_TOKEN`, as do custom origins.
 
 Local output remains the default introduced in CLI `0.4.x`: `firstdraft plan compile` is equivalent to
 `firstdraft plan compile --output .`, with GitHub publication selected by explicit `--github`. The root archive
-remains `.firstdraft/design`. Existing applications and old Plans are not migrated.
+remains `.firstdraft/design`.
 
 `release/compatibility.json` declares the package version, accepted API-contract range, and accepted Plan formats.
 It is source-only metadata, validated by the normal test suite and absent from the npm tarball. Coordinate the
