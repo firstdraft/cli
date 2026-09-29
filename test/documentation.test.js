@@ -40,6 +40,14 @@ test("public documentation avoids unavailable destinations", () => {
   }
 });
 
+test("Claude Code imports the shared agent instructions", () => {
+  assert.equal(
+    readFileSync(path.join(repository, "CLAUDE.md"), "utf8"),
+    "@AGENTS.md\n",
+    "CLAUDE.md must only import AGENTS.md so both harnesses read one source",
+  );
+});
+
 test("documentation entrypoints stay lean and route every public topic", () => {
   const entrypointBudgets = new Map([
     [path.join(repository, "AGENTS.md"), 2_048],

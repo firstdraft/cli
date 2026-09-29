@@ -24,6 +24,7 @@ evidence for implemented behavior; if they contradict a document, surface the co
 - [release-history.md](release-history.md) preserves dated release observations. Recheck live tags, package versions,
   and dist-tags before relying on them operationally; publisher configuration is checked when it changes or fails.
 - The source repository's `AGENTS.md` routes agent work; it should stay compact rather than duplicate these documents.
+  Its `CLAUDE.md` only imports `AGENTS.md`, so Claude Code and Codex read the same instructions.
 
 ## Retrieval quality
 
