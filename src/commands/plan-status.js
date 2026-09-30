@@ -4,10 +4,12 @@ import { lstatSync, readFileSync } from "node:fs";
 import {
   FirstDraftNetworkError,
   FirstDraftProtocolError,
+  SERVICE_ROUTES,
   isProblemBody,
   readResponseBody,
   responseMediaType,
   sendRequest,
+  serviceEndpoint,
 } from "../api-response.js";
 import { isUuidV7, readPlanState } from "../plan-state.js";
 
@@ -166,10 +168,9 @@ export async function readPlanStatus({
     );
   }
 
-  const endpoint = new URL(
-    `/v1/projects/${state.project_id}/analysis`,
-    state.api_url,
-  );
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.readAnalysis, state.api_url, {
+    project_id: state.project_id,
+  });
   const deadline = wait ? now() + WAIT_TIMEOUT_MS : null;
   /** @type {AnalysisResponse | null} */
   let first = null;
@@ -189,7 +190,6 @@ export async function readPlanStatus({
     let body;
     try {
       response = await sendRequest(fetchFunction, endpoint, {
-        method: "GET",
         headers: { Accept: "application/json, application/problem+json" },
         redirect: "error",
         signal: createRequestSignal(requestTimeout),

@@ -4,11 +4,13 @@ import path from "node:path";
 
 import {
   FirstDraftProtocolError,
+  SERVICE_ROUTES,
   isDiagnostic,
   isProblemBody,
   readResponseBody,
   responseMediaType,
   sendRequest,
+  serviceEndpoint,
 } from "../api-response.js";
 import { isFileSystemError } from "../file-system.js";
 import {
@@ -109,10 +111,9 @@ export async function pushPlan({
   const statePath = path.join(directory, "state.json");
   const planSource = readLocalFile(planPath, MAX_PLAN_BYTES, fileSystem);
   const origin = resolveApiUrl(apiUrl, state.api_url);
-  const endpoint = new URL(
-    `/v1/projects/${state.project_id}/foundation-plan`,
-    origin,
-  );
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.pushPlan, origin, {
+    project_id: state.project_id,
+  });
   const headers = {
     Accept: "application/json, application/problem+json",
     "Content-Type": FOUNDATION_PLAN_MEDIA_TYPE,
@@ -122,7 +123,6 @@ export async function pushPlan({
   };
 
   const response = await sendRequest(fetchFunction, endpoint, {
-    method: "PUT",
     headers,
     body: planSource,
     redirect: "error",

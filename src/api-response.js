@@ -23,13 +23,71 @@ export class FirstDraftProtocolError extends Error {
 }
 
 /**
+ * Every Service API route the CLI requests. docs/commands.md#service-endpoints
+ * has one row for each, and test/service-endpoints.test.js compares the two.
+ */
+export const SERVICE_ROUTES = {
+  pushPlan: {
+    method: "PUT",
+    path: "/v1/projects/{project_id}/foundation-plan",
+  },
+  readAnalysis: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/analysis",
+  },
+  startCompilation: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/compilations",
+  },
+  readCompilation: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/compilations/{compilation_id}",
+  },
+  downloadArtifact: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/compilations/{compilation_id}/artifact",
+  },
+  startPublication: {
+    method: "PUT",
+    path: "/v1/projects/{project_id}/github-publication",
+  },
+  readPublication: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/github-publication",
+  },
+};
+
+/** @typedef {{method: string, url: URL}} ServiceEndpoint */
+
+/**
+ * @param {{method: string, path: string}} route
+ * @param {string} apiUrl
+ * @param {Record<string, string>} parameters
+ * @returns {ServiceEndpoint}
+ */
+export function serviceEndpoint(route, apiUrl, parameters) {
+  const endpointPath = route.path.replace(/\{(\w+)\}/g, (_, name) => {
+    const value = parameters[name];
+    if (value === undefined) {
+      throw new Error(`${route.path} needs a ${name} value.`);
+    }
+    return value;
+  });
+
+  return { method: route.method, url: new URL(endpointPath, apiUrl) };
+}
+
+/**
  * @param {typeof globalThis.fetch} fetchFunction
- * @param {URL} endpoint
- * @param {RequestInit} request
+ * @param {ServiceEndpoint} endpoint
+ * @param {Omit<RequestInit, "method">} request
  */
 export async function sendRequest(fetchFunction, endpoint, request) {
   try {
-    return await fetchFunction(endpoint, request);
+    return await fetchFunction(endpoint.url, {
+      ...request,
+      method: endpoint.method,
+    });
   } catch (error) {
     if (
       error instanceof PlanStateConfigurationError ||

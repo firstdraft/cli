@@ -6,10 +6,12 @@ import { isAuthenticationProblem } from "../api-authentication.js";
 import {
   FirstDraftNetworkError,
   FirstDraftProtocolError,
+  SERVICE_ROUTES,
   isProblemBody,
   readResponseBody,
   responseMediaType,
   sendRequest,
+  serviceEndpoint,
 } from "../api-response.js";
 import { isUuidV7, readLocalFile, readPlanState } from "../plan-state.js";
 
@@ -284,10 +286,7 @@ export async function publishPlan({
     );
   }
 
-  const endpoint = new URL(
-    `/v1/projects/${state.project_id}/github-publication`,
-    state.api_url,
-  );
+  const apiUrl = state.api_url;
   const deadline = now() + WAIT_TIMEOUT_MS;
   let initial;
 
@@ -295,7 +294,7 @@ export async function publishPlan({
 
   try {
     initial = await startPublication({
-      endpoint,
+      apiUrl,
       projectId: state.project_id,
       headSourceSha256,
       etag: publicationEtag,
@@ -307,7 +306,7 @@ export async function publishPlan({
 
     try {
       initial = await readPublicationStatus({
-        endpoint,
+        apiUrl,
         projectId: state.project_id,
         headSourceSha256,
         fetchFunction,
@@ -359,7 +358,7 @@ export async function publishPlan({
     if (now() >= deadline) throw new PublicationTimeoutError(current);
 
     const next = await readPublicationStatus({
-      endpoint,
+      apiUrl,
       projectId: state.project_id,
       headSourceSha256,
       fetchFunction,
@@ -391,7 +390,7 @@ export async function publishPlan({
 
 /**
  * @param {object} options
- * @param {URL} options.endpoint
+ * @param {string} options.apiUrl
  * @param {string} options.projectId
  * @param {string} options.headSourceSha256
  * @param {string} options.etag
@@ -399,18 +398,20 @@ export async function publishPlan({
  * @param {(timeoutMs: number) => AbortSignal} options.createRequestSignal
  */
 async function startPublication({
-  endpoint,
+  apiUrl,
   projectId,
   headSourceSha256,
   etag,
   fetchFunction,
   createRequestSignal,
 }) {
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.startPublication, apiUrl, {
+    project_id: projectId,
+  });
   let response;
   let body;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
-      method: "PUT",
       headers: {
         Accept: "application/json, application/problem+json",
         "If-Match": etag,
@@ -452,7 +453,7 @@ async function startPublication({
 
 /**
  * @param {object} options
- * @param {URL} options.endpoint
+ * @param {string} options.apiUrl
  * @param {string} options.projectId
  * @param {string} options.headSourceSha256
  * @param {typeof globalThis.fetch} options.fetchFunction
@@ -460,18 +461,20 @@ async function startPublication({
  * @param {number} options.requestTimeout
  */
 async function readPublicationStatus({
-  endpoint,
+  apiUrl,
   projectId,
   headSourceSha256,
   fetchFunction,
   createRequestSignal,
   requestTimeout,
 }) {
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.readPublication, apiUrl, {
+    project_id: projectId,
+  });
   let response;
   let body;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
-      method: "GET",
       headers: { Accept: "application/json, application/problem+json" },
       redirect: "error",
       signal: createRequestSignal(requestTimeout),

@@ -39,7 +39,8 @@
     "pack:check": "node scripts/check-pack.js",
     "pack:smoke": "node scripts/smoke-package.js",
     "test": "node scripts/run-tests.js",
-    "typecheck": "tsc --project jsconfig.json"
+    "typecheck": "tsc --project jsconfig.json",
+    "version": "node scripts/sync-version.js --apply"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

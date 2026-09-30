@@ -18,6 +18,7 @@ import { run } from "../src/cli.js";
 import {
   ARTIFACT_MEDIA_TYPE,
   FOUNDATION_PLAN_FORMAT,
+  RAILS_TARGET_PROFILE,
 } from "../src/compilation-artifact.js";
 import { ROOT_TRANSACTION_NAME } from "../src/root-output.js";
 
@@ -40,7 +41,7 @@ const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" };
+const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const SUCCESS_PROGRESS = `First Draft: Analyzing Foundation Plan...
 First Draft: Foundation Plan analysis valid.
 First Draft: Compiling application...

@@ -18,6 +18,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { run } from "../src/cli.js";
+import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000000301";
 const PLAN_HELP = `First Draft CLI
@@ -61,11 +62,17 @@ const PLAN_INIT_ERROR = jsonOutput({
     "Could not initialize .firstdraft. The directory may be incomplete; no existing files were overwritten.",
 });
 
+const [PLAN_FORMAT] = JSON.parse(
+  readFileSync(
+    new URL("../release/compatibility.json", import.meta.url),
+    "utf8",
+  ),
+).requires.foundation_plan_formats;
 const EXPECTED_PLAN = `{
-  "format": "firstdraft.foundation-plan.sketch/0.23",
+  "format": ${JSON.stringify(PLAN_FORMAT)},
   "target": {
     "id": "rails",
-    "profile": "rails-sketch/2026-09-bookmark-assets"
+    "profile": ${JSON.stringify(RAILS_TARGET_PROFILE)}
   },
   "application": {
     "key": "oscar_party",
