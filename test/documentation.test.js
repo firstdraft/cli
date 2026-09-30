@@ -9,6 +9,8 @@ import {
   markdownLinkTargets,
   withoutFencedCode,
 } from "../scripts/markdown-documentation.js";
+import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
+import { VERSION } from "../src/version.js";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const markdownFiles = [
@@ -132,6 +134,300 @@ test("local documentation links and fragments resolve", () => {
     }
   }
 });
+
+test("living documentation names only current version identities", () => {
+  const identities = versionIdentities(
+    VERSION,
+    JSON.parse(
+      readFileSync(path.join(repository, "release/compatibility.json"), "utf8"),
+    ).requires,
+  );
+  const findings = [];
+
+  for (const [file, source] of sources) {
+    const name = path.relative(repository, file);
+    if (name === path.join("docs", "release-history.md")) continue;
+
+    findings.push(...staleVersionFindings(name, source, identities));
+
+    for (const match of source.matchAll(/rails-sketch\/[\w-]*\w/g)) {
+      if (match[0] === RAILS_TARGET_PROFILE) continue;
+
+      findings.push(
+        `${name}:${lineAt(source, match.index)} names ${match[0]}, but src/compilation-artifact.js accepts ` +
+          `${RAILS_TARGET_PROFILE}. Name that profile or describe the behavior without one.`,
+      );
+    }
+  }
+
+  assert.ok(
+    findings.length === 0,
+    `Update stale version identities:\n${findings.join("\n")}`,
+  );
+});
+
+test("the version lint catches unlabeled, prerelease, and unreleased CLI versions", () => {
+  // Fixed identities from the 0.8.0 release, when the API minor trailed the CLI minor by one.
+  const identities = versionIdentities("0.8.0", {
+    api_contract: [">= 0.7.0", "< 0.8.0"],
+    foundation_plan_formats: ["firstdraft.foundation-plan.sketch/0.23"],
+  });
+  const stale = [
+    "The CLI/Skill `0.7.0` pair sent Plans.",
+    "| CLI | 0.7.0 |",
+    "npm `latest` selects `0.7.0`.",
+    "Scripts written for the 0.7 line keep `--github`.",
+    "CLI 0.8.0 has not been published.",
+    "CLI 0.8.0 has not been\npublished.",
+    "Before\npublishing CLI 0.8.0, align the companions.",
+    "CLI 0.8.0 isn't published yet.",
+    "The upcoming CLI 0.8.0 adds this flag.",
+    "Install `0.8.0-rc.1` to try it.",
+  ];
+  const current = [
+    "The current `0.8.x` source line contains the commands.",
+    "CLI `0.8.x` requires the service's `0.7.x` API contract.",
+    "Plan `0.23` has no `application.pwa` option.",
+    "Development uses Node.js 24.18.0.",
+  ];
+
+  for (const line of stale) {
+    assert.equal(
+      staleVersionFindings("probe.md", line, identities).length,
+      1,
+      line,
+    );
+  }
+  for (const line of current) {
+    assert.deepEqual(
+      staleVersionFindings("probe.md", line, identities),
+      [],
+      line,
+    );
+  }
+});
+
+const identityLabels = {
+  cli: "CLI ",
+  api: "API ",
+  plan: "Plan ",
+  unlabeled: "",
+};
+
+const versionToken = /(?<![\w.])(v?)(\d+\.\d+(?:\.(?:\d+|x))?)\b(?!\.\d)/g;
+
+const releaseStatus =
+  /(?:\bnot|n't) (?:yet |been |yet been )?(?:published|released)\b|\b(?:candidates?|unreleased|unpublished|upcoming|pre-?releases?|pending|(?:published|released) yet|before publishing)\b/i;
+
+const releasedOnly =
+  "keep dated release observations in docs/release-history.md.";
+
+// Labels such as "CLI/Skill `", "**CLI** ", "CLI versions ", "| CLI | ", "firstdraft ", "cli@", or "latest=".
+const cliLabelBefore =
+  /(?:\bCLI(?:\/Skill|'s)?(?:`|\*\*)?(?:\s+(?:versions?|releases?|line))?|\bfirstdraft|@firstdraft\.com\/cli`?|\b(?:latest|next)`?)\s*[:(=@|]?\s*(?:`|\*\*)?$/;
+
+const comparatorSigns = new Map([
+  ["=", [0]],
+  ["<", [-1]],
+  ["<=", [-1, 0]],
+  [">", [1]],
+  [">=", [0, 1]],
+]);
+
+/** @typedef {"cli" | "api" | "plan" | "unlabeled"} IdentityKind */
+/** @typedef {{major: number, minor: number, patch: number | undefined}} Version */
+
+/**
+ * @param {string} packageVersion
+ * @param {{api_contract: string[], foundation_plan_formats: string[]}} requires
+ */
+function versionIdentities(packageVersion, requires) {
+  const cliVersion = parseVersion(packageVersion);
+  const apiComparators = requires.api_contract.map(parseComparator);
+  const planVersions = requires.foundation_plan_formats.map((format) =>
+    parseVersion(format.replace(/^.*\//, "")),
+  );
+  const apiRange = requires.api_contract.join(" ");
+  const planFormats = requires.foundation_plan_formats.join(", ");
+  const withoutOldVersion = `state the current behavior without the old version, and ${releasedOnly}`;
+  /** @param {Version} version */
+  const acceptsCli = (version) =>
+    sameLine(version, cliVersion) &&
+    (version.patch === undefined || version.patch === cliVersion.patch);
+
+  /** @type {Record<IdentityKind, (version: Version) => boolean>} */
+  const accepts = {
+    cli: acceptsCli,
+    api: (version) =>
+      apiComparators.every((comparator) => comparator.accepts(version)),
+    plan: (version) =>
+      version.patch === undefined &&
+      planVersions.some((plan) => sameLine(version, plan)),
+    // An unlabeled token is read as a CLI version. Otherwise a retired CLI line that the API range
+    // still accepts, such as CLI 0.7.x beside API 0.7.x, would pass.
+    unlabeled: acceptsCli,
+  };
+  /** @type {Record<IdentityKind, string>} */
+  const staleAdvice = {
+    cli: `but package.json is ${packageVersion}. Name that version or ${withoutOldVersion}`,
+    api: `but release/compatibility.json accepts API ${apiRange}. Name an accepted version or state the behavior without one.`,
+    plan: `but release/compatibility.json accepts ${planFormats}. Name an accepted format or state the behavior without one.`,
+    unlabeled:
+      `which has no API or Plan label, so it is checked as a CLI version against package.json's ` +
+      `${packageVersion}. Add its API or Plan label if it names one; otherwise ${withoutOldVersion}`,
+  };
+
+  return {
+    // Other majors, such as Node.js 24.18.0 or npm 11.16.0, are not First Draft identities.
+    productMajors: new Set(
+      [
+        cliVersion,
+        ...apiComparators.map(({ bound }) => bound),
+        ...planVersions,
+      ].map(({ major }) => major),
+    ),
+    accepts,
+    staleAdvice,
+  };
+}
+
+/**
+ * @param {string} name
+ * @param {string} source
+ * @param {ReturnType<typeof versionIdentities>} identities
+ * @returns {string[]}
+ */
+function staleVersionFindings(
+  name,
+  source,
+  { productMajors, accepts, staleAdvice },
+) {
+  const findings = [];
+
+  for (const match of source.matchAll(versionToken)) {
+    const [token, tagPrefix, versionText] = match;
+    assert(versionText !== undefined);
+    const version = parseVersion(versionText);
+    if (!productMajors.has(version.major)) continue;
+
+    const end = match.index + token.length;
+    const kind = identityKind(
+      tagPrefix,
+      source.slice(Math.max(0, match.index - 40), match.index),
+      source.slice(end, end + 20),
+    );
+    const location = `${name}:${lineAt(source, match.index)}`;
+    const prerelease =
+      version.patch === undefined
+        ? undefined
+        : /^-[0-9A-Za-z][0-9A-Za-z.-]*\b/.exec(source.slice(end))?.[0];
+
+    if (!accepts[kind](version)) {
+      findings.push(
+        `${location} names ${identityLabels[kind]}${token}, ${staleAdvice[kind]}`,
+      );
+    } else if (prerelease) {
+      findings.push(
+        `${location} names prerelease ${token}${prerelease}. Living pages name only released versions: ` +
+          `remove the prerelease suffix and ${releasedOnly}`,
+      );
+    } else if (kind === "cli" || kind === "unlabeled") {
+      const status = releaseStatus.exec(
+        sentenceAround(source, match.index).replace(/\s+/g, " "),
+      );
+      if (status) {
+        findings.push(
+          `${location} calls the current package version ${token} "${status[0]}". Living pages treat ` +
+            `package.json's version as released: remove the release-status wording and ${releasedOnly}`,
+        );
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * @param {string | undefined} tagPrefix
+ * @param {string} before
+ * @param {string} after
+ * @returns {IdentityKind}
+ */
+function identityKind(tagPrefix, before, after) {
+  if (tagPrefix === "v" || cliLabelBefore.test(before)) return "cli";
+  if (/\bAPI\s+(?:contract\s+|version\s+)?`?$/.test(before)) return "api";
+  if (/(?:sketch\/|\bPlan\s+(?:format\s+|version\s+)?`?)$/.test(before)) {
+    return "plan";
+  }
+
+  const labelAfter = /^(?:`|\*\*)?\s+(API|Plan|CLI)\b/.exec(after)?.[1];
+  if (labelAfter === "API") return "api";
+  if (labelAfter === "Plan") return "plan";
+  return labelAfter === "CLI" ? "cli" : "unlabeled";
+}
+
+/** @param {string} value @returns {Version} */
+function parseVersion(value) {
+  const match = /^(\d+)\.(\d+)(?:\.(\d+|x))?$/.exec(value);
+  assert(match, `expected a version, found ${value}`);
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch:
+      match[3] === undefined || match[3] === "x" ? undefined : Number(match[3]),
+  };
+}
+
+/** @param {string} requirement */
+function parseComparator(requirement) {
+  const match = /^(=|<|<=|>|>=)\s+(\S+)$/.exec(requirement);
+  const signs = comparatorSigns.get(match?.[1] ?? "");
+  assert(match?.[2] && signs, `invalid comparator: ${requirement}`);
+  const bound = parseVersion(match[2]);
+
+  return {
+    bound,
+    /** A line such as 0.7.x is compared as its first release. @param {Version} version */
+    accepts(version) {
+      const order =
+        version.major - bound.major ||
+        version.minor - bound.minor ||
+        (version.patch ?? 0) - (bound.patch ?? 0);
+
+      return signs.includes(Math.sign(order));
+    },
+  };
+}
+
+/** @param {Version} left @param {Version} right */
+function sameLine(left, right) {
+  return left.major === right.major && left.minor === right.minor;
+}
+
+/** @param {string} source @param {number} index */
+function lineAt(source, index) {
+  return source.slice(0, index).split("\n").length;
+}
+
+/** @param {string} source @param {number} index */
+function sentenceAround(source, index) {
+  let start = 0;
+  let end = source.length;
+
+  for (const boundary of source.matchAll(
+    /[.!?](?=\s)|\n[ \t]*(?:\n|[-*+|#]|\d+\.\s)/g,
+  )) {
+    if (boundary.index < index) {
+      start = boundary.index + boundary[0].length;
+    } else {
+      end = boundary.index;
+      break;
+    }
+  }
+
+  return source.slice(start, end);
+}
 
 /** @param {string} directory @returns {string[]} */
 function findMarkdownFiles(directory) {

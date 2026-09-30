@@ -9,8 +9,8 @@ install the CLI and Skill, then compile into your current folder with `firstdraf
 clone or GitHub push is required. The [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft)
 is the Codespaces fallback.
 
-CLI 0.4 and later make `--output .` the default. Keep the explicit flag with CLI 0.3, whose zero-flag command selects GitHub
-publication.
+`--output .` is also the default, so `firstdraft plan compile` alone writes to the current folder. GitHub publication
+requires `--github`.
 
 ## What this repository owns
 

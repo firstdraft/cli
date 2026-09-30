@@ -59,8 +59,7 @@ commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflic
 Every remote command selects credentials from its effective origin: the exact `https://staging.firstdraft.com`
 origin requires `FIRSTDRAFT_STAGING_API_TOKEN`; production and custom origins use `FIRSTDRAFT_API_TOKEN`. Neither
 token is a fallback for the other. This includes existing staging Projects and retained status or artifact reads,
-even when no flag is supplied. Upgrading from CLI `0.6.x` therefore requires moving the staging credential to
-`FIRSTDRAFT_STAGING_API_TOKEN`; production tokens stay in `FIRSTDRAFT_API_TOKEN`.
+even when no flag is supplied.
 
 The CLI sends the selected token as a Bearer credential on every API request. It does not save it in `.firstdraft`,
 print it, or require it for local commands. Revoke a token in the environment that issued it if it is exposed. A
@@ -179,8 +178,7 @@ firstdraft plan compile
 This is equivalent to `firstdraft plan compile --output .`. Use `--output ./application` for another absent
 directory, or `--github` to publish to a private GitHub repository. `--github` and `--output` are mutually exclusive.
 No GitHub connection, repository clone, or push is required for local compilation. Compilation runs on the First
-Draft service; output and the application runtime are local. CLI `0.3.x` used GitHub Publication as its default;
-scripts that require that behavior must add `--github` when upgrading to `0.4.x` or later.
+Draft service; output and the application runtime are local.
 
 Both `plan compile` modes first push the exact current bytes in
 `.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and save the accepted ETag using the same
@@ -201,10 +199,6 @@ that resolves to the physical current directory. It validates either destination
 destination is checked again after analysis; root adoption instead holds its owned lock and performs the exact
 pre-move identity recheck described below. Other existing destinations remain invalid, so
 `--output ./application` retains its absent-directory contract.
-
-The nested archive layout below is shared by CLI `0.3.x` and later.
-[Published CLI `0.2.2`](release-history.md#022-publication-and-registry-observation) archives at top-level `design/`;
-existing applications are not migrated automatically.
 
 The default `--output .` is the noninteractive root-adoption mode. `./`, an absolute spelling of the current directory, and
 another spelling that resolves to that same physical directory select the same mode. It works at any real current
