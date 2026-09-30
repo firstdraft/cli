@@ -33,6 +33,7 @@ repository owns the exact command and transport behavior between them.
 | Change the CLI                       | [Agent instructions](https://github.com/firstdraft/cli/blob/main/AGENTS.md), then [documentation map](docs/README.md) |
 | Find a command or output contract    | [Command reference](docs/commands.md)                                                                                 |
 | Interpret an error or recover safely | [Errors and recovery](docs/errors.md)                                                                                 |
+| Commit, review, or land a change     | [Contributing guide](https://github.com/firstdraft/cli/blob/main/CONTRIBUTING.md)                                     |
 | Prepare or publish a package         | [Release runbook](https://github.com/firstdraft/cli/blob/main/RELEASING.md)                                           |
 | See what changed in a version        | [Changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md)                                                 |
 | Report a vulnerability               | [Security policy](SECURITY.md)                                                                                        |

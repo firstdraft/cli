@@ -17,6 +17,7 @@ const markdownFiles = [
   ...[
     "AGENTS.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "README.md",
     "RELEASING.md",
     "SECURITY.md",

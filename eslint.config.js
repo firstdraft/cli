@@ -3,7 +3,7 @@ import globals from "globals";
 
 export default [
   {
-    ignores: ["node_modules/", "tmp/"],
+    ignores: ["node_modules/", "tmp/", ".claude/worktrees/"],
   },
   js.configs.recommended,
   {
