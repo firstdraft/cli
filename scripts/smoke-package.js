@@ -15,11 +15,17 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
+
 const npmCli = requiredEnvironmentVariable("npm_execpath");
 const apiToken = `fd_${"a".repeat(43)}`;
 
 /** @type {{name: string, version: string}} */
 const packageMetadata = JSON.parse(readFileSync("package.json", "utf8"));
+/** @type {[string]} */
+const [planFormat] = JSON.parse(
+  readFileSync("release/compatibility.json", "utf8"),
+).requires.foundation_plan_formats;
 const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "firstdraft-cli-"));
 const installationDirectory = path.join(temporaryDirectory, "installation");
 const packedExecutable = path.join(
@@ -149,8 +155,8 @@ try {
       name: initializedPlan.application.name,
     },
     {
-      format: "firstdraft.foundation-plan.sketch/0.23",
-      target: { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" },
+      format: planFormat,
+      target: { id: "rails", profile: RAILS_TARGET_PROFILE },
       key: "oscar_party",
       name: "Oscar Party",
     },
@@ -392,10 +398,7 @@ async function exercisePackedCompilation(projectDirectory) {
     "foundation-plan-rails/application-2026-09-27-bookmark-assets";
   const compilerRelease =
     "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-  const target = {
-    id: "rails",
-    profile: "rails-sketch/2026-09-bookmark-assets",
-  };
+  const target = { id: "rails", profile: RAILS_TARGET_PROFILE };
   const gapSet = {
     format: "firstdraft.foundation-gaps/2",
     source: { sha256: headSha256 },
@@ -450,7 +453,7 @@ async function exercisePackedCompilation(projectDirectory) {
         graph_version: 1,
         head_source_sha256: headSha256,
         foundation_plan: {
-          format: "firstdraft.foundation-plan.sketch/0.23",
+          format: planFormat,
           sha256: foundationPlanSha256,
         },
         analysis: {
@@ -585,7 +588,7 @@ async function exercisePackedCompilation(projectDirectory) {
         {
           project: { id: projectId, graph_version: 1 },
           foundation_plan: {
-            format: "firstdraft.foundation-plan.sketch/0.23",
+            format: planFormat,
             source_sha256: headSha256,
           },
           diagnostics: [],

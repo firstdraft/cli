@@ -25,6 +25,7 @@ import {
   MAX_ARTIFACT_BYTES,
   materializeCompilationArtifact,
   parseCompilationArtifact,
+  RAILS_TARGET_PROFILE,
   resolveOutputTarget,
   prepareCompilationOutputTarget,
 } from "../src/compilation-artifact.js";
@@ -37,7 +38,7 @@ const HEAD_SHA256 = "1".repeat(64);
 const FOUNDATION_PLAN_SHA256 = "5".repeat(64);
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" };
+const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const EXPECTED = {
   projectId: PROJECT_ID,
   compilationId: COMPILATION_ID,

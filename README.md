@@ -46,7 +46,7 @@ Run firstdraft --help or a command group's --help for concise terminal syntax.
 | bin/     | Published executable entrypoint                               |
 | src/     | Commands, API client, local Plan state, and output contracts  |
 | test/    | Command, protocol, recovery, and package tests                |
-| scripts/ | Test runner and package allowlist/smoke checks                |
+| scripts/ | Test runner, package checks, and version sync                 |
 | docs/    | Command, error, release-history, and maintainer documentation |
 
 ## Development

@@ -5,6 +5,8 @@ handled-error recovery in `docs/errors.md`, living release policy in `RELEASING.
 in `docs/release-history.md`. When behavior changes, update its owning document in the same change.
 
 - Verify with `npm run check`, which takes about 30 seconds. A fresh checkout needs `npm ci --ignore-scripts` first.
+- To add a command, follow `docs/commands.md#add-a-command`. To change the version, follow the `npm version` step in
+  `RELEASING.md`.
 - Sibling repositories: `firstdraft/firstdraft` (private) owns the Service API and Plan format; `firstdraft/skills`
   owns the Skill and plugin packaging.
 - Changes to the accepted API-contract range, accepted Plan formats, command names or flags, handled `error` values,

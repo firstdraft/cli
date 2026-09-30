@@ -31,6 +31,8 @@ const ETAG = '"opaque:plan-validator"';
 const STARTED_AT = "2026-07-30T12:00:00.123Z";
 const COMPLETED_AT = "2026-07-30T12:00:01.456Z";
 const HEAD_SOURCE_SHA256 = "1".repeat(64);
+// The pinned Service gap-set digest covers these three values. Change them only
+// together with a digest that the Service computed.
 const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =

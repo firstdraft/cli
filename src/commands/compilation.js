@@ -17,11 +17,13 @@ import {
 import {
   FirstDraftNetworkError,
   FirstDraftProtocolError,
+  SERVICE_ROUTES,
   isProblemBody,
   readResponseBody,
   readResponseBytes,
   responseMediaType,
   sendRequest,
+  serviceEndpoint,
 } from "../api-response.js";
 import { isUuidV7, readLocalFile, readPlanState } from "../plan-state.js";
 
@@ -332,6 +334,8 @@ export async function downloadCompilation({
       );
     const source = await downloadArtifact({
       apiUrl: context.apiUrl,
+      projectId: context.projectId,
+      compilationId: current.compilation.id,
       metadata,
       fetchFunction,
       createRequestSignal,
@@ -472,6 +476,8 @@ export async function compileAndDownload({
         );
       const source = await downloadArtifact({
         apiUrl: context.apiUrl,
+        projectId: context.projectId,
+        compilationId: current.compilation.id,
         metadata,
         fetchFunction,
         createRequestSignal,
@@ -600,12 +606,13 @@ async function startCompilation({
   fetchFunction,
   createRequestSignal,
 }) {
-  const endpoint = new URL(`/v1/projects/${projectId}/compilations`, apiUrl);
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.startCompilation, apiUrl, {
+    project_id: projectId,
+  });
   let response;
   let body;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
-      method: "POST",
       headers: {
         Accept: "application/json, application/problem+json",
         "If-Match": etag,
@@ -667,15 +674,14 @@ async function readCompilationStatus({
   createRequestSignal,
   requestTimeout,
 }) {
-  const endpoint = new URL(
-    `/v1/projects/${projectId}/compilations/${compilationId}`,
-    apiUrl,
-  );
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.readCompilation, apiUrl, {
+    project_id: projectId,
+    compilation_id: compilationId,
+  });
   let response;
   let body;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
-      method: "GET",
       headers: { Accept: "application/json, application/problem+json" },
       redirect: "error",
       signal: createRequestSignal(requestTimeout),
@@ -749,22 +755,28 @@ function matchesExpectedCompilation(current, expected) {
 /**
  * @param {object} options
  * @param {string} options.apiUrl
+ * @param {string} options.projectId
+ * @param {string} options.compilationId
  * @param {{path: string, sha256: string, media_type: string, byte_size: number}} options.metadata
  * @param {typeof globalThis.fetch} options.fetchFunction
  * @param {(timeoutMs: number) => AbortSignal} options.createRequestSignal
  */
 async function downloadArtifact({
   apiUrl,
+  projectId,
+  compilationId,
   metadata,
   fetchFunction,
   createRequestSignal,
 }) {
-  const endpoint = new URL(metadata.path, apiUrl);
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.downloadArtifact, apiUrl, {
+    project_id: projectId,
+    compilation_id: compilationId,
+  });
   let response;
   let source;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
-      method: "GET",
       headers: {
         Accept: `${ARTIFACT_MEDIA_TYPE}, application/problem+json`,
       },

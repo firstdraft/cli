@@ -37,7 +37,10 @@ not authorization or runtime proof. Its closed `firstdraft.release-compatibility
 
 ## Prepare before merge
 
-1. Update `package.json`, `package-lock.json`, and `release/compatibility.json`, and align the Skills CLI requirement.
+1. Set the version with `npm version <x.y.z> --no-git-tag-version --ignore-scripts=false`. npm updates `package.json`
+   and `package-lock.json`, and the package's `version` script copies the version into `release/compatibility.json`.
+   The last flag is required because `.npmrc` sets `ignore-scripts=true`, which also skips that script. If it was
+   omitted, run `node scripts/sync-version.js --apply`. Then align the Skills CLI requirement.
 2. Update the command, error, and Skill guidance affected by the change. When onboarding changes, coordinate the
    [local guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e) publication from the Service's
    `docs/guides/local-app.md` before the new CLI reaches `latest`. Preserve dated release evidence.

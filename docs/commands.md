@@ -152,8 +152,8 @@ or `superseded`. Every validated analysis status is a successful read with exit 
 `analysis.status` value and inspect `analysis.diagnostics` rather than treating a completed analysis with issues as
 a transport failure.
 
-The projection includes the exact Head digest, Analyzer and Compiler releases, selected target, and
-`analysis.gap_set` plus `analysis.gap_set_sha256`. A `valid` run always returns the complete parsed canonical
+The projection includes the exact [Head](#head-and-its-etag) digest, Analyzer and Compiler releases, selected target,
+and `analysis.gap_set` plus `analysis.gap_set_sha256`. A `valid` run always returns the complete parsed canonical
 `firstdraft.foundation-gaps/2` object, including every ordered gap record and an empty `gaps` array when nothing is
 missing. Both GapSet fields are `null` for every other status. The CLI validates the GapSet's Head, Project,
 generation, releases, target, canonical digest, and complete record shapes, then prints the records without
@@ -399,3 +399,95 @@ sibling directory, verifies the complete tree, and atomically renames it into th
 POSIX, directories use mode `0755` and files use artifact-declared `0644` or `0755`; Windows verifies structure,
 contents, and digests without claiming POSIX mode bits. The declared and streamed artifact envelope is bounded at
 128 MiB.
+
+## Service endpoints
+
+The CLI calls these Service API routes at the origin pinned for the Project. Every request sends the selected token
+as a Bearer credential, refuses redirects, and has a bounded timeout. Each request takes its method and path from one
+`SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
+`SERVICE_ROUTES` differ, or when no file in `src/` uses a declared route.
+
+| Method | Path                                                               | Purpose                              |
+| ------ | ------------------------------------------------------------------ | ------------------------------------ |
+| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                        | Create or replace the Head           |
+| `GET`  | `/v1/projects/{project_id}/analysis`                               | Read the Head's current analysis     |
+| `POST` | `/v1/projects/{project_id}/compilations`                           | Start a Compilation of the Head      |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`          | Read one retained Compilation        |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact` | Download that Compilation's artifact |
+| `PUT`  | `/v1/projects/{project_id}/github-publication`                     | Start or rejoin the Publication      |
+| `GET`  | `/v1/projects/{project_id}/github-publication`                     | Poll or reconcile the Publication    |
+
+`plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
+Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
+`compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
+
+The first push sends `If-None-Match: *`. Later pushes, the Compilation `POST`, and the Publication `PUT` send the
+saved Head ETag in `If-Match`. The Service also has a Compilation cancel route, which the CLI does not call.
+
+These routes belong to the API-contract range that `release/compatibility.json` accepts. The CLI does not read the
+Service's `FirstDraft-API-Contract` response header. Instead, the Service's release compatibility check compares the
+declared ranges before a release. The Service documents the routes in its Foundation Plan machine reference,
+`docs/architecture/reference/README.md` in the private `firstdraft/firstdraft` repository.
+
+### Head and its ETag
+
+The Head is the exact Foundation Plan bytes that First Draft holds for a Project. The latest accepted
+`PUT /v1/projects/{project_id}/foundation-plan` sets it. The Service stores those bytes unchanged. A byte change that
+keeps the Plan's meaning still makes a new Head, although the Project's `graph_version` stays the same.
+
+A successful Plan `PUT` returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
+64-character lowercase SHA-256 of the Head bytes. The CLI saves the complete header value in `.firstdraft/state.json`
+and replays it in `If-Match`. `plan compile` also extracts `<hex>` to check that the local Plan still matches the
+Head before it starts a Compilation or Publication. A saved ETag in any other form stops that check with
+`invalid_configuration`.
+
+The same digest appears as `head_source_sha256` in analysis and Compilation responses. To tell whether the local Plan
+is the Head, compare the SHA-256 of `.firstdraft/foundation-plan.json` with `analysis.head_source_sha256` from
+`plan status`. The artifact download expects an ETag of the same form over the artifact bytes.
+
+The Service reference asks clients to replay the Plan ETag without interpreting it. This CLI parses it anyway. A
+Service ETag in another form would make every `plan compile` stop with `invalid_configuration`.
+
+## Add a command
+
+Use this checklist when a change adds a command or subcommand. Each step names the file to change.
+
+1. **Implement it.** Put the command's logic in a module under `src/commands/`, usually `<group>-<name>.js`. Accept
+   `fetchFunction`, file system functions, clocks, and request signals as options, as the existing commands do, so
+   tests can replace them. Throw a named error class for each failure the command handles. Build each Service
+   request with `serviceEndpoint` and a route declared in `SERVICE_ROUTES` in `src/api-response.js`.
+2. **Dispatch it in `src/cli.js`.**
+   - Add a `<GROUP>_<NAME>_HELP` string, and list the command in its group's help: `PLAN_HELP`,
+     `COMPILATION_HELP`, or `GENERATE_HELP`. A new group also needs a line in `ROOT_HELP` and a branch in `run`.
+   - Add the branch in `runPlan`, `runCompilation`, or `runGenerate`, and a `run<Group><Name>` function.
+   - Parse arguments with strict `parseArgs`. Invalid syntax writes `invalid_arguments` and exits 2.
+   - A command that calls the Service also accepts `--staging` and calls `authenticateApiCommand`. It maps each
+     error class to one `writeJson(stderr, …)` envelope and its exit status.
+3. **Test it.**
+   - Add `test/<group>-<name>.test.js`. Cover the help text, invalid arguments, the success output, and every
+     handled `error` value.
+   - Update the exact group help in the tests: `HELP` in `test/cli.test.js`, `PLAN_HELP` in `test/plan-init.test.js`,
+     or `GENERATE_HELP` in `test/generate-uuid.test.js`. No test asserts the whole `compilation` group help.
+   - Append a command that calls the Service to `REMOTE_COMMANDS` in `test/api-environments.test.js`. Some tests
+     there select entries by index, so add it at the end. The command's first request must reach the pinned origin
+     with that origin's token, and one `401` must produce `authentication_required`.
+   - Add packed-package cases to `scripts/smoke-package.js`, including at least an invalid-arguments case.
+4. **Package it.** Add each new `src/` file to the exact list in `scripts/check-pack.js`. `firstdraft/skills` keeps
+   a copy of that list as `packedFileAllowlist` in `script/cli-contract/config.mjs`. The copy must change when
+   Skills bundles this CLI version.
+5. **Document it.**
+   - In this page, add a row to the [command map](#command-map) and a section for the command. Add a row to
+     [Service endpoints](#service-endpoints) for each new route, and name the command in the paragraph below the
+     table. If the command calls a route that section says the CLI does not call, such as Compilation cancel,
+     rewrite that sentence.
+   - In [errors.md](errors.md#error-index), add an Error index row for each new `error` value. Add recovery guidance
+     when retrying the command is safe in a different way than for the existing commands.
+   - When the Skill will call the command, update the Skill's CLI references and contract checks in
+     `firstdraft/skills` with its CLI pin.
+6. **Review it.** New command names, flags, `error` values, and exit statuses need the independent review named in
+   `AGENTS.md`.
+7. **Version it.** Choose the next version with the [version policy](../RELEASING.md#version-and-compatibility-policy)
+   and apply it with the [version step](../RELEASING.md#prepare-before-merge). If the command needs a route or
+   response that the accepted API range lacks, the Service ships it first under a new API-contract version. Then
+   raise `requires.api_contract` in `release/compatibility.json`, and align the Skills CLI requirement. Because the
+   CLI does not read the contract header, an older Service rejects the new route as not found.

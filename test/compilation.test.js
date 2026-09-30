@@ -19,6 +19,7 @@ import {
   ARTIFACT_MEDIA_TYPE,
   FOUNDATION_PLAN_FORMAT,
   MAX_ARTIFACT_BYTES,
+  RAILS_TARGET_PROFILE,
 } from "../src/compilation-artifact.js";
 import { ROOT_TRANSACTION_NAME } from "../src/root-output.js";
 
@@ -34,7 +35,7 @@ const STARTED_AT = "2026-08-04T12:00:01.000000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000000Z";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" };
+const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const STATUS_PATH = `/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}`;
 const ARTIFACT_PATH = `${STATUS_PATH}/artifact`;
 

@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { run } from "../src/cli.js";
+import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000001001";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000001002";
@@ -28,7 +29,7 @@ const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" };
+const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const ARTIFACT = {
   sha256: "1".repeat(64),
   manifest_sha256: "2".repeat(64),
