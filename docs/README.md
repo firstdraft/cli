@@ -33,7 +33,8 @@ authority boundary. Create another page only for a distinct audience, task, or a
 
 The documentation tests keep `AGENTS.md` at or below 2 KiB, the root README at or below 6 KiB, and this map at or
 below 4 KiB. They also require every public topic to remain reachable from this map or the root README and verify
-repository-local links and fragments. The package check separately verifies that every relative link in the
+repository-local links and fragments. Outside release history, they reject retired version identities and
+release-status labels on the current version. The package check separately verifies that every relative link in the
 packaged Markdown resolves inside that exact package.
 
 ## Work on the repository

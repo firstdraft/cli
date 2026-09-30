@@ -21,14 +21,13 @@ CLI `0.8.x` requires API `0.7.x`, Plan `firstdraft.foundation-plan.sketch/0.23`,
 ordinary bookmark assets and metadata without a Plan switch. Earlier Plan formats and target profiles are not
 accepted for artifact materialization. Existing applications and old Plans are not migrated.
 
-Before publishing CLI `0.8.0`, align the Service and Skills companions for the bookmark-assets contract. Source
+Align the Service and Skills companions before publishing a CLI version that changes this contract. Source
 checks and packed-package smokes do not establish a published or deployed tuple. Staging continues to require
 `FIRSTDRAFT_STAGING_API_TOKEN`, including existing pinned Projects. Production remains the default and uses
 `FIRSTDRAFT_API_TOKEN`, as do custom origins.
 
-Local output remains the default introduced in CLI `0.4.x`: `firstdraft plan compile` is equivalent to
-`firstdraft plan compile --output .`, with GitHub publication selected by explicit `--github`. The root archive
-remains `.firstdraft/design`.
+Local output is the default: `firstdraft plan compile` is equivalent to `firstdraft plan compile --output .`,
+with GitHub publication selected by explicit `--github`. The root archive is `.firstdraft/design`.
 
 `release/compatibility.json` declares the package version, accepted API-contract range, and accepted Plan formats.
 It is source-only metadata, validated by the normal test suite and absent from the npm tarball. Coordinate the
