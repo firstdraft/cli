@@ -14,9 +14,13 @@ import { VERSION } from "../src/version.js";
 
 const repository = fileURLToPath(new URL("..", import.meta.url));
 const markdownFiles = [
-  ...["AGENTS.md", "README.md", "RELEASING.md", "SECURITY.md"].map((file) =>
-    path.join(repository, file),
-  ),
+  ...[
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "README.md",
+    "RELEASING.md",
+    "SECURITY.md",
+  ].map((file) => path.join(repository, file)),
   ...findMarkdownFiles(path.join(repository, "docs")),
 ];
 
@@ -84,15 +88,8 @@ test("documentation entrypoints stay lean and route every public topic", () => {
     const source = sources.get(sourceFile);
     assert(source);
     for (const target of markdownLinkTargets(source)) {
-      if (isExternalTarget(target)) continue;
-
-      const [rawPath] = target.split("#", 1);
-      if (rawPath === undefined || rawPath === "") continue;
-      const targetFile = path.resolve(
-        path.dirname(sourceFile),
-        decodeURIComponent(rawPath),
-      );
-      if (publicTopics.has(targetFile)) pending.push(targetFile);
+      const targetFile = repositoryLink(sourceFile, target)?.file;
+      if (targetFile && publicTopics.has(targetFile)) pending.push(targetFile);
     }
   }
 
@@ -105,15 +102,12 @@ test("documentation entrypoints stay lean and route every public topic", () => {
   }
 });
 
-test("local documentation links and fragments resolve", () => {
+test("links to repository files and fragments resolve", () => {
   for (const [sourceFile, source] of sources) {
     for (const target of markdownLinkTargets(source)) {
-      if (isExternalTarget(target)) continue;
-
-      const [rawPath, rawFragment] = target.split("#", 2);
-      const targetFile = rawPath
-        ? path.resolve(path.dirname(sourceFile), decodeURIComponent(rawPath))
-        : sourceFile;
+      const link = repositoryLink(sourceFile, target);
+      if (link === undefined) continue;
+      const { file: targetFile, fragment: rawFragment } = link;
 
       assert.equal(
         existsSync(targetFile) && statSync(targetFile).isFile(),
@@ -146,7 +140,12 @@ test("living documentation names only current version identities", () => {
 
   for (const [file, source] of sources) {
     const name = path.relative(repository, file);
-    if (name === path.join("docs", "release-history.md")) continue;
+    if (
+      name === "CHANGELOG.md" ||
+      name === path.join("docs", "release-history.md")
+    ) {
+      continue;
+    }
 
     findings.push(...staleVersionFindings(name, source, identities));
 
@@ -207,6 +206,33 @@ test("the version lint catches unlabeled, prerelease, and unreleased CLI version
   }
 });
 
+test("changelog headings carry no release status", () => {
+  const changelog = sources.get(path.join(repository, "CHANGELOG.md"));
+  assert(changelog);
+  assert.deepEqual(changelogStatusFindings(changelog), []);
+
+  for (const heading of [
+    "## 0.9.0 (unreleased)",
+    "## 0.9.0: Released 2026-10-01",
+    "## 0.9.0 release candidate",
+    "## 0.9.0 (not yet published)",
+  ]) {
+    assert.equal(
+      changelogStatusFindings(`${heading}\n\nAdds a flag.\n`).length,
+      1,
+      heading,
+    );
+  }
+  for (const source of [
+    "## 0.9.0\n\nAdds a flag.\n",
+    "## 0.9.0: Local output\n\nAdds a flag.\n",
+    "Whether a version is published shows in npm.\n",
+    "```md\n## 0.9.0 (unreleased)\n```\n",
+  ]) {
+    assert.deepEqual(changelogStatusFindings(source), [], source);
+  }
+});
+
 const identityLabels = {
   cli: "CLI ",
   api: "API ",
@@ -219,8 +245,13 @@ const versionToken = /(?<![\w.])(v?)(\d+\.\d+(?:\.(?:\d+|x))?)\b(?!\.\d)/g;
 const releaseStatus =
   /(?:\bnot|n't) (?:yet |been |yet been )?(?:published|released)\b|\b(?:candidates?|unreleased|unpublished|upcoming|pre-?releases?|pending|(?:published|released) yet|before publishing)\b/i;
 
-const releasedOnly =
-  "keep dated release observations in docs/release-history.md.";
+const releasedOnly = "describe version changes in CHANGELOG.md.";
+
+// A heading labeled "released" needs the same hand edit as one labeled "unreleased", so headings reject both.
+const headingReleaseStatus = new RegExp(
+  `${releaseStatus.source}|\\b(?:released|published)\\b`,
+  "i",
+);
 
 // Labels such as "CLI/Skill `", "**CLI** ", "CLI versions ", "| CLI | ", "firstdraft ", "cli@", or "latest=".
 const cliLabelBefore =
@@ -400,6 +431,23 @@ function parseComparator(requirement) {
   };
 }
 
+/** @param {string} source @returns {string[]} */
+function changelogStatusFindings(source) {
+  return withoutFencedCode(source)
+    .split("\n")
+    .filter((line) => /^ {0,3}##[ \t]/.test(line))
+    .flatMap((line) => {
+      const heading = line.trim();
+      const status = headingReleaseStatus.exec(heading)?.[0];
+      return status === undefined
+        ? []
+        : [
+            `CHANGELOG.md heading "${heading}" says "${status}". The v<version> tag and npm show whether a ` +
+              "version is published, so remove the label.",
+          ];
+    });
+}
+
 /** @param {Version} left @param {Version} right */
 function sameLine(left, right) {
   return left.major === right.major && left.minor === right.minor;
@@ -427,6 +475,33 @@ function sentenceAround(source, index) {
   }
 
   return source.slice(start, end);
+}
+
+const repositoryBlob = "https://github.com/firstdraft/cli/blob/main/";
+
+/**
+ * Resolves a relative link, or an absolute link to this repository's main branch, to a local file. Packaged
+ * Markdown links unpackaged repository files by absolute URL, so both forms need checking.
+ *
+ * @param {string} sourceFile
+ * @param {string} target
+ * @returns {{file: string, fragment: string | undefined} | undefined}
+ */
+function repositoryLink(sourceFile, target) {
+  const absolute = target.startsWith(repositoryBlob);
+  if (!absolute && isExternalTarget(target)) return undefined;
+
+  const [rawPath, fragment] = (
+    absolute ? target.slice(repositoryBlob.length) : target
+  ).split("#", 2);
+  if (rawPath === undefined || rawPath === "") {
+    return absolute ? undefined : { file: sourceFile, fragment };
+  }
+
+  const file = absolute
+    ? path.join(repository, decodeURIComponent(rawPath))
+    : path.resolve(path.dirname(sourceFile), decodeURIComponent(rawPath));
+  return { file, fragment };
 }
 
 /** @param {string} directory @returns {string[]} */

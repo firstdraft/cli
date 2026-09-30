@@ -30,13 +30,11 @@ if (result.status !== 0) {
   assert.deepEqual(paths, [
     "LICENSE",
     "README.md",
-    "RELEASING.md",
     "SECURITY.md",
     "bin/firstdraft.js",
     "docs/README.md",
     "docs/commands.md",
     "docs/errors.md",
-    "docs/release-history.md",
     "package.json",
     "src/api-authentication.js",
     "src/api-response.js",

@@ -29,6 +29,8 @@ jobs:
           package-manager-cache: false
       - name: Verify tag and source commit
         run: bash scripts/check-release-source.sh
+      - name: Require a changelog entry for this version
+        run: node scripts/check-changelog.js "$GITHUB_REF_NAME"
       - name: Reuse successful CI for this source
         env:
           GH_TOKEN: ${{ github.token }}
