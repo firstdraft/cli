@@ -12,6 +12,10 @@ const PROJECT_ID = "01900000-0000-7000-8000-000000008001";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000008002";
 const PRODUCTION_TOKEN = "canary-production-token";
 const STAGING_TOKEN = "canary-staging-token";
+const CUSTOM = "http://127.0.0.1:4300";
+const SAVED_PRODUCTION_TOKEN = "fd_canary-saved-production-token";
+const SAVED_STAGING_TOKEN = "fd_canary-saved-staging-token";
+const SAVED_CUSTOM_TOKEN = "fd_canary-saved-custom-token";
 const REMOTE_COMMANDS = [
   ["plan", "push"],
   ["plan", "status"],
@@ -198,6 +202,142 @@ test("a custom initial origin retains explicit support and uses its own supplied
   assert.equal(errorEnvelope(result.stderr).status, 401);
 });
 
+test("a saved login authenticates its exact origin when the environment has no token", async (context) => {
+  for (const argv of REMOTE_COMMANDS) {
+    for (const [origin, token] of [
+      [PRODUCTION, SAVED_PRODUCTION_TOKEN],
+      [STAGING, SAVED_STAGING_TOKEN],
+      [CUSTOM, SAVED_CUSTOM_TOKEN],
+    ]) {
+      let requests = 0;
+      const result = await invoke(argv, {
+        cwd: projectDirectory(context, origin),
+        apiToken: "",
+        stagingApiToken: undefined,
+        env: savedLogins(context, {
+          [PRODUCTION]: SAVED_PRODUCTION_TOKEN,
+          [STAGING]: SAVED_STAGING_TOKEN,
+          [CUSTOM]: SAVED_CUSTOM_TOKEN,
+        }),
+        fetchFunction: async (input, init) => {
+          requests += 1;
+          assert.equal(new URL(String(input)).origin, origin);
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            `Bearer ${token}`,
+          );
+          return authenticationProblem();
+        },
+      });
+      assert.equal(requests, 1, argv.join(" "));
+      assert.equal(errorEnvelope(result.stderr).status, 401);
+      assert.doesNotMatch(result.stdout + result.stderr, /canary/);
+    }
+  }
+});
+
+test("an environment token takes precedence over a saved login", async (context) => {
+  for (const argv of REMOTE_COMMANDS) {
+    for (const [origin, token] of [
+      [PRODUCTION, PRODUCTION_TOKEN],
+      [STAGING, STAGING_TOKEN],
+    ]) {
+      let requests = 0;
+      await invoke(argv, {
+        cwd: projectDirectory(context, origin),
+        env: savedLogins(context, {
+          [PRODUCTION]: SAVED_PRODUCTION_TOKEN,
+          [STAGING]: SAVED_STAGING_TOKEN,
+        }),
+        fetchFunction: async (_input, init) => {
+          requests += 1;
+          assert.equal(
+            new Headers(init?.headers).get("authorization"),
+            `Bearer ${token}`,
+          );
+          return authenticationProblem();
+        },
+      });
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test("a saved login never authenticates a different origin", async (context) => {
+  /** @type {[string, Record<string, string>][]} */
+  const cases = [
+    [
+      PRODUCTION,
+      { [STAGING]: SAVED_STAGING_TOKEN, [CUSTOM]: SAVED_CUSTOM_TOKEN },
+    ],
+    [STAGING, { [PRODUCTION]: SAVED_PRODUCTION_TOKEN }],
+    [CUSTOM, { [PRODUCTION]: SAVED_PRODUCTION_TOKEN }],
+  ];
+  for (const argv of REMOTE_COMMANDS) {
+    for (const [origin, saved] of cases) {
+      const result = await invoke(argv, {
+        cwd: projectDirectory(context, origin),
+        apiToken: "",
+        stagingApiToken: "",
+        env: savedLogins(context, saved),
+      });
+      assert.equal(result.status, 1);
+      assert.deepEqual(errorEnvelope(result.stderr), {
+        error: "authentication_required",
+        detail:
+          "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
+      });
+      assert.doesNotMatch(result.stderr, /canary/);
+    }
+  }
+});
+
+test("an unreadable saved login file is treated as no saved login", async (context) => {
+  const configHome = mkdtempSync(path.join(tmpdir(), "firstdraft-saved-"));
+  context.after(() => rmSync(configHome, { recursive: true, force: true }));
+  mkdirSync(path.join(configHome, "firstdraft"));
+  writeFileSync(
+    path.join(configHome, "firstdraft", "credentials.json"),
+    `{"canary": "${SAVED_PRODUCTION_TOKEN}"`,
+  );
+  const result = await invoke(["plan", "push"], {
+    cwd: projectDirectory(context, PRODUCTION),
+    apiToken: "",
+    stagingApiToken: "",
+    env: { XDG_CONFIG_HOME: configHome },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(errorEnvelope(result.stderr).error, "authentication_required");
+  assert.doesNotMatch(result.stderr, /canary/);
+});
+
+/**
+ * @param {import("node:test").TestContext} context
+ * @param {Record<string, string>} tokens
+ */
+function savedLogins(context, tokens) {
+  const configHome = mkdtempSync(path.join(tmpdir(), "firstdraft-saved-"));
+  context.after(() => rmSync(configHome, { recursive: true, force: true }));
+  mkdirSync(path.join(configHome, "firstdraft"));
+  writeFileSync(
+    path.join(configHome, "firstdraft", "credentials.json"),
+    JSON.stringify({
+      format: "firstdraft.cli-credentials/1",
+      origins: Object.fromEntries(
+        Object.entries(tokens).map(([origin, token]) => [
+          origin,
+          {
+            access_token: token,
+            token_type: "Bearer",
+            created_at: "2026-09-29T12:00:00.000Z",
+          },
+        ]),
+      ),
+    }),
+  );
+  return { XDG_CONFIG_HOME: configHome };
+}
+
 /** @param {import("node:test").TestContext} context @param {string} [origin] */
 function projectDirectory(context, origin) {
   const cwd = mkdtempSync(path.join(tmpdir(), "firstdraft-environment-"));
@@ -230,6 +370,7 @@ async function invoke(argv, options = {}) {
     stderr: { write: (text) => (stderr += text) },
     apiToken: PRODUCTION_TOKEN,
     stagingApiToken: STAGING_TOKEN,
+    env: { XDG_CONFIG_HOME: "/nonexistent/firstdraft-test-config" },
     fetchFunction: async () => assert.fail("No network request was expected"),
     ...options,
   });

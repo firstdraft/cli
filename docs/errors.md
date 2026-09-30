@@ -7,7 +7,8 @@ This page owns handled-error interpretation, retry safety, and recovery guidance
 
 Every handled subcommand failure ends with exactly one JSON object on standard error. `plan compile` may first write
 progress lines; machine consumers can remove only lines beginning with the exact `First Draft: ` prefix and parse the
-remaining JSON document. Branch on the stable `error` value rather than the human-readable `detail`.
+remaining JSON document. `login` may first write its human-readable authorization instructions; its JSON object
+starts on the line after them. Branch on the stable `error` value rather than the human-readable `detail`.
 
 Handled output never includes command arguments, local Plan bytes, raw artifact bytes, raw filesystem or network
 errors, or unvalidated response bodies. `local_state_not_saved` is the sole exception to private-state redaction:
@@ -21,10 +22,42 @@ saved origin. Push and Compile also reject any URL override that differs from th
 override or use a separate initialized project directory for the other environment; do not redirect existing
 private Project state. Status and retained download commands continue using their pin.
 
-`authentication_required` means the selected environment's token is missing or rejected. Staging requires
-`FIRSTDRAFT_STAGING_API_TOKEN`, including old staging Projects with no flag. Production and custom origins require
-`FIRSTDRAFT_API_TOKEN`. The CLI never substitutes one for the other. Obtain or refresh the credential from the
-same environment, then follow the command's recovery instructions below.
+`authentication_required` means the selected environment's token is missing or rejected. Staging uses
+`FIRSTDRAFT_STAGING_API_TOKEN`, including old staging Projects with no flag. Production and custom origins use
+`FIRSTDRAFT_API_TOKEN`. When that variable is unset, the token saved by `firstdraft login` for the exact origin is
+used. The CLI never substitutes one environment's credential for another's. Run `firstdraft login` for the same
+environment (with `--staging` or the same `FIRSTDRAFT_API_URL`), or refresh the environment token, then follow the
+command's recovery instructions below. If a saved login is rejected, run `firstdraft login` again.
+
+## Login and logout errors
+
+`login` and `logout` never print a token. A local credential failure can occur after the server has issued or revoked a token.
+
+- `authorization_denied`: the approval was denied in the browser. Run `firstdraft login` again to retry.
+- `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before
+  approval. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
+- `login_failed`: the login could not be completed. `reason`, when present, is the server's OAuth error code (for
+  example `invalid_grant` for a used, expired, or mismatched code), `loopback_unavailable` when the local listener
+  could not start, `credentials_invalid` / `credentials_unavailable` when the credentials file could not be read or
+  written, or `credentials_locked` when another command held its lock for 10 seconds. `status` is the HTTP status
+  when one was received. Credentials failures include `credentials_path` and `phase`. With `phase: "read"`, no
+  request was made; repair or remove the file and retry. With `phase: "write"`, First Draft issued a token but the
+  CLI could not save it. Revoke that new token on the selected origin's `/api-tokens` page, then repair the
+  credentials file and retry login. Any previously saved token remains unchanged when the replacement fails.
+- `logout_failed`: the credentials file could not be read or updated. It carries `reason`, `credentials_path`,
+  and `phase`. With `phase: "read"`, no token was revoked or removed; repair or remove the file and retry. With
+  `phase: "write"`, local removal failed after the revocation attempt. `revoked: true` means First Draft confirmed
+  revocation; repair the file and retry logout to remove the stale entry. `revoked: false` means revocation was not
+  confirmed, so the token may still be active; revoke it on the selected origin's `/api-tokens` page, then repair
+  the file and retry logout. Preserve entries for other origins when repairing the file.
+- With reason `credentials_locked`, from either command: wait for any other `firstdraft` command to finish and
+  retry. If none is running, the lock was left by a command that exited mid-update; delete `credentials.json.lock`
+  next to `credentials_path` instead of repairing the file, and retry. The CLI never removes the lock itself,
+  because it cannot tell an abandoned lock from one another command has just taken.
+
+`invalid_configuration` from `login` or `logout` means `--staging` conflicts with `FIRSTDRAFT_API_URL`, or the URL is
+invalid. A logout whose server revocation is not confirmed still succeeds after removing the local entry. It
+writes a note on standard error; revoke the token on `/api-tokens` if it may still be active.
 
 ## Ambiguous mutations
 
@@ -123,7 +156,10 @@ stopped without following the replacement.
 | Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                               |
 | `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                            |
 | Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                        |
-| Network commands                             | `authentication_required`                                                                          |    1 | The token is missing or First Draft returned a validated authentication problem.                       |
+| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.               |
+| `login`                                      | `login_failed`                                                                                     |    1 | Nothing was saved; `phase: "write"` means a token was issued ([recovery](#login-and-logout-errors)).   |
+| `logout`                                     | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).      |
+| Network commands                             | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                       |
 | Plan commands, `compilation *`               | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                                |
 | Status, Compile, Compilation commands        | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                         |
 | `plan push`, `plan compile`                  | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.        |

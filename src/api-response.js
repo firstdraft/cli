@@ -55,6 +55,18 @@ export const SERVICE_ROUTES = {
     method: "GET",
     path: "/v1/projects/{project_id}/github-publication",
   },
+  requestOAuthToken: {
+    method: "POST",
+    path: "/oauth/token",
+  },
+  requestDeviceAuthorization: {
+    method: "POST",
+    path: "/oauth/device_authorization",
+  },
+  revokeOAuthToken: {
+    method: "POST",
+    path: "/oauth/revoke",
+  },
 };
 
 /** @typedef {{method: string, url: URL}} ServiceEndpoint */

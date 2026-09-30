@@ -8,7 +8,9 @@ import {
 } from "./application-identity.js";
 import {
   ApiAuthenticationRequiredError,
+  STAGING_API_URL,
   authenticateApiCommand,
+  environmentTokenFor,
   isAuthenticationProblem,
 } from "./api-authentication.js";
 import {
@@ -42,6 +44,14 @@ import {
   compilePlanToGitHub,
   compilePlanToDirectory,
 } from "./commands/plan-compile.js";
+import {
+  LoginDeniedError,
+  LoginExpiredError,
+  LoginFailedError,
+  login,
+  resolveLoginOrigin,
+} from "./commands/login.js";
+import { LogoutFailedError, logout } from "./commands/logout.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
   PublicationCancelledError,
@@ -70,6 +80,7 @@ import {
   PlanStatusTimeoutError,
   readPlanStatus,
 } from "./commands/plan-status.js";
+import { storedTokenReader } from "./credentials.js";
 import { isFileSystemError } from "./file-system.js";
 import { createPlanCompileProgressReporter } from "./plan-compile-progress.js";
 import { isUuidV7 } from "./plan-state.js";
@@ -85,6 +96,8 @@ Usage:
 Commands:
   compilation  Inspect and download Compilations
   generate     Generate local values
+  login        Log in to First Draft and save a token
+  logout       Revoke and remove the saved token
   plan         Work with Foundation Plans
 
 Options:
@@ -275,6 +288,45 @@ Provide at least one of --application-key or --name. The command derives a
 missing key from the name or a missing display name from the key.
 `;
 
+const LOGIN_HELP = `First Draft CLI
+
+Usage:
+  firstdraft login [--interactive]
+
+Options:
+      --staging      Log in to staging
+  -i, --interactive  Approve with a code on another device (no local browser)
+      --device       Same as --interactive
+  -h, --help         Show help
+
+Environment:
+  FIRSTDRAFT_API_URL  Log in to a custom API origin
+  XDG_CONFIG_HOME     Credentials directory base (default: ~/.config)
+
+By default the command prints a URL to open in a browser on this machine, then
+waits up to five minutes for First Draft to redirect to a one-time listener on
+127.0.0.1. The token is saved for the selected origin in
+firstdraft/credentials.json under the configuration directory and is never
+printed. Token environment variables take precedence over a saved login.
+`;
+
+const LOGOUT_HELP = `First Draft CLI
+
+Usage:
+  firstdraft logout
+
+Options:
+      --staging  Log out of staging
+  -h, --help     Show help
+
+Environment:
+  FIRSTDRAFT_API_URL  Log out of a custom API origin
+
+The command asks First Draft to revoke the saved token for the selected origin,
+then removes it from the credentials file even if revocation is not confirmed.
+Token environment variables are not changed.
+`;
+
 const ROOT_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft --help' for usage.\n";
 const ROOT_UNKNOWN_COMMAND =
@@ -304,7 +356,23 @@ const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
   "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
 const AUTHENTICATION_REQUIRED_DETAIL =
-  "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.";
+  "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.";
+const LOGIN_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft login --help' for usage.";
+const LOGOUT_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft logout --help' for usage.";
+const LOGIN_DENIED_DETAIL =
+  "The login was denied in the browser. No credential was saved. Run 'firstdraft login' again to retry.";
+const LOGIN_EXPIRED_DETAIL =
+  "The login was not approved before it expired. No credential was saved. Run 'firstdraft login' again to retry.";
+const LOGIN_FAILED_DETAIL =
+  "The login could not be completed. No credential was saved. Run 'firstdraft login' again, or use 'firstdraft login --interactive' if this machine has no browser.";
+const LOGIN_CREDENTIALS_DETAIL =
+  "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login' again.";
+const CREDENTIALS_LOCKED_RECOVERY =
+  "if no other firstdraft command is running, delete credentials.json.lock next to credentials_path";
+const LOGOUT_FAILED_DETAIL =
+  "The credentials file could not be read, so no token was revoked or removed. Repair or remove it, then retry.";
 const PLAN_STATUS_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan status --help' for usage.";
 const PLAN_STATUS_LOCAL_INPUT_UNREADABLE_DETAIL =
@@ -445,6 +513,14 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {string} [apiUrl]
  * @property {string} [apiToken]
  * @property {string} [stagingApiToken]
+ * @property {Readonly<Record<string, string | undefined>>} [env] Locates the credentials file (XDG_CONFIG_HOME)
+ * @property {() => string} [homedir]
+ * @property {import("./credentials.js").CredentialsFileSystem} [credentialsFileSystem]
+ * @property {number} [credentialsLockTimeoutMs]
+ * @property {() => string} [hostname]
+ * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [loginSleep]
+ * @property {() => number} [loginNow]
+ * @property {import("./oauth.js").StartLoopbackServer} [startLoopbackServer]
  */
 
 /**
@@ -476,6 +552,11 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {string} [apiToken]
  * @property {string} [stagingApiToken]
  * @property {boolean} [staging]
+ * @property {import("./credentials.js").CredentialStore} [credentials]
+ * @property {() => string} [hostname]
+ * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [loginSleep]
+ * @property {() => number} [loginNow]
+ * @property {import("./oauth.js").StartLoopbackServer} [startLoopbackServer]
  */
 
 /**
@@ -488,6 +569,10 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
 
 /**
  * @typedef {Omit<CommandOptions, "cwd" | "createProjectId" | "createUuid" | "fileSystem" | "createTemporaryId" | "planStatusSleep" | "planStatusNow" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload"> & {cwd?: string, getCwd: () => string}} CompilationCommandOptions
+ */
+
+/**
+ * @typedef {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "fetchFunction" | "createRequestSignal" | "credentials" | "hostname" | "loginSleep" | "loginNow" | "startLoopbackServer" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} LoginCommandOptions
  */
 
 /** @param {RunOptions} options */
@@ -519,9 +604,43 @@ export async function run({
   apiUrl = process.env.FIRSTDRAFT_API_URL,
   apiToken = process.env.FIRSTDRAFT_API_TOKEN,
   stagingApiToken = process.env.FIRSTDRAFT_STAGING_API_TOKEN,
+  env = process.env,
+  homedir,
+  credentialsFileSystem,
+  credentialsLockTimeoutMs,
+  hostname,
+  loginSleep,
+  loginNow,
+  startLoopbackServer,
 }) {
   const staging = argv[0] === "--staging";
   if (staging) argv = argv.slice(1);
+  /** @type {import("./credentials.js").CredentialStore} */
+  const credentials = {
+    env,
+    homedir,
+    fileSystem: credentialsFileSystem,
+    lockTimeoutMs: credentialsLockTimeoutMs,
+  };
+
+  if (argv[0] === "login" || argv[0] === "logout") {
+    return (argv[0] === "login" ? runLogin : runLogout)({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      fetchFunction,
+      createRequestSignal,
+      credentials,
+      hostname,
+      loginSleep,
+      loginNow,
+      startLoopbackServer,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging,
+    });
+  }
 
   if (argv[0] === "generate") {
     return runGenerate({
@@ -561,6 +680,7 @@ export async function run({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -580,6 +700,7 @@ export async function run({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -658,6 +779,7 @@ async function runPlan({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   if (argv[0] === "init") {
     return runPlanInit({
@@ -684,6 +806,7 @@ async function runPlan({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -702,6 +825,7 @@ async function runPlan({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -729,6 +853,7 @@ async function runPlan({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -776,6 +901,7 @@ async function runCompilation({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   if (argv[0] === "status") {
     return runCompilationStatus({
@@ -792,6 +918,7 @@ async function runCompilation({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -808,6 +935,7 @@ async function runCompilation({
       apiToken,
       stagingApiToken,
       staging,
+      credentials,
     });
   }
 
@@ -840,7 +968,7 @@ async function runCompilation({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
  */
 async function runCompilationStatus({
   argv,
@@ -856,6 +984,7 @@ async function runCompilationStatus({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -900,6 +1029,7 @@ async function runCompilationStatus({
       apiToken,
       stagingApiToken,
       staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
     });
     if (authentication === null) {
       writeAuthenticationRequired(stderr);
@@ -925,7 +1055,7 @@ async function runCompilationStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
  */
 async function runCompilationDownload({
   argv,
@@ -939,6 +1069,7 @@ async function runCompilationDownload({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -989,6 +1120,7 @@ async function runCompilationDownload({
       apiToken,
       stagingApiToken,
       staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
     });
     if (authentication === null) {
       writeAuthenticationRequired(stderr);
@@ -1161,6 +1293,257 @@ function writeCompilationReadError(writer, error, throwUnknown = true) {
   return null;
 }
 
+/** @param {LoginCommandOptions} options */
+async function runLogin({
+  argv,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  hostname,
+  loginSleep,
+  loginNow,
+  startLoopbackServer,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        interactive: { type: "boolean", short: "i" },
+        device: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (
+    !parsed ||
+    repeatedValueOption(parsed.tokens) ||
+    (parsed.values.interactive && parsed.values.device)
+  ) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: LOGIN_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(LOGIN_HELP);
+    return 0;
+  }
+
+  const origin = selectLoginOrigin(stderr, {
+    apiUrl,
+    staging: staging || parsed.values.staging,
+  });
+  if (origin === null) return 2;
+
+  try {
+    await login({
+      origin,
+      device: parsed.values.interactive || parsed.values.device,
+      prompt: (text) => stderr.write(text),
+      fetchFunction,
+      createRequestSignal,
+      sleep: loginSleep,
+      now: loginNow,
+      hostname,
+      startLoopback: startLoopbackServer,
+      credentials,
+    });
+  } catch (error) {
+    if (error instanceof LoginDeniedError) {
+      writeJson(stderr, {
+        error: "authorization_denied",
+        detail: LOGIN_DENIED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof LoginExpiredError) {
+      writeJson(stderr, {
+        error: "authorization_expired",
+        detail: LOGIN_EXPIRED_DETAIL,
+      });
+      return 1;
+    }
+
+    if (error instanceof LoginFailedError) {
+      writeJson(stderr, {
+        error: "login_failed",
+        detail:
+          error.credentialsPath === undefined
+            ? LOGIN_FAILED_DETAIL
+            : error.phase === "write"
+              ? `First Draft issued a token, but it could not be saved. Revoke the new token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry login.`
+              : LOGIN_CREDENTIALS_DETAIL,
+        ...(error.phase === undefined ? {} : { phase: error.phase }),
+        ...(error.reason === undefined ? {} : { reason: error.reason }),
+        ...(error.status === undefined ? {} : { status: error.status }),
+        ...(error.credentialsPath === undefined
+          ? {}
+          : { credentials_path: error.credentialsPath }),
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+
+  stdout.write(`Logged in to ${origin}\n`);
+  writeEnvironmentTokenNote(stderr, origin, { apiToken, stagingApiToken });
+  return 0;
+}
+
+/** @param {LoginCommandOptions} options */
+async function runLogout({
+  argv,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: LOGOUT_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(LOGOUT_HELP);
+    return 0;
+  }
+
+  const origin = selectLoginOrigin(stderr, {
+    apiUrl,
+    staging: staging || parsed.values.staging,
+  });
+  if (origin === null) return 2;
+
+  let result;
+  try {
+    result = await logout({
+      origin,
+      fetchFunction,
+      createRequestSignal,
+      credentials,
+    });
+  } catch (error) {
+    if (!(error instanceof LogoutFailedError)) throw error;
+
+    writeJson(stderr, {
+      error: "logout_failed",
+      detail:
+        error.phase === "read"
+          ? LOGOUT_FAILED_DETAIL
+          : error.revoked
+            ? `First Draft confirmed token revocation, but the local credential could not be removed. To remove it, ${credentialsRecovery(error.reason)} and retry logout.`
+            : `First Draft did not confirm token revocation, and the local credential could not be removed. Revoke the token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry logout.`,
+      phase: error.phase,
+      ...(error.revoked === undefined ? {} : { revoked: error.revoked }),
+      reason: error.reason,
+      credentials_path: error.credentialsPath,
+    });
+    return 1;
+  }
+
+  if (!result.stored) {
+    stdout.write(`Not logged in to ${origin}; no saved token was found.\n`);
+  } else {
+    stdout.write(`Logged out of ${origin}\n`);
+    if (result.changed) {
+      stderr.write(
+        `The saved token for ${origin} changed while logout was running, so the current saved token was left in place. Run 'firstdraft logout' again to remove it.\n`,
+      );
+    }
+    if (!result.revoked) {
+      stderr.write(
+        `First Draft did not confirm that the token was revoked. The local copy was removed; revoke the token at ${new URL("/api-tokens", origin).href} if it may still be active.\n`,
+      );
+    }
+  }
+  writeEnvironmentTokenNote(stderr, origin, { apiToken, stagingApiToken });
+  return 0;
+}
+
+/**
+ * The recovery step after a credentials update failed, phrased to follow
+ * "then" in a detail message.
+ *
+ * @param {string | undefined} reason
+ */
+function credentialsRecovery(reason) {
+  return reason === "credentials_locked"
+    ? CREDENTIALS_LOCKED_RECOVERY
+    : "repair the credentials file";
+}
+
+/**
+ * @param {Writer} stderr
+ * @param {{apiUrl?: string, staging?: boolean}} options
+ * @returns {string | null}
+ */
+function selectLoginOrigin(stderr, options) {
+  try {
+    return resolveLoginOrigin(options);
+  } catch (error) {
+    if (!(error instanceof PlanPushConfigurationError)) throw error;
+
+    writeJson(stderr, {
+      error: "invalid_configuration",
+      detail: error.message,
+    });
+    return null;
+  }
+}
+
+/**
+ * @param {Writer} stderr
+ * @param {string} origin
+ * @param {{apiToken?: string, stagingApiToken?: string}} tokens
+ */
+function writeEnvironmentTokenNote(stderr, origin, tokens) {
+  if (environmentTokenFor(origin, tokens) === undefined) return;
+
+  const variable =
+    origin === STAGING_API_URL
+      ? "FIRSTDRAFT_STAGING_API_TOKEN"
+      : "FIRSTDRAFT_API_TOKEN";
+  stderr.write(
+    `Note: ${variable} is set and takes precedence over the saved login for ${origin}.\n`,
+  );
+}
+
 /**
  * @param {GenerateCommandOptions} options
  */
@@ -1296,7 +1679,7 @@ function runGenerateApplicationKey({ argv, stdout, stderr }) {
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
  */
 async function runPlanPush({
   argv,
@@ -1311,6 +1694,7 @@ async function runPlanPush({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1346,6 +1730,7 @@ async function runPlanPush({
       apiToken,
       stagingApiToken,
       staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
     });
     if (authentication === null) {
       writeAuthenticationRequired(stderr);
@@ -1441,7 +1826,7 @@ async function runPlanPush({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
  */
 async function runPlanStatus({
   argv,
@@ -1457,6 +1842,7 @@ async function runPlanStatus({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1493,6 +1879,7 @@ async function runPlanStatus({
       apiToken,
       stagingApiToken,
       staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
     });
     if (authentication === null) {
       writeAuthenticationRequired(stderr);
@@ -1605,7 +1992,7 @@ async function runPlanStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
  */
 async function runPlanCompile({
   argv,
@@ -1630,6 +2017,7 @@ async function runPlanCompile({
   apiToken,
   stagingApiToken,
   staging,
+  credentials,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1676,6 +2064,7 @@ async function runPlanCompile({
       apiToken,
       stagingApiToken,
       staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
     });
     if (authentication === null) {
       writeAuthenticationRequired(stderr);

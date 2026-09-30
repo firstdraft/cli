@@ -669,7 +669,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
   assert.deepEqual(JSON.parse(missing.stderr), {
     error: "authentication_required",
     detail:
-      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
+      "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
   });
   assert.equal(missing.status, 1);
   assert.equal(requests, 0);
@@ -690,7 +690,7 @@ test("missing credentials and a validated 401 use one stable authentication erro
   assert.deepEqual(JSON.parse(rejected.stderr), {
     error: "authentication_required",
     detail:
-      "First Draft authentication is required. Set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
+      "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.",
     status: 401,
     response: {
       type: "about:blank",
