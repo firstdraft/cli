@@ -3,7 +3,7 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.8.x` source line contains the auditable command shell, local Foundation Plan initialization, local
+The current `0.8.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.8.x`
 requires the service's `0.7.x` API contract. The
@@ -11,55 +11,119 @@ requires the service's `0.7.x` API contract. The
 
 ## Command map
 
-| Command                               | Network | Purpose                                                    |
-| ------------------------------------- | ------- | ---------------------------------------------------------- |
-| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity |
-| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation               |
-| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities    |
-| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                  |
-| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis          |
-| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder   |
-| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub           |
-| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                       |
-| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation   |
+| Command                               | Network | Purpose                                                     |
+| ------------------------------------- | ------- | ----------------------------------------------------------- |
+| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity  |
+| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                |
+| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities     |
+| `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin |
+| `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin             |
+| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                   |
+| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis           |
+| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder    |
+| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub            |
+| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                        |
+| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation    |
 
 ## Select an environment and authenticate
 
-Production at `https://firstdraft.com` is the default. Create a token at
-[First Draft](https://firstdraft.com/api-tokens) and provide it through `FIRSTDRAFT_API_TOKEN` when running a network
-command. Keep token values out of shell history and command arguments.
+Production at `https://firstdraft.com` is the default. Log in once per environment:
 
 ```sh
-firstdraft plan push
+firstdraft login
 ```
 
-For staging, create a separate token at [First Draft staging](https://staging.firstdraft.com/api-tokens), provide it
-through `FIRSTDRAFT_STAGING_API_TOKEN`, and select staging on the first remote command:
+The command prints an authorization URL on standard error. Open it in a browser on the same machine, sign in, and
+approve **First Draft CLI**. The CLI then saves a token and prints `Logged in to <origin>` on standard output.
+
+For staging, select it on the login and on the first remote command:
 
 ```sh
+firstdraft --staging login
 firstdraft --staging plan push
 firstdraft plan compile --staging
 ```
 
-`--staging` may precede the command group or appear among a remote command's options. It selects
-`https://staging.firstdraft.com`. `plan init` and `generate` remain local; a global flag on a local command does not
-save an environment selection. The first successful push, including the push within `plan compile`, pins the API
-origin in `.firstdraft/state.json`.
+### How login works
+
+The default login uses the OAuth 2.0 authorization code flow with PKCE (`S256`) and a loopback redirect
+(RFC 8252). The CLI listens on `127.0.0.1` at an ephemeral port for one `GET /callback`, sends a random `state`
+and code challenge, and waits up to five minutes. Only a callback with the exact `state` is accepted. Requests
+for other paths, with a missing or different `state`, or with another `Host` get an error page and do not end
+the wait, so a stray local request can neither inject a code nor cancel the login. The first matching callback
+closes the listener and shows a page that says you can close the tab. The CLI then exchanges the single-use code
+and its PKCE verifier at `POST /oauth/token`. The token never appears in a URL.
+
+On a machine without a browser, such as an SSH session or a container, use the device flow (RFC 8628):
+
+```sh
+firstdraft login --interactive   # also -i or --device
+```
+
+The CLI prints a verification URL, a short user code, and a URL that already includes the code. Open either URL on
+any device, confirm the code, and approve. The CLI polls at the server's interval, adds five seconds when asked to
+slow down, and stops when the code expires.
+
+Both flows send this machine's hostname as the device name shown on the approval page and in the token's name on
+`/api-tokens`. A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
+`authorization_expired`. Other failures exit with `login_failed`. No credential is saved unless the login succeeds.
+See [Errors and recovery](errors.md#login-and-logout-errors).
+
+### Saved credentials
+
+The token is saved in `$XDG_CONFIG_HOME/firstdraft/credentials.json`, or `~/.config/firstdraft/credentials.json`
+when `XDG_CONFIG_HOME` is unset or not absolute. The directory is created with mode `0700`. The file is written
+with mode `0600` through a temporary file and an atomic rename. Each update holds `credentials.json.lock` in the
+same directory from its read to its rename, so concurrent commands cannot drop each other's entries. An update
+waits up to 10 seconds for another command's lock, then fails with reason `credentials_locked`. The CLI never removes
+a lock by itself: if no other `firstdraft` command is running, the lock was left by one that exited mid-update, and
+you can delete it. The file stores one entry per exact origin, so production, staging, and local development logins
+can exist side by side. Logging in again to the same origin replaces its
+entry. Run `firstdraft logout` first if the old token should also be revoked. The CLI never prints a saved token or
+writes it to `.firstdraft`.
+
+`firstdraft logout` (or `firstdraft --staging logout`) asks First Draft to revoke the saved token for the selected
+origin through `POST /oauth/revoke`. It then removes the local entry even when revocation cannot be confirmed; in
+that case it says so on standard error, and you can revoke the token on `/api-tokens`. With nothing saved, it
+reports that and exits 0. If a newer login saved a different token for the origin while revocation was pending,
+logout keeps that token and says so on standard error. If the local update fails after revocation, logout exits with `logout_failed` and reports
+whether revocation was confirmed; see [Errors and recovery](errors.md#login-and-logout-errors). Logout never changes
+token environment variables.
+
+### Environment tokens
+
+Tokens from the environment still work and take precedence over a saved login. Create one on
+[First Draft](https://firstdraft.com/api-tokens) and provide it through `FIRSTDRAFT_API_TOKEN`. For staging, create a
+separate token at [First Draft staging](https://staging.firstdraft.com/api-tokens) and provide it through
+`FIRSTDRAFT_STAGING_API_TOKEN`. Keep token values out of shell history and command arguments. `login` and `logout`
+note on standard error when an environment token will override the saved login.
+
+### Origins and projects
+
+`--staging` may precede the command group or appear among a remote command's options, including `login` and
+`logout`. It selects `https://staging.firstdraft.com`. `plan init` and `generate` remain local; a global flag on a
+local command does not save an environment selection. The first successful push, including the push within
+`plan compile`, pins the API origin in `.firstdraft/state.json`.
 
 Existing Projects keep their pinned origin with or without the flag. A CLI upgrade does not migrate a Project or its
 credentials. A staging flag that disagrees with a Project's pin stops before any request.
 To work with another environment, initialize a separate project directory and submit the Plan there; do not edit
 the existing Project's private state to redirect it.
 
-`FIRSTDRAFT_API_URL` remains available for an initial custom HTTPS origin or loopback HTTP development server.
-`--staging` together with a different URL is an error; the equivalent normalized staging URL is allowed. Later
-pushes and compilation reject an override that differs from the pin. Read-only status and retained download
-commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflict with an explicit `--staging`.
+`FIRSTDRAFT_API_URL` remains available for an initial custom HTTPS origin or loopback HTTP development server, and
+it also selects the origin for `login` and `logout`, for example `FIRSTDRAFT_API_URL=http://127.0.0.1:3000
+firstdraft login`. `--staging` together with a different URL is an error; the equivalent normalized staging URL is
+allowed. Later pushes and compilation reject an override that differs from the pin. Read-only status and retained
+download commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflict with an explicit
+`--staging`.
 
-Every remote command selects credentials from its effective origin: the exact `https://staging.firstdraft.com`
-origin requires `FIRSTDRAFT_STAGING_API_TOKEN`; production and custom origins use `FIRSTDRAFT_API_TOKEN`. Neither
-token is a fallback for the other. This includes existing staging Projects and retained status or artifact reads,
-even when no flag is supplied.
+Every remote command selects credentials from its effective origin. First it uses the environment: the exact
+`https://staging.firstdraft.com` origin uses `FIRSTDRAFT_STAGING_API_TOKEN`; production and custom origins use
+`FIRSTDRAFT_API_TOKEN`. When that variable is unset or empty, it uses the token saved by `firstdraft login` for that
+exact origin. No token is a fallback for a different origin: neither environment variable substitutes for the other,
+and a saved login for one origin never authenticates another. This includes existing staging Projects and retained
+status or artifact reads, even when no flag is supplied. An unreadable or malformed credentials file counts as no
+saved login.
 
 The CLI sends the selected token as a Bearer credential on every API request. It does not save it in `.firstdraft`,
 print it, or require it for local commands. Revoke a token in the environment that issued it if it is exposed. A
@@ -402,8 +466,10 @@ contents, and digests without claiming POSIX mode bits. The declared and streame
 
 ## Service endpoints
 
-The CLI calls these Service API routes at the origin pinned for the Project. Every request sends the selected token
-as a Bearer credential, refuses redirects, and has a bounded timeout. Each request takes its method and path from one
+The CLI calls these Service API routes. The `/v1` routes go to the origin pinned for the Project and send the
+selected token as a Bearer credential. The `/oauth` routes go to the origin selected for `login` or `logout` and
+send form-encoded OAuth parameters without a Bearer credential. Every request refuses redirects and has a bounded
+timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
 `SERVICE_ROUTES` differ, or when no file in `src/` uses a declared route.
 
@@ -416,15 +482,21 @@ as a Bearer credential, refuses redirects, and has a bounded timeout. Each reque
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact` | Download that Compilation's artifact |
 | `PUT`  | `/v1/projects/{project_id}/github-publication`                     | Start or rejoin the Publication      |
 | `GET`  | `/v1/projects/{project_id}/github-publication`                     | Poll or reconcile the Publication    |
+| `POST` | `/oauth/token`                                                     | Exchange a login grant for a token   |
+| `POST` | `/oauth/device_authorization`                                      | Start a device-flow login            |
+| `POST` | `/oauth/revoke`                                                    | Revoke a saved token                 |
 
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
+`login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
+`/oauth/device_authorization` and then polls `/oauth/token`. `logout` calls `/oauth/revoke`. The browser, not the
+CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 
 The first push sends `If-None-Match: *`. Later pushes, the Compilation `POST`, and the Publication `PUT` send the
 saved Head ETag in `If-Match`. The Service also has a Compilation cancel route, which the CLI does not call.
 
-These routes belong to the API-contract range that `release/compatibility.json` accepts. The CLI does not read the
+The `/v1` routes belong to the API-contract range that `release/compatibility.json` accepts. The CLI does not read the
 Service's `FirstDraft-API-Contract` response header. Instead, the Service's release compatibility check compares the
 declared ranges before a release. The Service documents the routes in its Foundation Plan machine reference,
 `docs/architecture/reference/README.md` in the private `firstdraft/firstdraft` repository.

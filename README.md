@@ -76,8 +76,8 @@ To exercise the checkout directly:
 node bin/firstdraft.js --help
 ```
 
-Remote commands default to production and read `FIRSTDRAFT_API_TOKEN`. Use `firstdraft --staging plan compile`
-and a separate `FIRSTDRAFT_STAGING_API_TOKEN` for staging. Existing Projects retain their saved origin. See
+Remote commands default to production. Run `firstdraft login` (or `firstdraft --staging login`) once, or set
+`FIRSTDRAFT_API_TOKEN` / `FIRSTDRAFT_STAGING_API_TOKEN`. Existing Projects retain their saved origin. See
 [environment selection](docs/commands.md#select-an-environment-and-authenticate) for custom URLs and credential
 isolation. Keep tokens out of arguments, shell history, fixtures, snapshots, and logs.
 
@@ -98,7 +98,7 @@ The published package:
 - runs reviewed JavaScript source directly;
 - has no runtime dependencies or install scripts;
 - performs no telemetry, update check, or network request unless the caller invokes an API command;
-- reads Bearer credentials only from the environment; and
+- reads Bearer credentials from the environment or its private `firstdraft login` credentials file; and
 - carries npm provenance linking registry bytes to its GitHub workflow and commit.
 
 The package includes this README, the documentation map, the command and error references, and the security

@@ -17,6 +17,8 @@ Usage:
 Commands:
   compilation  Inspect and download Compilations
   generate     Generate local values
+  login        Log in to First Draft and save a token
+  logout       Revoke and remove the saved token
   plan         Work with Foundation Plans
 
 Options:

@@ -5,20 +5,13 @@ export const STAGING_API_URL = "https://staging.firstdraft.com";
 export class ApiAuthenticationRequiredError extends Error {}
 
 /**
- * @param {object} options
- * @param {typeof globalThis.fetch} [options.fetchFunction]
- * @param {string} [options.apiToken]
- * @param {string} [options.stagingApiToken]
- * @param {string} [options.apiUrl]
- * @param {boolean} [options.staging]
+ * Rejects `--staging` together with a FIRSTDRAFT_API_URL that names another
+ * origin.
+ *
+ * @param {string | undefined} apiUrl
+ * @param {boolean} staging
  */
-export function authenticateApiCommand({
-  fetchFunction,
-  apiToken,
-  stagingApiToken,
-  apiUrl,
-  staging = false,
-}) {
+export function assertStagingSelection(apiUrl, staging) {
   if (
     staging &&
     apiUrl !== undefined &&
@@ -28,9 +21,48 @@ export function authenticateApiCommand({
       "--staging conflicts with FIRSTDRAFT_API_URL. Unset it or select the staging origin.",
     );
   }
+}
+
+/**
+ * Selects the environment token for an origin: staging uses its own variable,
+ * production and custom origins share FIRSTDRAFT_API_TOKEN.
+ *
+ * @param {string} origin
+ * @param {{apiToken?: string, stagingApiToken?: string}} tokens
+ */
+export function environmentTokenFor(origin, { apiToken, stagingApiToken }) {
+  const token = origin === STAGING_API_URL ? stagingApiToken : apiToken;
+  return hasToken(token) ? token : undefined;
+}
+
+/**
+ * @param {object} options
+ * @param {typeof globalThis.fetch} [options.fetchFunction]
+ * @param {string} [options.apiToken]
+ * @param {string} [options.stagingApiToken]
+ * @param {string} [options.apiUrl]
+ * @param {boolean} [options.staging]
+ * @param {() => Readonly<Record<string, string>>} [options.readStoredTokens]
+ *   Stored `firstdraft login` tokens keyed by exact origin. Consulted only when
+ *   the environment has no token for the requested origin.
+ */
+export function authenticateApiCommand({
+  fetchFunction,
+  apiToken,
+  stagingApiToken,
+  apiUrl,
+  staging = false,
+  readStoredTokens = () => ({}),
+}) {
+  assertStagingSelection(apiUrl, staging);
 
   const configured = staging ? STAGING_API_URL : apiUrl;
-  if (!hasToken(apiToken) && !hasToken(stagingApiToken)) return null;
+  if (
+    !hasToken(apiToken) &&
+    !hasToken(stagingApiToken) &&
+    !Object.values(readStoredTokens()).some(hasToken)
+  )
+    return null;
 
   let selectedOrigin = staging ? STAGING_API_URL : undefined;
   const request = fetchFunction ?? globalThis.fetch;
@@ -43,8 +75,9 @@ export function authenticateApiCommand({
       );
     }
     const token =
-      endpoint.origin === STAGING_API_URL ? stagingApiToken : apiToken;
-    if (!hasToken(token)) throw new ApiAuthenticationRequiredError();
+      environmentTokenFor(endpoint.origin, { apiToken, stagingApiToken }) ??
+      storedToken(readStoredTokens(), endpoint.origin);
+    if (token === undefined) throw new ApiAuthenticationRequiredError();
     selectedOrigin = endpoint.origin;
     return request(input, {
       ...init,
@@ -57,7 +90,16 @@ export function authenticateApiCommand({
   return { apiUrl: configured, fetchFunction: authorizedFetch };
 }
 
-/** @param {string | undefined} token */
+/** @param {Readonly<Record<string, string>>} tokens @param {string} origin */
+function storedToken(tokens, origin) {
+  const token = Object.hasOwn(tokens, origin) ? tokens[origin] : undefined;
+  return hasToken(token) ? token : undefined;
+}
+
+/**
+ * @param {string | undefined} token
+ * @returns {token is string}
+ */
 function hasToken(token) {
   return token !== undefined && token.trim().length > 0;
 }

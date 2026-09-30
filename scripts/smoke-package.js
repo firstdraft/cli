@@ -28,6 +28,7 @@ const [planFormat] = JSON.parse(
 ).requires.foundation_plan_formats;
 const temporaryDirectory = mkdtempSync(path.join(tmpdir(), "firstdraft-cli-"));
 const installationDirectory = path.join(temporaryDirectory, "installation");
+const configHome = path.join(temporaryDirectory, "config");
 const packedExecutable = path.join(
   installationDirectory,
   "node_modules",
@@ -262,6 +263,25 @@ try {
       "Invalid arguments. Run 'firstdraft compilation status --help' for usage.",
   });
 
+  const invalidLogin = spawnPackedCli(
+    ["login", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidLogin, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft login --help' for usage.",
+  });
+
+  const emptyLogout = spawnPackedCli(["logout"], installationDirectory, {
+    FIRSTDRAFT_API_TOKEN: "",
+  });
+  assert.equal(emptyLogout.status, 0);
+  assert.equal(
+    emptyLogout.stdout,
+    "Not logged in to https://firstdraft.com; no saved token was found.\n",
+  );
+  assert.equal(emptyLogout.stderr, "");
+
   exercisePackedEnvironmentSelection(temporaryDirectory);
   await exercisePackedCompilation(projectDirectory);
 } finally {
@@ -309,6 +329,7 @@ function spawnPackedCli(arguments_, cwd = process.cwd(), environment = {}) {
       FIRSTDRAFT_API_URL: undefined,
       FIRSTDRAFT_API_TOKEN: apiToken,
       FIRSTDRAFT_STAGING_API_TOKEN: "",
+      XDG_CONFIG_HOME: configHome,
       ...environment,
     },
   });
@@ -326,6 +347,7 @@ async function spawnPackedCliAsync(arguments_, cwd) {
       FIRSTDRAFT_API_URL: undefined,
       FIRSTDRAFT_API_TOKEN: apiToken,
       FIRSTDRAFT_STAGING_API_TOKEN: "",
+      XDG_CONFIG_HOME: configHome,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
