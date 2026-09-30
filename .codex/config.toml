@@ -1,0 +1,6 @@
+[marketplaces.cross-review]
+source_type = "git"
+source = "https://github.com/raghubetina/cross-review.git"
+
+[plugins."claude-review@cross-review"]
+enabled = true

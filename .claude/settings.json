@@ -1,0 +1,18 @@
+{
+  "extraKnownMarketplaces": {
+    "cross-review": {
+      "source": {
+        "source": "github",
+        "repo": "raghubetina/cross-review"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "codex-review@cross-review": true
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  }
+}
