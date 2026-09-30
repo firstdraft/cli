@@ -4,7 +4,7 @@ firstdraft is the command-line client shared by First Draft agents and automatio
 files, calls the versioned Service API, exposes reviewed analysis and GapSets, materializes verified Compilations,
 and coordinates private GitHub publication.
 
-Start with the [local development guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e):
+Start with the [local development guide](https://firstdraft.github.io/firstdraft/docs/guides/local-app.html):
 install the CLI and Skill, then compile into your current folder with `firstdraft plan compile --output .`. No Drawing Board
 clone or GitHub push is required. The [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft)
 is the Codespaces fallback.

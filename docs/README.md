@@ -5,7 +5,7 @@ evidence for implemented behavior; if they contradict a document, surface the co
 
 | Task                             | Read first                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Local app development            | [Local guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e)              |
+| Local app development            | [Local guide](https://firstdraft.github.io/firstdraft/docs/guides/local-app.html)                |
 | Codespaces fallback              | [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft) |
 | Installation or package contract | [Root README](../README.md)                                                                      |
 | Commands, Service API, or output | [Command reference](commands.md); [add a command](commands.md#add-a-command)                     |
