@@ -33,21 +33,21 @@ repository owns the exact command and transport behavior between them.
 | Change the CLI                       | [Agent instructions](https://github.com/firstdraft/cli/blob/main/AGENTS.md), then [documentation map](docs/README.md) |
 | Find a command or output contract    | [Command reference](docs/commands.md)                                                                                 |
 | Interpret an error or recover safely | [Errors and recovery](docs/errors.md)                                                                                 |
-| Prepare or publish a package         | [Release runbook](RELEASING.md)                                                                                       |
-| Inspect dated package observations   | [Release history](docs/release-history.md)                                                                            |
+| Prepare or publish a package         | [Release runbook](https://github.com/firstdraft/cli/blob/main/RELEASING.md)                                           |
+| See what changed in a version        | [Changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md)                                                 |
 | Report a vulnerability               | [Security policy](SECURITY.md)                                                                                        |
 
 Run firstdraft --help or a command group's --help for concise terminal syntax.
 
 ## Repository layout
 
-| Path     | Responsibility                                                |
-| -------- | ------------------------------------------------------------- |
-| bin/     | Published executable entrypoint                               |
-| src/     | Commands, API client, local Plan state, and output contracts  |
-| test/    | Command, protocol, recovery, and package tests                |
-| scripts/ | Test runner, package checks, and version sync                 |
-| docs/    | Command, error, release-history, and maintainer documentation |
+| Path     | Responsibility                                                              |
+| -------- | --------------------------------------------------------------------------- |
+| bin/     | Published executable entrypoint                                             |
+| src/     | Commands, API client, local Plan state, and output contracts                |
+| test/    | Command, protocol, recovery, and package tests                              |
+| scripts/ | Test runner, package checks, and version sync                               |
+| docs/    | Documentation map, command and error references, and frozen release history |
 
 ## Development
 
@@ -88,8 +88,8 @@ The published CLI supports Node.js 22 or newer. Direct automation callers can in
 npm install --global @firstdraft.com/cli
 ```
 
-Pin an exact compatible version when a repeatable installation matters; [RELEASING.md](RELEASING.md) owns channel
-and release meaning.
+Pin an exact compatible version when a repeatable installation matters. The
+[changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 
 The published package:
 
@@ -100,11 +100,7 @@ The published package:
 - reads Bearer credentials only from the environment; and
 - carries npm provenance linking registry bytes to its GitHub workflow and commit.
 
-Inspect the packed file list whenever a source or documentation path moves. The public documentation graph,
-including the release runbook and dated release history, ships with the package. `AGENTS.md` and the source-only
-`release/compatibility.json` do not.
-
-## Release boundary
-
-Merging source is not package publication. An approved coordinated release publishes directly to `latest`, reusing
-successful CI for the exact source. [RELEASING.md](RELEASING.md) owns the short release and recovery procedure.
+The package includes this README, the documentation map, the command and error references, and the security
+policy. Repository files for maintainers stay out of it: `AGENTS.md`, the release runbook, the changelog, the
+release history, and the source-only `release/compatibility.json`. Inspect the packed file list whenever a source or
+documentation path moves.

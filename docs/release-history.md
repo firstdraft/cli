@@ -1,9 +1,10 @@
 # First Draft CLI release history
 
-This page preserves dated release and registry observations. It is historical evidence, not a statement of current
-npm, GitHub, service, or qualification state. Before acting, recheck the registry, protected tags, exact source SHA,
-compatibility declarations, trusted-publisher relationship, and named release-specific qualification by following
-the living [release policy and runbook](../RELEASING.md).
+**Status:** Historical, frozen 2026-09-30.
+
+This page preserves dated release and registry observations from the alpha publications through CLI 0.4.0. It is no
+longer updated and does not describe current npm, GitHub, service, or qualification state. Versions prepared after
+it was frozen have entries in [CHANGELOG.md](../CHANGELOG.md). [RELEASING.md](../RELEASING.md) describes publication.
 
 ## 0.4.0 local-output release
 

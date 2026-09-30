@@ -9,9 +9,10 @@
   },
   "files": [
     "bin",
-    "docs",
+    "docs/README.md",
+    "docs/commands.md",
+    "docs/errors.md",
     "src",
-    "RELEASING.md",
     "SECURITY.md"
   ],
   "engines": {

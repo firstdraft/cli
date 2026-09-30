@@ -1,85 +1,64 @@
 # Releasing First Draft CLI
 
-An approved coordinated release publishes directly to npm's `latest` channel. Tests and review belong before merge;
-publication reuses successful CI for the exact source. It does not repeat the suite or require a second
-`next`-to-`latest` promotion. Dated observations remain in [release history](docs/release-history.md).
+This page covers the mechanics of publishing `@firstdraft.com/cli` to npm. The service repository coordinates each
+release of the Service, this CLI, and the Skills plugin, and it owns the approval and smoke policy. A merge alone
+does not authorize publication.
 
-A merge alone does not authorize publication. Obtain one approval for the intended coordinated release, or use the
-approval already given for that scope. The existing GitHub `npm` environment protection still applies; its approval
-executes the same release decision. Do not ask for another conversational approval between already-approved steps.
+## Versions
 
-## Version and compatibility policy
+Before `1.0.0`, raise `MINOR` for a breaking change and `PATCH` for a backward-compatible one. npm never accepts a
+published version twice, and a pushed `v<version>` tag must not move. A fix after tagging therefore takes a new
+version.
 
-Before `1.0.0`, use ordinary `0.MINOR.PATCH` versions: increase `MINOR` for a breaking compatibility-line change and
-`PATCH` for a backward-compatible change within that line. Never reuse a published version or move a protected
-release tag. An unpublished, untagged candidate can retain its proposed version while its source changes.
-The published version may remain in source during documentation and test maintenance; recording its release history
-does not require preparing another version. Choose an unused version when preparing the next publication.
+`release/compatibility.json` declares the package version, the accepted API-contract range, and the accepted Plan
+formats. The tests validate it, and it stays out of the npm package. `firstdraft/skills` pins an exact CLI revision
+and version and keeps a copy of the package file list. Skills updates all three when it bundles a new CLI version.
 
-CLI `0.8.x` requires API `0.7.x`, Plan `firstdraft.foundation-plan.sketch/0.23`, and target
-`rails-sketch/2026-09-bookmark-assets`. This breaking contract retires `application.pwa`; the Rails target retains
-ordinary bookmark assets and metadata without a Plan switch. Earlier Plan formats and target profiles are not
-accepted for artifact materialization. Existing applications and old Plans are not migrated.
+## Prepare the version pull request
 
-Align the Service and Skills companions before publishing a CLI version that changes this contract. Source
-checks and packed-package smokes do not establish a published or deployed tuple. Staging continues to require
-`FIRSTDRAFT_STAGING_API_TOKEN`, including existing pinned Projects. Production remains the default and uses
-`FIRSTDRAFT_API_TOKEN`, as do custom origins.
+1. Set the version:
 
-Local output is the default: `firstdraft plan compile` is equivalent to `firstdraft plan compile --output .`,
-with GitHub publication selected by explicit `--github`. The root archive is `.firstdraft/design`.
+   ```sh
+   npm version <x.y.z> --no-git-tag-version --ignore-scripts=false
+   ```
 
-`release/compatibility.json` declares the package version, accepted API-contract range, and accepted Plan formats.
-It is source-only metadata, validated by the normal test suite and absent from the npm tarball. Coordinate the
-explicit CLI comparator and bundled CLI pin in `firstdraft/skills` when this version changes. The service's
-`script/release_compatibility_check` compares the three exact revisions; compatibility establishes eligibility,
-not authorization or runtime proof. Its closed `firstdraft.release-compatibility/1` format rejects unknown keys.
+   npm updates `package.json` and `package-lock.json`. The package's `version` lifecycle then copies the version
+   into `release/compatibility.json`. The last flag is required because `.npmrc` sets `ignore-scripts=true`. If it
+   was left off, run `node scripts/sync-version.js --apply`.
 
-## Prepare before merge
+2. Add the version's entry to [CHANGELOG.md](CHANGELOG.md): a `## <x.y.z>` heading, then what changed and what
+   callers need to do. `node scripts/check-changelog.js` confirms the entry.
+3. Run `npm ci --ignore-scripts`, `npm audit`, and `npm run check`. CI also fails when the version has no tag and
+   no changelog entry.
+4. Merge, then wait for the `CI` push run on `main` to pass. Publication reuses that run.
 
-1. Set the version with `npm version <x.y.z> --no-git-tag-version --ignore-scripts=false`. npm updates `package.json`
-   and `package-lock.json`, and the package's `version` script copies the version into `release/compatibility.json`.
-   The last flag is required because `.npmrc` sets `ignore-scripts=true`, which also skips that script. If it was
-   omitted, run `node scripts/sync-version.js --apply`. Then align the Skills CLI requirement.
-2. Update the command, error, and Skill guidance affected by the change. When onboarding changes, coordinate the
-   [local guide](https://gist.github.com/raghubetina/3d424a97a1eaa6de8c406e67f32a237e) publication from the Service's
-   `docs/guides/local-app.md` before the new CLI reaches `latest`. Preserve dated release evidence.
-3. Run focused checks while developing and the repository's required CI for the merge candidate. For a fresh
-   checkout, the complete local check is `npm ci --ignore-scripts`, `npm audit`, then `npm run check`.
-4. Review and merge the change. Wait for the existing `CI` workflow to pass for the selected `main` SHA; publication
-   uses that run instead of starting another one.
+## Publish
 
-Use existing smoke evidence when it covers the changed behavior. If changed CLI/Service/Skill behavior warrants a
-live smoke, use a simple Plan, compile locally with `firstdraft plan compile --output .`, and boot the generated app locally
-when runtime behavior changed. A CLI dispatch-only change can be covered by local command and packed-package tests.
-Do not require Codespaces, GitHub Publication, native builds, or Revyl for a routine release. Codespaces is a fallback
-development environment. Additional integration checks belong only to changes affecting those integrations.
+1. Tag the merged commit and push the tag:
 
-## Publish the approved source
+   ```sh
+   git tag v<x.y.z> <sha>
+   git push origin v<x.y.z>
+   ```
 
-From a clean checkout of the selected `main` revision:
+   Push one release tag at a time. The workflow's concurrency group keeps one pending run and cancels an older one.
 
-1. Confirm the exact package version and `v<package-version>` tag are both unused. If either identity is already
-   consumed, prepare the next version required by the pre-1.0 policy rather than moving or reusing it.
-2. Confirm the intended three revisions are compatible and the coordinated release approval covers them.
-3. Create and push `v<package-version>` at that source revision. Push one release tag at a time; the workflow
-   serializes publication and GitHub retains at most one pending run in a concurrency group.
-4. Approve the existing `npm` environment deployment for that tag. The workflow publishes with provenance under
-   `latest`; no separate dist-tag mutation is needed.
+2. The tag starts the [publish workflow](.github/workflows/publish.yml). Its `verify` job requires:
+   - a protected `v*` tag that names the `package.json` version and still points at the pushed commit;
+   - a commit in the first-parent history of `main`;
+   - a successful `CI` push run for that exact commit;
+   - an entry for the version in CHANGELOG.md; and
+   - the exact package file list.
 
-The workflow requires a protected `v*` tag in `firstdraft/cli`, the matching `package.json` version, an unchanged
-remote tag, and a commit in the first-parent history of protected `main`. It finds a successful `CI` push run for
-that exact SHA using `gh run list`, checks the package file allowlist, then rechecks mutable refs after environment
-approval. It does not install development dependencies, rerun tests or audit, or request interactive npm login.
-Both source checks invoke `scripts/check-release-source.sh`; the postapproval invocation must remain before publish.
+3. Approve the pending `npm` environment deployment in the workflow run. The `publish` job rechecks the tag and
+   `main`, then publishes to `latest` with provenance. It does not install development dependencies or rerun tests.
 
-If CI is still running, let that run finish and rerun the failed publication verification job. Resolve failing
-checks in CI itself; publication does not start a duplicate suite. A source fix after tagging requires a new version.
-Do not retest unrelated surfaces merely because time has passed since merge.
+If `verify` fails because CI was still running, let CI finish and rerun the failed job. Fix a failing check in CI
+itself; publication never starts a second test run.
 
 ## Verify and recover
 
-After publication, inspect the registry before retrying a failed workflow; the immutable version may already exist:
+Check the registry before retrying a failed publication, because the version may already exist:
 
 ```sh
 FD_CLI_RELEASE_VERSION="$(node -p "require('./package.json').version")"
@@ -88,33 +67,33 @@ npm view "@firstdraft.com/cli@$FD_CLI_RELEASE_VERSION" \
 npm dist-tag ls '@firstdraft.com/cli'
 ```
 
-Confirm the intended version is `latest` and has integrity/provenance metadata. Install that exact version in a
-temporary prefix, confirm `firstdraft --version`, and run `npm audit signatures` there to verify the published
-artifact. This checks distribution; it does not repeat application qualification. Record the version, source,
-package integrity, and any relevant smoke evidence in the dated release record.
+Confirm that `latest` selects the version and that the version has integrity and provenance metadata. Install that
+exact version into a temporary prefix, check `firstdraft --version`, and run `npm audit signatures` there.
 
-If OIDC authentication fails, reconcile the registry version and protected tag before retrying. Correct a broken
-trusted-publisher relationship when necessary, then rerun failed jobs at the existing tag. If the tagged workflow
-identity itself is wrong, prepare a new version; never move the tag or add a persistent-token fallback.
+If OIDC authentication fails, reconcile the registry version and the tag before retrying. Correct a broken
+trusted-publisher relationship if needed, then rerun the failed jobs at the same tag. If the tagged workflow itself
+is wrong, prepare a new version. Never move the tag or add a persistent npm token.
 
-For a bad release, move `latest` to a known-good compatible version as an incident rollback, or deprecate the bad
-version and publish a corrected higher version. Unpublishing is exceptional incident response, not routine rollback.
+For a bad release, deprecate the version and publish a corrected higher one. Alternatively, move `latest` back to a
+known-good version with the [dist-tag repair](https://github.com/firstdraft/skills/blob/main/docs/dist-tag-repair.md)
+procedure. Unpublishing is exceptional incident response.
 
 ## Publisher configuration
 
-These are durable repository and npm controls, not a per-release account audit. Verify them when provisioning,
-changing publisher configuration, or diagnosing an actual failure:
+These repository and npm settings are durable. Check them when provisioning, when changing publisher configuration,
+or when diagnosing a failure, not on every release.
 
-- `firstdraft/cli` is public; `main` requires pull requests and CI, and a `v*` ruleset restricts tag mutation.
-- The `npm` GitHub environment is limited to release tags, requires its existing reviewer, disables administrator
-  bypass, and defines `NPM_RELEASE_ENABLED=true`.
+- `firstdraft/cli` is public. `main` requires pull requests and the `CI` checks.
+- The `v*` tag rulesets limit tag creation to organization administrators. They block deleting a tag and moving it
+  to a commit that does not descend from its current one.
+- The `npm` GitHub environment accepts only `v*` tags, requires its reviewer, disallows administrator bypass, and
+  defines `NPM_RELEASE_ENABLED=true`.
 - npm trusted publishing identifies package `@firstdraft.com/cli`, repository `firstdraft/cli`, workflow
-  `publish.yml`, environment `npm`, and permission `createPackage`. The publishing account retains the intended
-  organization access and write-protecting 2FA. Configure these with an administrator only when needed.
-- Publication runs on a GitHub-hosted runner with `id-token: write`, pinned Node.js 24.18.0 and npm 11.16.0. npm's
+  `publish.yml`, environment `npm`, and permission `createPackage`. The publishing account keeps its organization
+  access and write-protecting 2FA. Change these with an administrator only when needed.
+- Publication runs on a GitHub-hosted runner with `id-token: write`, Node.js 24.18.0, and npm 11.16.0. npm's
   short-lived OIDC exchange is the only publication credential; no persistent npm token or Actions secret is used.
   The CI lookup uses GitHub's read-only workflow token.
 
-Ordinary installation and use require no npm login. Ordinary trusted publication requires no local maintainer
-login or per-release security-key ceremony. Request npm interaction only when npm requires it for a governance
-change or an actual authentication failure. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+Installing and using the package requires no npm login. Trusted publication requires no local maintainer login or
+per-release security-key ceremony. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).

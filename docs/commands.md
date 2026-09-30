@@ -6,8 +6,8 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 The current `0.8.x` source line contains the auditable command shell, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.8.x`
-requires the service's `0.7.x` API contract. See the [release policy](../RELEASING.md) for versioning and channel
-semantics and [release history](release-history.md) for the transition from prereleases.
+requires the service's `0.7.x` API contract. The
+[changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 
 ## Command map
 
@@ -486,8 +486,10 @@ Use this checklist when a change adds a command or subcommand. Each step names t
      `firstdraft/skills` with its CLI pin.
 6. **Review it.** New command names, flags, `error` values, and exit statuses need the independent review named in
    `AGENTS.md`.
-7. **Version it.** Choose the next version with the [version policy](../RELEASING.md#version-and-compatibility-policy)
-   and apply it with the [version step](../RELEASING.md#prepare-before-merge). If the command needs a route or
-   response that the accepted API range lacks, the Service ships it first under a new API-contract version. Then
-   raise `requires.api_contract` in `release/compatibility.json`, and align the Skills CLI requirement. Because the
-   CLI does not read the contract header, an older Service rejects the new route as not found.
+7. **Version it.** Choose the next version with the
+   [version rule](https://github.com/firstdraft/cli/blob/main/RELEASING.md#versions), and apply it with the
+   [version pull request](https://github.com/firstdraft/cli/blob/main/RELEASING.md#prepare-the-version-pull-request)
+   steps. If the command needs a route or response that the accepted API range lacks, the Service ships it first
+   under a new API-contract version. Then raise `requires.api_contract` in `release/compatibility.json`, and align
+   the Skills CLI requirement. Because the CLI does not read the contract header, an older Service rejects the new
+   route as not found.

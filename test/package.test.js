@@ -12,6 +12,10 @@ const publishWorkflow = await readFile(
   new URL("../.github/workflows/publish.yml", import.meta.url),
   "utf8",
 );
+const ciWorkflow = await readFile(
+  new URL("../.github/workflows/ci.yml", import.meta.url),
+  "utf8",
+);
 const releaseSourceScript = await readFile(
   new URL("../scripts/check-release-source.sh", import.meta.url),
   "utf8",
@@ -24,9 +28,10 @@ test("package metadata preserves the audited runtime boundary", () => {
   assert.deepEqual(metadata.bin, { firstdraft: "bin/firstdraft.js" });
   assert.deepEqual(metadata.files, [
     "bin",
-    "docs",
+    "docs/README.md",
+    "docs/commands.md",
+    "docs/errors.md",
     "src",
-    "RELEASING.md",
     "SECURITY.md",
   ]);
   assert.equal(metadata.scripts.test, "node scripts/run-tests.js");
@@ -76,6 +81,25 @@ test("publication reuses successful exact-source CI instead of rerunning the sui
   assert.doesNotMatch(
     publishWorkflow,
     /npm ci|npm audit|npm run check|npm test/,
+  );
+});
+
+test("CI and publication require a changelog entry for the version", () => {
+  const verifyJob = workflowJob(publishWorkflow, "verify");
+  const tagCheck = 'node scripts/check-changelog.js "$GITHUB_REF_NAME"';
+  assert.ok(
+    verifyJob.includes(tagCheck),
+    "verify must check the tag's changelog entry",
+  );
+  assert.ok(
+    verifyJob.indexOf("bash scripts/check-release-source.sh") <
+      verifyJob.indexOf(tagCheck),
+    "the tag must match package.json before its changelog entry is checked",
+  );
+  assert.match(
+    workflowJob(ciWorkflow, "quality"),
+    /node scripts\/check-changelog\.js "\$version"/,
+    "CI must check the entry before the version is tagged",
   );
 });
 

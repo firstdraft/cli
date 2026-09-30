@@ -54,3 +54,15 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm audit
       - run: npm run check
+      # A missing entry found at tag time would cost the tagged version, so check it before the tag exists.
+      - name: Require a changelog entry for an untagged version
+        run: |
+          set -euo pipefail
+          version="$(node --print 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8")).version')"
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null || status=$?
+          case "$status" in
+            0) echo "v$version is tagged, so this check does not apply." ;;
+            2) node scripts/check-changelog.js "$version" ;;
+            *) exit "$status" ;;
+          esac
