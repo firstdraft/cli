@@ -1,0 +1,28 @@
+name: Docs line
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  docs-line:
+    name: Docs line
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require a Docs line in the pull request body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          body="$(printf '%s\n' "$BODY" | tr -d '\r' | perl -0777 -pe 's/<!--.*?-->//gs')"
+          if grep -qF 'Docs: updated … / Docs: none, because …' <<< "$body"; then
+            echo "::error::Replace the template's Docs placeholder with one of its two forms."
+            exit 1
+          fi
+          if ! grep -qE '^Docs: (updated|none, because) .*[[:alnum:]]' <<< "$body"; then
+            echo "::error::Add a line to the pull request body: 'Docs: updated <what>' or 'Docs: none, because <reason>'."
+            exit 1
+          fi
