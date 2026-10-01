@@ -1,10 +1,10 @@
 # Contributing
 
-This page covers checks, commit messages, pull requests, independent review, and landing for the First Draft CLI.
-[AGENTS.md](AGENTS.md) routes agent work and lists the changes that need independent review; the
-[documentation map](docs/README.md) routes everything else. The commit, pull request, review, and landing rules
-below also apply in `firstdraft/skills` and the private service repository, `firstdraft/firstdraft`. When you change
-one of them, change it in all three `CONTRIBUTING.md` pages.
+This page covers checks, commit messages, pull requests, independent review, landing, and maintenance for the
+First Draft CLI. [AGENTS.md](AGENTS.md) routes agent work and lists the changes that need independent review; the
+[documentation map](docs/README.md) routes everything else. The commit, pull request, review, landing, and
+maintenance rules below also apply in `firstdraft/skills` and the private service repository,
+`firstdraft/firstdraft`. When you change one of them, change it in all three `CONTRIBUTING.md` pages.
 
 ## Checks
 
@@ -33,10 +33,13 @@ it commits.
 
 ## Pull requests
 
-The pull request body carries:
+The pull request body carries one line: `Docs: updated X` or `Docs: none, because ...`. The
+[`Docs line`](.github/workflows/pr-docs-line.yml) check fails until the body has one, and it skips pull requests
+that a bot such as Dependabot opens.
 
-- a summary of what changed and why;
-- one line: `Docs: updated X` or `Docs: none, because ...`; and
+The body also carries:
+
+- a summary of what changed and why; and
 - when [AGENTS.md](AGENTS.md) requires independent review, one line, `Review: <reviewer>, session <id>, <verdict>`,
   with the findings left out.
 
@@ -69,9 +72,9 @@ codex plugin add claude-review@cross-review
 
 To run a review:
 
-1. Start a `new` session over the branch, such as `new branch main`, or over an explicit range with
-   `new range <base>..<head>`. When an instruction-policy change is the only reason for review, run that one session
-   with `--effort high` instead of the default `max`.
+1. Start a `new` session over the branch (`new branch main`) or an explicit range (`new range <base>..<head>`).
+   When an instruction-policy change is the only reason for review, run that one session with `--effort high`
+   instead of the default `max`.
 2. Pass the service repository's `docs/review-focus.md` with `--focus-file`, from a sibling `firstdraft/firstdraft`
    checkout or fetched into the ignored `tmp/`:
 
@@ -81,13 +84,16 @@ To run a review:
      -H 'Accept: application/vnd.github.raw' > tmp/review-focus.md
    ```
 
-   List the affected surfaces after `--`.
+   After `--`, name the claims the change affects: the specific statements and pages, such as the owners in the
+   `Docs:` line and the facts the change alters. The reviewer checks whether each still holds. Give the reviewer the
+   diff and affected behavior, not an author verdict to repeat.
 
-3. When the review finishes, the host agent runs `cite` and checks each finding against the cited lines before
-   relaying it.
-4. Record each decision after `--` as `reject F-...: reason`, `accept F-...`, or `defer F-...`. Re-review an
-   amendment only when it does more than apply accepted findings, in the same session with
-   `range <reviewed-head>..HEAD`.
+3. The host runs `cite` and classifies each finding before relaying it.
+4. Record decisions as `reject F-...: reason`, `accept F-...`, or `defer F-...`. A later re-review in the same
+   session covers only the amendment (`range <reviewed-head>..HEAD`).
+
+Fix feedback in coherent amendments. Re-review an amendment only when it does more than apply accepted findings;
+that follow-up covers the extra change and its affected consumers.
 
 Do not merge while a required review is still running. Review third-party changes, such as Dependabot or outside
 pull requests, with `--capability read-only`.
@@ -101,3 +107,13 @@ report the repository and the exact merged SHA.
 
 A merge does not release anything. [RELEASING.md](RELEASING.md) covers publication, which the service repository
 coordinates.
+
+## Maintenance
+
+At each new model release, or quarterly if none comes first, the owner prunes instructions and documentation checks
+in all three repositories: `firstdraft/firstdraft`, `firstdraft/skills`, and `firstdraft/cli`.
+
+- Test each line of every `AGENTS.md`: would an agent get a task wrong if the line were gone? If not, delete it. In
+  Claude Code, `/doctor prompt-audit` also suggests lines to cut.
+- Shrink each exceptions list, such as `docs/owner-shape-exceptions.json` in `firstdraft/firstdraft`.
+- Delete any documentation check that caught nothing that tests or review would not have caught.
