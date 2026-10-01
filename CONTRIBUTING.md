@@ -101,5 +101,5 @@ in all three repositories: `firstdraft/firstdraft`, `firstdraft/skills`, and `fi
 
 - Test each line of every `AGENTS.md`: would an agent get a task wrong if the line were gone? If not, delete it. In
   Claude Code, `/doctor prompt-audit` also suggests lines to cut.
-- Shrink each exceptions list, such as `docs/owner-shape-exceptions.json` in `firstdraft/firstdraft`.
+- Shrink each exceptions list, such as `currencyBaseline` in `firstdraft/skills`.
 - Delete any documentation check that caught nothing that tests or review would not have caught.
