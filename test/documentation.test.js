@@ -141,12 +141,7 @@ test("living documentation names only current version identities", () => {
 
   for (const [file, source] of sources) {
     const name = path.relative(repository, file);
-    if (
-      name === "CHANGELOG.md" ||
-      name === path.join("docs", "release-history.md")
-    ) {
-      continue;
-    }
+    if (name === "CHANGELOG.md") continue;
 
     findings.push(...staleVersionFindings(name, source, identities));
 
