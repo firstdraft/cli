@@ -30,13 +30,6 @@ evidence for implemented behavior; if they contradict a document, surface the co
 Start here, then load the one owning document for the task. Follow a cross-link only when the task crosses an
 authority boundary. Create another page only for a distinct audience, task, or authority.
 
-The documentation tests cap `AGENTS.md` at 2 KiB, the root README at 6 KiB, and this map at 4 KiB. They also
-require every public topic to be reachable from this map or the root README. They check relative links, links to
-this repository's `main` on GitHub, and their fragments. Outside the changelog and release history, they reject
-retired version identities and release-status labels on the current version. They also reject status labels in
-changelog headings. The package check verifies that relative links in packaged Markdown resolve inside the package;
-packaged pages link other files on GitHub.
-
 ## Work on the repository
 
 Development uses Node.js 24.18.0 and npm 11.16.0, pinned in `.tool-versions`. From a fresh checkout:

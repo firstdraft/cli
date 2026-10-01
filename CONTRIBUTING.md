@@ -53,22 +53,8 @@ reviews from Claude Code, and Claude Code reviews from Codex. Install both and s
 and `codex login`). In Claude Code, ask for a Codex review or run `/codex-review:codex-review`; in Codex, use
 `$claude-review`. Neither is a shell command.
 
-- **Claude Code:** the tracked `.claude/settings.json` registers the cross-review marketplace and enables
-  `codex-review`. It loads once you accept the workspace-trust prompt for the main checkout; linked worktrees use
-  that trust. A headless `claude -p` run loads it only where you have already trusted the checkout.
-- **Codex:** the tracked `.codex/config.toml` declares the marketplace and enables `$claude-review` in a trusted
-  project. The first trusted session fetches the plugin and the next one loads it;
-  `codex plugin marketplace upgrade cross-review` fetches it at once. In the Codex desktop app, quit and reopen it
-  after the first fetch.
-
-If the tracked configuration does not load a plugin, install it yourself:
-
-```sh
-claude plugin marketplace add raghubetina/cross-review
-claude plugin install codex-review@cross-review
-codex plugin marketplace add raghubetina/cross-review
-codex plugin add claude-review@cross-review
-```
+The tracked `.claude/settings.json` and `.codex/config.toml` enable both plugins once you trust the main checkout,
+and linked worktrees inherit that trust. The cross-review README covers installing them by hand.
 
 To run a review:
 

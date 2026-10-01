@@ -42,13 +42,13 @@ Run firstdraft --help or a command group's --help for concise terminal syntax.
 
 ## Repository layout
 
-| Path     | Responsibility                                                              |
-| -------- | --------------------------------------------------------------------------- |
-| bin/     | Published executable entrypoint                                             |
-| src/     | Commands, API client, local Plan state, and output contracts                |
-| test/    | Command, protocol, recovery, and package tests                              |
-| scripts/ | Test runner, package checks, and version sync                               |
-| docs/    | Documentation map, command and error references, and frozen release history |
+| Path     | Responsibility                                               |
+| -------- | ------------------------------------------------------------ |
+| bin/     | Published executable entrypoint                              |
+| src/     | Commands, API client, local Plan state, and output contracts |
+| test/    | Command, protocol, recovery, and package tests               |
+| scripts/ | Test runner, package checks, and version sync                |
+| docs/    | Documentation map and command and error references           |
 
 ## Development
 
@@ -102,6 +102,5 @@ The published package:
 - carries npm provenance linking registry bytes to its GitHub workflow and commit.
 
 The package includes this README, the documentation map, the command and error references, and the security
-policy. Repository files for maintainers stay out of it: `AGENTS.md`, the release runbook, the changelog, the
-release history, and the source-only `release/compatibility.json`. Inspect the packed file list whenever a source or
-documentation path moves.
+policy. Repository files for maintainers stay out of it: `AGENTS.md`, the release runbook, the changelog, and the
+source-only `release/compatibility.json`. Inspect the packed file list whenever a source or documentation path moves.
