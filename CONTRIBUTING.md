@@ -70,7 +70,8 @@ codex plugin add claude-review@cross-review
 To run a review:
 
 1. Start a `new` session over the branch, such as `new branch main`, or over an explicit range with
-   `new range <base>..<head>`.
+   `new range <base>..<head>`. When an instruction-policy change is the only reason for review, run that one session
+   with `--effort high` instead of the default `max`.
 2. Pass the service repository's `docs/review-focus.md` with `--focus-file`, from a sibling `firstdraft/firstdraft`
    checkout or fetched into the ignored `tmp/`:
 
@@ -84,8 +85,9 @@ To run a review:
 
 3. When the review finishes, the host agent runs `cite` and checks each finding against the cited lines before
    relaying it.
-4. Record each decision after `--` as `reject F-...: reason`, `accept F-...`, or `defer F-...`. Review an amendment
-   in the same session with `range <reviewed-head>..HEAD`.
+4. Record each decision after `--` as `reject F-...: reason`, `accept F-...`, or `defer F-...`. Re-review an
+   amendment only when it does more than apply accepted findings, in the same session with
+   `range <reviewed-head>..HEAD`.
 
 Do not merge while a required review is still running. Review third-party changes, such as Dependabot or outside
 pull requests, with `--capability read-only`.
