@@ -19,7 +19,7 @@ it was frozen have entries in [CHANGELOG.md](../CHANGELOG.md). [RELEASING.md](..
   the local root, and passed local Rails boot, browser creation, and source-edit refresh. Existing warnings and gaps
   remained disclosed. No Codespace, GitHub Publication, native build, or Revyl session was part of this release smoke.
 - Plugin `0.4.0` bundles this exact CLI source. Its publication workflow matched all 27 files with the registry CLI.
-  The [plugin release record](https://github.com/firstdraft/skills/blob/main/evidence/2026-09-22-plugin-0.4.0-release.md)
+  The [plugin release record](https://github.com/firstdraft/skills/blob/archive/evidence-2026-10-01/evidence/2026-09-22-plugin-0.4.0-release.md)
   records the companion package, catalog, and post-publication Drawing Board follow-up.
 
 ## 0.1.0 alpha publications
