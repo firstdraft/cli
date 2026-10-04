@@ -17,6 +17,8 @@ import {
   CompilationArtifactInvalidError,
   CompilationArtifactResponseInvalidError,
   CompilationArtifactUnavailableError,
+  CompilationCancelRejectedError,
+  CompilationCancelUnavailableError,
   CompilationCancelledError,
   CompilationChangedError,
   CompilationFailedError,
@@ -32,6 +34,7 @@ import {
   CompilationStatusInvalidError,
   CompilationStatusUnavailableError,
   CompilationTimeoutError,
+  cancelCompilation,
   downloadCompilation,
   readCompilation,
 } from "./commands/compilation.js";
@@ -94,7 +97,7 @@ Usage:
   firstdraft [options]
 
 Commands:
-  compilation  Inspect and download Compilations
+  compilation  Inspect, download, and cancel Compilations
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
@@ -230,6 +233,7 @@ Usage:
 Commands:
   status    Read one retained Compilation
   download  Download one successful Compilation artifact
+  cancel    Cancel one queued or running Compilation
 
 Options:
   -h, --help  Show help
@@ -272,6 +276,25 @@ The command reads the retained Compilation once, requires it to have
 succeeded, downloads and verifies its exact artifact once, and atomically
 materializes it into an absent output path or adopts the current directory
 while preserving existing material under .firstdraft/design. It never starts work.
+`;
+
+const COMPILATION_CANCEL_HELP = `First Draft CLI
+
+Usage:
+  firstdraft compilation cancel <compilation-id>
+
+Options:
+      --staging  Use staging; reject a different saved origin
+  -h, --help     Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command asks First Draft once to cancel a queued or running Compilation of
+the local Project and prints the cancelled Compilation. Cancelling it again
+prints the same result; a succeeded or failed Compilation is not changed.
+Once cancelled, it no longer blocks plan push or plan compile.
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI
@@ -446,6 +469,8 @@ const COMPILATION_STATUS_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft compilation status --help' for usage.";
 const COMPILATION_DOWNLOAD_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft compilation download --help' for usage.";
+const COMPILATION_CANCEL_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft compilation cancel --help' for usage.";
 const COMPILATION_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state. No network request was made.";
 const COMPILATION_NOT_PUSHED_DETAIL =
@@ -460,6 +485,12 @@ const COMPILATION_TIMEOUT_DETAIL =
   "The retained Compilation is still processing after the bounded ten-minute wait.";
 const COMPILATION_NOT_SUCCEEDED_DETAIL =
   "The requested Compilation has not succeeded, so no artifact was downloaded.";
+const COMPILATION_CANCEL_REJECTED_DETAIL =
+  "First Draft rejected the cancellation, so nothing was cancelled. response.code compilation_not_cancellable means the Compilation already succeeded or failed; compilation_not_found or project_not_found means First Draft found no such Compilation for this Project and account.";
+const COMPILATION_CANCEL_UNAVAILABLE_DETAIL =
+  "Could not confirm the cancellation. Cancelling again is safe: rerun 'firstdraft compilation cancel', or check the Compilation with 'firstdraft compilation status'.";
+const COMPILATION_CANCEL_INVALID_DETAIL =
+  "First Draft returned an invalid response to the cancellation, so its outcome is unconfirmed. Check the Compilation with 'firstdraft compilation status'; retrying unchanged will not repair this protocol mismatch.";
 const COMPILATION_ARTIFACT_UNAVAILABLE_DETAIL =
   "Could not download the requested Compilation artifact. No files were materialized.";
 const COMPILATION_ARTIFACT_INVALID_DETAIL =
@@ -939,6 +970,23 @@ async function runCompilation({
     });
   }
 
+  if (argv[0] === "cancel") {
+    return runCompilationCancel({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd: cwd ?? getCwd(),
+      fetchFunction,
+      planPushFileSystem,
+      createRequestSignal,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging,
+      credentials,
+    });
+  }
+
   const parsed = parseArguments(() =>
     parseArgs({
       args: [...argv],
@@ -1200,6 +1248,120 @@ async function runCompilationDownload({
       return 1;
     }
 
+    throw error;
+  }
+}
+
+/**
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ */
+async function runCompilationCancel({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  fetchFunction,
+  planPushFileSystem,
+  createRequestSignal,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+  credentials,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeCompilationInvalidArguments(
+      stderr,
+      COMPILATION_CANCEL_INVALID_ARGUMENTS_DETAIL,
+    );
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(COMPILATION_CANCEL_HELP);
+    return 0;
+  }
+
+  const [compilationId] = parsed.positionals;
+  if (parsed.positionals.length !== 1 || !isUuidV7(compilationId)) {
+    writeCompilationInvalidArguments(
+      stderr,
+      COMPILATION_CANCEL_INVALID_ARGUMENTS_DETAIL,
+    );
+    return 2;
+  }
+
+  try {
+    const authentication = authenticateApiCommand({
+      fetchFunction,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
+    });
+    if (authentication === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+    const result = await cancelCompilation({
+      cwd,
+      compilationId,
+      fetchFunction: authentication.fetchFunction,
+      fileSystem: planPushFileSystem,
+      createRequestSignal,
+    });
+    writeJson(stdout, result);
+    return 0;
+  } catch (error) {
+    if (error instanceof CompilationCancelRejectedError) {
+      if (isAuthenticationProblem(error.status, error.response)) {
+        writeAuthenticationRequired(stderr, error.status, error.response);
+        return 1;
+      }
+      writeJson(stderr, {
+        error: "compilation_cancel_rejected",
+        detail: COMPILATION_CANCEL_REJECTED_DETAIL,
+        status: error.status,
+        response: error.response,
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationCancelUnavailableError) {
+      writeJson(stderr, {
+        error: "compilation_cancel_unavailable",
+        detail: COMPILATION_CANCEL_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    if (error instanceof CompilationStatusInvalidError) {
+      writeJson(stderr, {
+        error: "invalid_compilation_status",
+        detail: COMPILATION_CANCEL_INVALID_DETAIL,
+        status: error.status,
+      });
+      return 1;
+    }
+
+    const status = writeCompilationReadError(stderr, error, false);
+    if (status !== null) return status;
     throw error;
   }
 }

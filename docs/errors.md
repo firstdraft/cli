@@ -20,9 +20,9 @@ remain human-readable text on standard error with exit 2. Unexpected programming
 `invalid_configuration` stops before a request when `--staging` conflicts with `FIRSTDRAFT_API_URL` or a Project's
 saved origin. Push and Compile also reject any URL override that differs from that pin. Unset the conflicting
 override or use a separate initialized project directory for the other environment; do not redirect existing
-private Project state. Status and retained download commands continue using their pin.
+private Project state. Status, retained download, and cancel commands continue using their pin.
 
-`authentication_required` means the selected environment's token is missing or rejected. Staging uses
+`authentication_required` means the selected environment's token is missing or rejected with `401`. Staging uses
 `FIRSTDRAFT_STAGING_API_TOKEN`, including old staging Projects with no flag. Production and custom origins use
 `FIRSTDRAFT_API_TOKEN`. When that variable is unset, the token saved by `firstdraft login` for the exact origin is
 used. The CLI never substitutes one environment's credential for another's. Run `firstdraft login` for the same
@@ -130,9 +130,36 @@ operation is safe to remove. After successful adoption, run retained status and 
 
 After `compilation_wait_timed_out`, retained work may still continue. Use
 `firstdraft compilation status <current.compilation.id>` for one read-only status check; do not rerun
-`plan compile`. `compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry the
+`plan compile`. If it stays `queued` or `running`, follow [stuck Compilation recovery](#stuck-compilation-recovery).
+`compilation_failed`, `compilation_cancelled`, and `compilation_changed` already carry the
 validated `current` projection appropriate to their stopping boundary. Authentication recovery may refresh the
 credential, but it must continue from the retained ID rather than starting another Compilation.
+
+## Stuck Compilation recovery
+
+A Project allows one active Compilation. While one is queued or running, `plan push` and `plan compile` report
+`server_rejected` with First Draft's `409 compilation_active` problem in `response`, because the Plan cannot be
+replaced. `plan compile` can also meet it at the Compilation start, as `compilation_start_rejected`. Either problem's
+`response.detail` names the active Compilation's ID.
+
+1. Read that Compilation once with `firstdraft compilation status <id>`. One that has reached `succeeded`, `failed`,
+   or `cancelled` no longer blocks; rerun `plan compile`.
+2. If it is still `queued` or `running` well after a Compilation normally finishes, for example after a
+   `plan compile` wait timed out, cancel it with `firstdraft compilation cancel <id>`. Cancelling throws away any
+   work it is still doing.
+3. After the cancel succeeds, rerun `plan compile`.
+
+Cancel never changes a succeeded or failed Compilation, and repeating it is safe:
+
+- `compilation_cancel_rejected` means First Draft refused and nothing was cancelled; `response.code` says why.
+  `409 compilation_not_cancellable` means the Compilation already succeeded or failed, so it no longer blocks; check
+  it with `compilation status`. `404 compilation_not_found` or `404 project_not_found` means First Draft found no
+  such Compilation for this Project and account. Check the ID, the directory, and that the environment and login
+  match the ones that started it.
+- `compilation_cancel_unavailable` means a network failure, timeout, or server error left the outcome unconfirmed.
+  Rerun `compilation cancel`, or check the result with `compilation status`.
+- `invalid_compilation_status` means the response violated the Compilation contract, so the cancellation may or may
+  not have happened. Check with `compilation status` rather than repeating the unchanged request.
 
 ## Publication recovery
 
@@ -178,6 +205,9 @@ stopped without following the replacement.
 | `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                  |
 | `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                |
 | `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                              |
+| `compilation cancel`                         | `compilation_cancel_rejected`                                                                      |    1 | Nothing was cancelled; `response.code` says why ([recovery](#stuck-compilation-recovery)).             |
+| `compilation cancel`                         | `compilation_cancel_unavailable`                                                                   |    1 | The cancellation could not be confirmed; repeating it is safe.                                         |
+| `compilation cancel`                         | `invalid_compilation_status`                                                                       |    1 | The response violated the Compilation contract; check status before repeating.                         |
 | Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`. |
 | Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.  |
 | Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable. |

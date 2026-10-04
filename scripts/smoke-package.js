@@ -263,6 +263,16 @@ try {
       "Invalid arguments. Run 'firstdraft compilation status --help' for usage.",
   });
 
+  const invalidCancel = spawnPackedCli(
+    ["compilation", "cancel", "not-a-uuid"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidCancel, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft compilation cancel --help' for usage.",
+  });
+
   const invalidLogin = spawnPackedCli(
     ["login", "--canary-secret-option"],
     installationDirectory,
@@ -520,6 +530,14 @@ async function exercisePackedCompilation(projectDirectory) {
       completed_at: "2026-07-30T12:00:02.000000Z",
     },
   };
+  const cancelled = {
+    project: compilation.project,
+    compilation: {
+      ...compilation.compilation,
+      status: "cancelled",
+      artifact: null,
+    },
+  };
   const analysis = {
     project: { id: projectId, graph_version: 1 },
     analysis: {
@@ -590,6 +608,7 @@ async function exercisePackedCompilation(projectDirectory) {
     publication: 0,
     compilationStarts: 0,
     status: false,
+    cancel: false,
     artifact: false,
   };
   const server = createServer(async (request, response) => {
@@ -650,6 +669,13 @@ async function exercisePackedCompilation(projectDirectory) {
     if (request.method === "GET" && request.url === statusPath) {
       seen.status = true;
       respondJson(response, 200, compilation);
+      return;
+    }
+    if (request.method === "POST" && request.url === `${statusPath}/cancel`) {
+      assert.equal(request.headers["if-match"], undefined);
+      assert.equal(requestBody.byteLength, 0);
+      seen.cancel = true;
+      respondJson(response, 200, cancelled);
       return;
     }
     if (request.method === "GET" && request.url === artifactPath) {
@@ -735,6 +761,16 @@ First Draft: Application compiled.
     assert.deepEqual(status, {
       status: 0,
       stdout: `${JSON.stringify(compilation, null, 2)}\n`,
+      stderr: "",
+    });
+
+    const cancel = await spawnPackedCliAsync(
+      ["compilation", "cancel", compilationId],
+      projectDirectory,
+    );
+    assert.deepEqual(cancel, {
+      status: 0,
+      stdout: `${JSON.stringify(cancelled, null, 2)}\n`,
       stderr: "",
     });
 
@@ -852,6 +888,7 @@ First Draft: Application compiled.
       publication: 1,
       compilationStarts: expectedCompilationStarts,
       status: true,
+      cancel: true,
       artifact: true,
     });
   } finally {

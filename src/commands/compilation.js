@@ -131,6 +131,30 @@ export class CompilationStatusInvalidError extends Error {
   }
 }
 
+export class CompilationCancelRejectedError extends Error {
+  /**
+   * @param {number} status
+   * @param {Record<string, unknown>} response
+   */
+  constructor(status, response) {
+    super("First Draft rejected the cancellation.");
+    this.status = status;
+    this.response = response;
+  }
+}
+
+export class CompilationCancelUnavailableError extends Error {
+  /**
+   * @param {number | undefined} status
+   * @param {Record<string, unknown> | null} [response]
+   */
+  constructor(status, response = null) {
+    super("The cancellation could not be confirmed.");
+    this.status = status;
+    this.response = response;
+  }
+}
+
 export class CompilationChangedError extends Error {
   /** @param {CompilationResponse} current */
   constructor(current) {
@@ -359,6 +383,82 @@ export async function downloadCompilation({
   } finally {
     releaseCompilationOutputTarget(outputTarget);
   }
+}
+
+/**
+ * @typedef {object} CompilationCancelOptions
+ * @property {string} cwd
+ * @property {string} compilationId
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
+ * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
+ */
+
+/**
+ * Cancel one queued or running Compilation of the local Project. The Service
+ * answers a repeated cancel with the same cancelled Compilation and refuses a
+ * succeeded or failed one without changing it, so an unconfirmed outcome is
+ * safe to repeat rather than an ambiguous mutation.
+ *
+ * @param {CompilationCancelOptions} options
+ * @returns {Promise<CompilationResponse>}
+ */
+export async function cancelCompilation({
+  cwd,
+  compilationId,
+  fetchFunction = globalThis.fetch,
+  fileSystem,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
+}) {
+  const { apiUrl, projectId } = readContext({ cwd, compilationId, fileSystem });
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.cancelCompilation, apiUrl, {
+    project_id: projectId,
+    compilation_id: compilationId,
+  });
+  let response;
+  let body;
+  try {
+    response = await sendRequest(fetchFunction, endpoint, {
+      headers: { Accept: "application/json, application/problem+json" },
+      redirect: "error",
+      signal: createRequestSignal(REQUEST_TIMEOUT_MS),
+    });
+    body = await readResponseBody(response);
+  } catch (error) {
+    if (error instanceof FirstDraftNetworkError) {
+      throw new CompilationCancelUnavailableError(error.status);
+    }
+    // An oversized error body leaves the outcome as unconfirmed as any other
+    // failed response; only an oversized success breaks the contract.
+    if (error instanceof FirstDraftProtocolError) {
+      throw error.status >= 200 && error.status < 300
+        ? new CompilationStatusInvalidError(error.status)
+        : new CompilationCancelUnavailableError(error.status);
+    }
+
+    throw error;
+  }
+
+  if (response.status !== 200) {
+    if (response.ok) throw new CompilationStatusInvalidError(response.status);
+
+    const problem = safeProblem(response, body);
+    if (problem !== null && response.status !== 408 && response.status < 500) {
+      throw new CompilationCancelRejectedError(response.status, problem);
+    }
+    throw new CompilationCancelUnavailableError(response.status, problem);
+  }
+
+  const parsed = parseCompilationResponse(body, projectId, compilationId);
+  if (
+    responseMediaType(response) !== "application/json" ||
+    parsed === null ||
+    parsed.compilation.status !== "cancelled"
+  ) {
+    throw new CompilationStatusInvalidError(response.status);
+  }
+
+  return parsed;
 }
 
 /**

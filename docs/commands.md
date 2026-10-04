@@ -5,8 +5,8 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 
 The current `0.8.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection. CLI `0.8.x`
-requires the service's `0.7.x` API contract. The
+Compile-and-materialize and private publish orchestration, and retained-Compilation inspection and cancellation.
+CLI `0.8.x` requires the service's `0.7.x` API contract. The
 [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 
 ## Command map
@@ -24,6 +24,7 @@ requires the service's `0.7.x` API contract. The
 | `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub            |
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                        |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation    |
+| `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                |
 
 ## Select an environment and authenticate
 
@@ -113,8 +114,8 @@ the existing Project's private state to redirect it.
 `FIRSTDRAFT_API_URL` remains available for an initial custom HTTPS origin or loopback HTTP development server, and
 it also selects the origin for `login` and `logout`, for example `FIRSTDRAFT_API_URL=http://127.0.0.1:3000
 firstdraft login`. `--staging` together with a different URL is an error; the equivalent normalized staging URL is
-allowed. Later pushes and compilation reject an override that differs from the pin. Read-only status and retained
-download commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflict with an explicit
+allowed. Later pushes and compilation reject an override that differs from the pin. Status, retained download, and
+cancel commands use the pin and ignore `FIRSTDRAFT_API_URL` unless checking its conflict with an explicit
 `--staging`.
 
 Every remote command selects credentials from its effective origin. First it uses the environment: the exact
@@ -464,6 +465,38 @@ POSIX, directories use mode `0755` and files use artifact-declared `0644` or `07
 contents, and digests without claiming POSIX mode bits. The declared and streamed artifact envelope is bounded at
 128 MiB.
 
+## Cancel a stuck Compilation
+
+A Project allows one active Compilation. While it is queued or running, First Draft refuses to replace the Plan or
+start another Compilation with `409 compilation_active`, so `plan push` and `plan compile` fail. If that Compilation
+will not finish, for example because its worker process died, cancel it from the Project's directory:
+
+```sh
+firstdraft compilation cancel 01900000-0000-7000-8000-000000000001
+```
+
+The `compilation_active` problem names the active Compilation's ID in its `response.detail`, and a `plan compile`
+failure after a validated start carries it as `current.compilation.id`. Read the Compilation with
+`compilation status` first. Cancelling one that is still making progress throws away its work, and the next
+`plan compile` starts over.
+
+The command validates the UUID before network access and makes one `POST` to the origin pinned for the Project, with
+that origin's credential. It sends no Plan bytes or precondition header and changes no local state. Success prints
+the validated cancelled Compilation in the same shape as `compilation status`, with `compilation.status` set to
+`cancelled`. First Draft clears the Project's active Compilation, so the next `plan push` or `plan compile` can
+proceed. A worker that finishes later cannot attach an artifact to a cancelled Compilation; stopping that worker is
+best effort.
+
+Cancel is idempotent for queued, running, and cancelled Compilations, so repeating it prints the same cancelled
+Compilation. First Draft never changes a succeeded or failed Compilation: it answers
+`409 compilation_not_cancellable`, which the CLI reports as `compilation_cancel_rejected`. Because a repeat is
+safe, an outcome the CLI cannot confirm is `compilation_cancel_unavailable` rather than `request_outcome_unknown`.
+See [stuck Compilation recovery](errors.md#stuck-compilation-recovery).
+
+If the Compilation was started by `plan compile --github`, Cancel also cancels the Project's Publication. The
+Publication is a Project singleton in this release, so `plan compile --github` cannot start another one for that
+Project.
+
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes go to the origin pinned for the Project and send the
@@ -479,6 +512,7 @@ timeout. Each request takes its method and path from one
 | `GET`  | `/v1/projects/{project_id}/analysis`                               | Read the Head's current analysis     |
 | `POST` | `/v1/projects/{project_id}/compilations`                           | Start a Compilation of the Head      |
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`          | Read one retained Compilation        |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`   | Cancel that Compilation              |
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact` | Download that Compilation's artifact |
 | `PUT`  | `/v1/projects/{project_id}/github-publication`                     | Start or rejoin the Publication      |
 | `GET`  | `/v1/projects/{project_id}/github-publication`                     | Poll or reconcile the Publication    |
@@ -489,12 +523,13 @@ timeout. Each request takes its method and path from one
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
+`compilation cancel` cancels it.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 
-The first push sends `If-None-Match: *`. Later pushes, the Compilation `POST`, and the Publication `PUT` send the
-saved Head ETag in `If-Match`. The Service also has a Compilation cancel route, which the CLI does not call.
+The first push sends `If-None-Match: *`. Later pushes, the Compilation start `POST`, and the Publication `PUT` send
+the saved Head ETag in `If-Match`. The cancel `POST` sends no precondition header.
 
 The `/v1` routes belong to the API-contract range that `release/compatibility.json` accepts. The CLI does not read the
 Service's `FirstDraft-API-Contract` response header. Instead, the Service's release compatibility check compares the
@@ -550,8 +585,7 @@ Use this checklist when a change adds a command or subcommand. Each step names t
 5. **Document it.**
    - In this page, add a row to the [command map](#command-map) and a section for the command. Add a row to
      [Service endpoints](#service-endpoints) for each new route, and name the command in the paragraph below the
-     table. If the command calls a route that section says the CLI does not call, such as Compilation cancel,
-     rewrite that sentence.
+     table.
    - In [errors.md](errors.md#error-index), add an Error index row for each new `error` value. Add recovery guidance
      when retrying the command is safe in a different way than for the existing commands.
    - When the Skill will call the command, update the Skill's CLI references and contract checks in

@@ -23,6 +23,7 @@ const REMOTE_COMMANDS = [
   ["plan", "compile", "--github"],
   ["compilation", "status", COMPILATION_ID],
   ["compilation", "download", COMPILATION_ID, "--output", "application"],
+  ["compilation", "cancel", COMPILATION_ID],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {
@@ -156,11 +157,12 @@ test("staging rejects a conflicting URL or pinned origin before any request", as
   }
 });
 
-test("retained reads ignore an initial URL override when selecting staging credentials", async (context) => {
+test("status and retained Compilation commands ignore an initial URL override when selecting staging credentials", async (context) => {
   for (const argv of [
     REMOTE_COMMANDS[1],
     REMOTE_COMMANDS[4],
     REMOTE_COMMANDS[5],
+    REMOTE_COMMANDS[6],
   ]) {
     assert(argv);
     let requests = 0;
