@@ -15,7 +15,7 @@ Usage:
   firstdraft [options]
 
 Commands:
-  compilation  Inspect and download Compilations
+  compilation  Inspect, download, and cancel Compilations
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token

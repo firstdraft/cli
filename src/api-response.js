@@ -43,6 +43,10 @@ export const SERVICE_ROUTES = {
     method: "GET",
     path: "/v1/projects/{project_id}/compilations/{compilation_id}",
   },
+  cancelCompilation: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/compilations/{compilation_id}/cancel",
+  },
   downloadArtifact: {
     method: "GET",
     path: "/v1/projects/{project_id}/compilations/{compilation_id}/artifact",

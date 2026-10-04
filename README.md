@@ -18,7 +18,7 @@ requires `--github`.
 - conditional whole-document push and conflict reporting;
 - analysis polling and complete GapSet output;
 - direct Compile-and-materialize and private publish orchestration;
-- retained Compilation inspection and artifact download;
+- retained Compilation inspection, cancellation, and artifact download;
 - terminal output, exit status, and recovery contracts;
 - the dependency-free npm package; and
 - package provenance and publication.

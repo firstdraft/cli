@@ -9,6 +9,26 @@ carry no release status. The `v<version>` tag and npm show whether a version is 
 Entries start with the first version prepared after this file was added, and earlier versions have none. The
 repository's [tags](https://github.com/firstdraft/cli/tags) identify the source of each published version.
 
+## 0.8.2
+
+Adds `firstdraft compilation cancel <compilation-id>`, so an agent can recover a Compilation that will not finish
+without an operator calling the Service for it.
+
+- A Project allows one active Compilation. While a stuck one stays queued or running, `plan push` and `plan compile`
+  fail with First Draft's `409 compilation_active` problem, whose `detail` names that Compilation. Check it with
+  `compilation status`, cancel it, then rerun `plan compile`.
+- The command makes one `POST` to the Service's cancel route for the local Project and prints the cancelled
+  Compilation in the same shape as `compilation status`. Repeating it prints the same result. First Draft refuses to
+  cancel a succeeded or failed Compilation and leaves it unchanged.
+- New `error` values: `compilation_cancel_rejected`, which carries the Service problem in `response`
+  (`compilation_not_cancellable`, `compilation_not_found`, or `project_not_found`), and
+  `compilation_cancel_unavailable`, after which cancelling again is safe. A response that violates the Compilation
+  contract reports `invalid_compilation_status`.
+- `firstdraft --help` describes the `compilation` group as "Inspect, download, and cancel Compilations".
+
+Existing callers need no change. The cancel route is part of the Service's API `0.7.x` contract, so the accepted
+API-contract range is unchanged.
+
 ## 0.8.1
 
 Adds `firstdraft login` and `firstdraft logout`, so a token no longer has to be copied from `/api-tokens` into the

@@ -1,7 +1,7 @@
 {
   "format": "firstdraft.release-compatibility/1",
   "component": "cli",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "requires": {
     "api_contract": [">= 0.7.0", "< 0.8.0"],
     "foundation_plan_formats": ["firstdraft.foundation-plan.sketch/0.23"]
