@@ -40,8 +40,9 @@ that a bot such as Dependabot opens.
 The body also carries:
 
 - a summary of what changed and why; and
-- when [AGENTS.md](AGENTS.md) requires independent review, one line, `Review: <reviewer>, session <id>, <verdict>`,
-  with the findings left out.
+- when [AGENTS.md](AGENTS.md) requires independent review, one line with the reviewer, the verdict, and the counts,
+  such as `Review: Codex, approve (2 rounds, 3 findings fixed)`. Leave out session ids, which name files in a deleted
+  worktree, and the findings themselves; give a material finding one line in the commit message.
 
 Use GitHub closing keywords only for completed Issues: even `does not close #123` closes #123. Say the remainder is
 tracked in open Issue #123 instead. The [pull request template](.github/pull_request_template.md) holds these fields.
