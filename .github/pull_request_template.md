@@ -6,7 +6,7 @@ Docs: <!-- "updated <files>" or "none, because ..." -->
 
 <!--
 When AGENTS.md requires independent review, add one line and leave the findings out:
-Review: <reviewer>, session <id>, <verdict>
+Review: <reviewer>, <verdict> (<rounds> rounds, <fixed> findings fixed)
 
 Add no agent attribution, such as a "Generated with" line.
 -->
