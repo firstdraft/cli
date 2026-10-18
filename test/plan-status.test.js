@@ -37,7 +37,7 @@ const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-09-bookmark-assets" };
+const TARGET = { id: "rails", profile: "rails-sketch/2026-10" };
 const PLAN_STATUS_HELP = `First Draft CLI
 
 Usage:
@@ -250,7 +250,7 @@ test("plan status accepts the pinned Service zero-gap canonical digest", async (
   const body = analysisBody("valid");
   body.analysis.gap_set.gaps = [];
   body.analysis.gap_set_sha256 =
-    "acf87b117814f28e52a85e6c13fb77e58166a38038bb36a6e0b6177995262618";
+    "c38373ec9f208fb4abb6eeec29c447142dc4f6dd706c8a48286abee4d55d66a8";
   const result = await invoke(["plan", "status"], {
     cwd,
     fetchFunction: recordingFetch([jsonResponse(body)], []),

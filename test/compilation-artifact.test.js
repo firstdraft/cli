@@ -306,7 +306,10 @@ test("pins external provenance identities and validates nested metadata", () => 
 });
 
 test("rejects an older target profile even when retained status agrees", () => {
-  const target = { id: "rails", profile: "rails-sketch/2026-09" };
+  const target = {
+    id: "rails",
+    profile: "rails-sketch/2026-09-bookmark-assets",
+  };
   const fixture = artifactFixture({ provenance: { target } });
 
   assert.throws(

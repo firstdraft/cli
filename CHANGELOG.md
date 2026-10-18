@@ -9,6 +9,21 @@ carry no release status. The `v<version>` tag and npm show whether a version is 
 Entries start with the first version prepared after this file was added, and earlier versions have none. The
 repository's [tags](https://github.com/firstdraft/cli/tags) identify the source of each published version.
 
+## 0.9.0
+
+Moves the Rails target to profile `rails-sketch/2026-10`. First Draft adopts Rails 8.1.4 under that new profile ID and
+API contract `0.8.0`, because Rails 8.1.4 changes the generated schema's column order and an inflection rule.
+
+- `plan init` writes Plans that target `rails-sketch/2026-10`. The Plan format stays
+  `firstdraft.foundation-plan.sketch/0.23`.
+- `plan compile` and `compilation download` accept only artifacts for `rails-sketch/2026-10`. An artifact for
+  `rails-sketch/2026-09-bookmark-assets` reports `invalid_artifact`.
+- The accepted API-contract range is `>= 0.8.0` and `< 0.9.0`.
+
+Use CLI 0.9.0 with a Service that serves API `0.8.x`; CLI 0.8.2 writes and accepts only the retired profile. Projects
+and Plans on the retired profile are not migrated. First Draft refuses them, and its refusal names the fix: start a
+new Project from the Plan.
+
 ## 0.8.2
 
 Adds `firstdraft compilation cancel <compilation-id>`, so an agent can recover a Compilation that will not finish

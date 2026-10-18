@@ -27,7 +27,7 @@ export const ARTIFACT_MEDIA_TYPE =
   "application/vnd.firstdraft.compilation-artifact+json";
 export const ARTIFACT_FORMAT = "firstdraft.compilation-artifact/1";
 export const FOUNDATION_PLAN_FORMAT = "firstdraft.foundation-plan.sketch/0.23";
-export const RAILS_TARGET_PROFILE = "rails-sketch/2026-09-bookmark-assets";
+export const RAILS_TARGET_PROFILE = "rails-sketch/2026-10";
 export const MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 const ARTIFACT_KEYS = ["format", "provenance", "manifest_sha256", "files"];
