@@ -3,10 +3,10 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.8.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
+The current `0.9.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, and retained-Compilation inspection and cancellation.
-CLI `0.8.x` requires the service's `0.7.x` API contract. The
+CLI `0.9.x` requires the service's `0.8.x` API contract. The
 [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 
 ## Command map
@@ -139,7 +139,7 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-09-bookmark-assets` and a
+This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-10` and a
 client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
 without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
 existing `.firstdraft` path.
@@ -390,7 +390,7 @@ local paths, or environment values. Success writes exactly the validated private
 newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
 stderr document after the progress lines.
 
-The closed API `0.7.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.8.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -440,7 +440,7 @@ never starts replacement work. An incomplete rollback leaves `.firstdraft-root-o
 reconciliation before this command can run again.
 
 Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.23` and target profile
-`rails-sketch/2026-09-bookmark-assets`, in addition to matching the retained Compilation's provenance and verifying file integrity.
+`rails-sketch/2026-10`, in addition to matching the retained Compilation's provenance and verifying file integrity.
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
