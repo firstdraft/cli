@@ -51,11 +51,11 @@ tracked in open Issue #123 instead. The [pull request template](.github/pull_req
 
 The reviewer is the other vendor's agent, through [cross-review](https://github.com/raghubetina/cross-review): Codex
 reviews from Claude Code, and Claude Code reviews from Codex. Install both and sign in to each (`claude auth login`
-and `codex login`). In Claude Code, ask for a Codex review or run `/codex-review:codex-review`; in Codex, use
-`$claude-review`. Neither is a shell command.
+and `codex login`). The plugin takes the reviewer as its first argument: in Claude Code, ask for a Codex review or
+run `/cross-review codex`; in Codex, use `$cross-review claude`. Neither is a shell command.
 
-The tracked `.claude/settings.json` and `.codex/config.toml` enable both plugins once you trust the main checkout,
-and linked worktrees inherit that trust. The cross-review README covers installing them by hand.
+The tracked `.claude/settings.json` and `.codex/config.toml` enable the plugin once you trust the main checkout, and
+linked worktrees inherit that trust. The cross-review README covers installing it by hand.
 
 To run a review:
 

@@ -12,8 +12,8 @@ handled-error recovery in `docs/errors.md`, publication mechanics in `RELEASING.
   owns the Skill and plugin packaging.
 - Changes to the accepted API-contract range, accepted Plan formats, command names or flags, handled `error` values,
   exit statuses, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `RELEASING.md`, `.claude/settings.json`, or
-  `.codex/config.toml` get an independent review through cross-review: `codex-review` from Claude Code,
-  `$claude-review` from Codex. Pass the service repository's `docs/review-focus.md` as `--focus-file` (see
+  `.codex/config.toml` get an independent review through the `cross-review` Skill, with `codex` as the reviewer from
+  Claude Code and `claude` from Codex. Pass the service repository's `docs/review-focus.md` as `--focus-file` (see
   `CONTRIBUTING.md`). Put the reviewer, verdict, and finding counts in the pull request body, not the findings.
 - `firstdraft plan compile` defaults to local output in the current directory. GitHub publication requires
   `--github`; Codespaces is a fallback. Keep Skill callers and recovery instructions aligned with this boundary.
