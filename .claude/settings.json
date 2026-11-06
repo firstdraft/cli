@@ -8,7 +8,7 @@
     }
   },
   "enabledPlugins": {
-    "codex-review@cross-review": true
+    "cross-review@cross-review": true
   },
   "attribution": {
     "commit": "",
