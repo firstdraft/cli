@@ -10,6 +10,7 @@ const PRODUCTION = "https://firstdraft.com";
 const STAGING = "https://staging.firstdraft.com";
 const PROJECT_ID = "01900000-0000-7000-8000-000000008001";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000008002";
+const ITEM_ID = "3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f";
 const PRODUCTION_TOKEN = "canary-production-token";
 const STAGING_TOKEN = "canary-staging-token";
 const CUSTOM = "http://127.0.0.1:4300";
@@ -24,6 +25,9 @@ const REMOTE_COMMANDS = [
   ["compilation", "status", COMPILATION_ID],
   ["compilation", "download", COMPILATION_ID, "--output", "application"],
   ["compilation", "cancel", COMPILATION_ID],
+  ["maintain"],
+  ["maintain", "show", ITEM_ID],
+  ["maintain", "resolve", ITEM_ID, "--reason", "not_a_bug"],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {
@@ -157,12 +161,15 @@ test("staging rejects a conflicting URL or pinned origin before any request", as
   }
 });
 
-test("status and retained Compilation commands ignore an initial URL override when selecting staging credentials", async (context) => {
+test("status, retained Compilation, and maintain commands ignore an initial URL override when selecting staging credentials", async (context) => {
   for (const argv of [
     REMOTE_COMMANDS[1],
     REMOTE_COMMANDS[4],
     REMOTE_COMMANDS[5],
     REMOTE_COMMANDS[6],
+    REMOTE_COMMANDS[7],
+    REMOTE_COMMANDS[8],
+    REMOTE_COMMANDS[9],
   ]) {
     assert(argv);
     let requests = 0;

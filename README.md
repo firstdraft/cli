@@ -19,6 +19,7 @@ requires `--github`.
 - analysis polling and complete GapSet output;
 - direct Compile-and-materialize and private publish orchestration;
 - retained Compilation inspection, cancellation, and artifact download;
+- maintenance-item listing, inspection, and resolution for a deployed Environment;
 - terminal output, exit status, and recovery contracts;
 - the dependency-free npm package; and
 - package provenance and publication.
