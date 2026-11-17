@@ -27,6 +27,9 @@ const ENVIRONMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 // Item IDs are UUIDs of any version, unlike the UUIDv7 Project IDs.
 const ITEM_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// The Service's Project::Environment::Item::GITHUB_ISSUE_URL.
+const GITHUB_ISSUE_URL_PATTERN =
+  /^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}\/issues\/[1-9][0-9]{0,9}$/;
 const KINDS = new Set(["agent_fixable"]);
 const SEVERITIES = new Set(["fatal", "error", "warning", "info", "debug"]);
 const ENVIRONMENT_KEYS = ["project_id", "name"];
@@ -43,6 +46,7 @@ const SUMMARY_KEYS = [
   "last_release",
   "status",
   "resolution_reason",
+  "issue_url",
 ];
 const DETAIL_KEYS = [...SUMMARY_KEYS, "evidence", "done_when"];
 const EVIDENCE_KEYS = [
@@ -362,6 +366,9 @@ function isSummary(value) {
     isTimestamp(value.first_seen_at) &&
     isTimestamp(value.last_seen_at) &&
     isNullableString(value.last_release) &&
+    (value.issue_url === null ||
+      (typeof value.issue_url === "string" &&
+        GITHUB_ISSUE_URL_PATTERN.test(value.issue_url))) &&
     ((value.status === "open" && value.resolution_reason === null) ||
       (value.status === "resolved" &&
         isResolutionReason(value.resolution_reason)))

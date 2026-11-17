@@ -514,8 +514,9 @@ firstdraft maintain resolve 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f --reason pull_r
 ```
 
 `firstdraft maintain` prints one page of the Environment's open items, most severe first, 200 per page. Each item has
-`id`, `kind`, `severity`, `title`, `occurrences`, `first_seen_at`, `last_seen_at`, `last_release`, `status`, and
-`resolution_reason`. When `next_page` is a number, pass it as `--page` to read the next page; it is `null` on the
+`id`, `kind`, `severity`, `title`, `occurrences`, `first_seen_at`, `last_seen_at`, `last_release`, `status`,
+`resolution_reason`, and `issue_url`, the GitHub issue First Draft filed and keeps current for the item, or `null`
+before it has one. When `next_page` is a number, pass it as `--page` to read the next page; it is `null` on the
 last page.
 
 `maintain show` prints one item with `evidence` and `done_when`. `evidence` comes from the latest event of the item's

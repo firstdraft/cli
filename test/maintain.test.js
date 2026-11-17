@@ -391,6 +391,14 @@ test("a success response must match the exact maintenance contract", async (cont
     ],
     [["maintain"], jsonResponse(indexBody({ next_page: 1 }))],
     [
+      ["maintain"],
+      jsonResponse(
+        indexBody({
+          items: [{ ...summary, issue_url: "https://example.test/issues/7" }],
+        }),
+      ),
+    ],
+    [
       ["maintain", "show", ITEM_ID],
       jsonResponse(showBody({ id: OTHER_ITEM_ID })),
     ],
@@ -574,6 +582,7 @@ function summaryBody(changes = {}) {
     last_release: "abc1234",
     status: "open",
     resolution_reason: null,
+    issue_url: "https://github.com/acme/app/issues/12",
     ...changes,
   };
 }
@@ -591,6 +600,7 @@ function indexBody(changes = {}) {
         occurrences: 0,
         first_seen_at: "2026-11-14T12:00:00.123456+00:00",
         last_release: null,
+        issue_url: null,
       }),
     ],
     next_page: null,

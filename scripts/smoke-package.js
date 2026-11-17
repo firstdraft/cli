@@ -641,6 +641,7 @@ async function exercisePackedCompilation(projectDirectory) {
     last_release: null,
     status: "open",
     resolution_reason: null,
+    issue_url: null,
   };
   const maintenanceIndex = { environment, items: [item], next_page: null };
   const maintenanceItem = {
