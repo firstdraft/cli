@@ -53,12 +53,14 @@ const OPTION_PATH = new RegExp(
   "g",
 );
 const ABSOLUTE_PATH = new RegExp(
-  String.raw`${PATH_START}(?:~[\\/]${PATH_CHARACTER}+|[A-Za-z]:[\\/]${PATH_CHARACTER}*|[\\/]{2}${SEGMENT}+${PATH_CHARACTER}*|[\\/](?:${SEGMENT}+[\\/])+${PATH_CHARACTER}*)`,
+  String.raw`${PATH_START}(?:~[\\/]${PATH_CHARACTER}+|[A-Za-z]:[\\/]${PATH_CHARACTER}*|[\\/]{2}${SEGMENT}+${PATH_CHARACTER}*|[\\/]${SEGMENT}+(?:[\\/]${PATH_CHARACTER}*)?)`,
   "g",
 );
 const QUOTED = /(['"`])([^'"`\n]+)\1/g;
 const ABSOLUTE_START =
   /^(?:file:\/\/|~[\\/]|[A-Za-z]:[\\/]|[\\/]{1,2}[^\s\\/])/i;
+// A quoted option and its path together, such as "-I/Team Notes/lib".
+const QUOTED_OPTION = /^(--?[A-Za-z][A-Za-z0-9-]*=?)(.*)$/;
 const FILE_URL = new RegExp(String.raw`\bfile:\/\/${PATH_CHARACTER}*`, "gi");
 // NAME=value, as a shell sets an environment variable for one command.
 // A value may be quoted, or unquoted with backslash escapes.
@@ -75,9 +77,12 @@ const COMMAND_ASSIGNMENT = new RegExp(
   String.raw`(?<![\w-])([A-Za-z_][A-Za-z0-9_]*)=${ASSIGNMENT_VALUE}`,
   "g",
 );
+// An assignment quoted as a whole, as in env 'LABEL=North West' bin/rspec.
+const QUOTED_ASSIGNMENT = /(['"])([A-Z_][A-Z0-9_]*)=[^'"\n]*\1/g;
+const QUOTED_COMMAND_ASSIGNMENT = /(['"])([A-Za-z_][A-Za-z0-9_]*)=[^'"\n]*\1/g;
 // Credential formats that need no digit, as the Service also scrubs them.
 const CREDENTIAL =
-  /\b(?:fd_[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[\w-]{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16})/g;
+  /\b(?:eyJ[\w-]*\.[\w-]+\.[\w-]*|fd_[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[\w-]{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16})/g;
 // A frame outside the application: redacted, absolute, or through "..". The
 // Service accepts only paths inside the project.
 const OUTSIDE_FRAME =
@@ -183,7 +188,12 @@ export function failureReportBody(
     failure_report: {
       kind,
       rerun: clip(
-        redact(rerun.replace(COMMAND_ASSIGNMENT, "$1=[value]"), cwd),
+        redact(
+          rerun
+            .replace(QUOTED_COMMAND_ASSIGNMENT, "$1$2=[value]$1")
+            .replace(COMMAND_ASSIGNMENT, "$1=[value]"),
+          cwd,
+        ),
         MAX_RERUN,
       ),
       error_class: field(errorClass, MAX_ERROR_CLASS),
@@ -232,12 +242,19 @@ export function redact(text, cwd) {
     .replace(CONTROL, "")
     .replace(EMAIL, "[email]")
     .replace(CREDENTIAL, "[token]")
+    .replace(QUOTED_ASSIGNMENT, "$1$2=[value]$1")
     .replace(ASSIGNMENT, "$1=[value]")
-    .replace(QUOTED, (match, quote, inner) =>
-      ABSOLUTE_START.test(inner)
-        ? `${quote}${replacePath(inner)}${quote}`
-        : match,
-    )
+    .replace(QUOTED, (match, quote, inner) => {
+      if (ABSOLUTE_START.test(inner)) {
+        return `${quote}${replacePath(inner)}${quote}`;
+      }
+      const [, option, operand] = QUOTED_OPTION.exec(inner) ?? [];
+      return option !== undefined &&
+        operand !== undefined &&
+        ABSOLUTE_START.test(operand)
+        ? `${quote}${option}${replacePath(operand)}${quote}`
+        : match;
+    })
     .replace(FILE_URL, REDACTED_PATH);
 
   return (
@@ -364,7 +381,11 @@ function isRecord(value) {
 function isStoredReport(report, compilationId) {
   return (
     typeof report.id === "string" &&
-    report.id !== "" &&
+    STORED_ID.test(report.id) &&
     report.compilation_id === compilationId
   );
 }
+
+// First Draft stores each report under a UUID.
+const STORED_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

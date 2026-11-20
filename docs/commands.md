@@ -182,8 +182,8 @@ notice therefore comes from First Draft's answer to the command being run, not f
   it exits with `update_required` or `api_contract_unsupported` instead of its own result. When that response was the
   command's last, the command reports its own result, after one `First Draft: ` line on standard error that names
   the stop and says the command finished. For an older contract, or a prerelease of a release inside the accepted range, it says to use the CLI that origin supports instead of updating; a prerelease of a newer release counts as newer. Either replaces the update line above.
-- **A `429` answer**, which First Draft sends with `Retry-After` when an account reaches a limit, such as its
-  Compilations for the day or its reports for the hour: the request did nothing, and whatever else the response
+- **A `429` answer**, which First Draft sends when a limit is reached, such as an account's Compilations for the day
+  or its reports for the hour, usually with `Retry-After`: the request did nothing, and whatever else the response
   says, the command exits with `rate_limited` and the time to try again.
 
 A header value that is not a version is ignored, and a prerelease contract counts as outside the range. `logout`
@@ -504,8 +504,9 @@ Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
-`.firstdraft/design/.firstdraft`; run later First Draft commands from `.firstdraft/design`. Run ordinary Rails
-setup, preview, and tests from the generated application root. Retain the archive when further First Draft
+`.firstdraft/design/.firstdraft`; run later Plan and Compilation commands from `.firstdraft/design`. Run ordinary
+Rails setup, preview, and tests, and `report` and `conversation send`, from the generated application root, where
+the CLI finds the archived Project and failure frames are relative to the application. Retain the archive when further First Draft
 authoring is useful. The CLI does not run or qualify the generated application's setup, preview, or test commands.
 Compiling a later Plan revision does not overwrite an already adopted root: choose a new absent output and
 deliberately reconcile it with application work.

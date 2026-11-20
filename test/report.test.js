@@ -17,6 +17,7 @@ const PRODUCTION = "https://firstdraft.com";
 const STAGING = "https://staging.firstdraft.com";
 const PROJECT_ID = "01900000-0000-7000-8000-000000009100";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000009101";
+const STORED_ID = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e";
 const TOKEN = "canary-report-token";
 const STAGING_TOKEN = "canary-staging-report-token";
 const CWD = path.resolve("/work/movie_catalog");
@@ -134,7 +135,7 @@ test("report progress prints the exact report, then sends those bytes once", asy
       fetchFunction: async (input, init) => {
         requests.push({ url: String(input), init });
         return new Response(
-          `{"progress_report":{"id":"canary","compilation_id":"${COMPILATION_ID}"}}`,
+          `{"progress_report":{"id":"${STORED_ID}","compilation_id":"${COMPILATION_ID}"}}`,
           {
             status: 201,
             headers: { "Content-Type": "application/json" },
@@ -250,7 +251,14 @@ test("a success without First Draft's acknowledgment is not reported as sent", a
     () =>
       new Response(
         JSON.stringify({
-          progress_report: { id: "x", compilation_id: PROJECT_ID },
+          progress_report: { id: STORED_ID, compilation_id: PROJECT_ID },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    () =>
+      new Response(
+        JSON.stringify({
+          progress_report: { id: "   ", compilation_id: COMPILATION_ID },
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),
@@ -632,6 +640,20 @@ test("redaction keeps relative paths and URLs and replaces what identifies a com
     ["ruby -I/gems bin/test", "ruby -I[path] bin/test"],
     ["token fd_abcdefghijklmnopqrstuv here", "token [token] here"],
     [
+      "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc",
+      "Authorization: Bearer [token]",
+    ],
+    ["found /.dockerenv here", "found [path] here"],
+    ['ruby "-I/Team Notes/lib" x.rb', 'ruby "-I[path]" x.rb'],
+    [
+      "env 'BUILD_LABEL=North West' bin/rspec",
+      "env 'BUILD_LABEL=[value]' bin/rspec",
+    ],
+    [
+      "undefined method `/' for nil and/or",
+      "undefined method `/' for nil and/or",
+    ],
+    [
       'RAILS_ENV=test SECRET="a b" bin/rails',
       "RAILS_ENV=[value] SECRET=[value] bin/rails",
     ],
@@ -669,7 +691,7 @@ test("redaction keeps relative paths and URLs and replaces what identifies a com
 
 /** @param {string} wrapper the report's key in First Draft's acknowledgment */
 function acknowledgment(wrapper) {
-  const report = { id: "canary-report", compilation_id: COMPILATION_ID };
+  const report = { id: STORED_ID, compilation_id: COMPILATION_ID };
   return new Response(JSON.stringify({ [wrapper]: report }), {
     status: 201,
     headers: { "Content-Type": "application/json" },

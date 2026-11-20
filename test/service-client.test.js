@@ -148,6 +148,24 @@ test("without a plugin version the CLI compares itself with the CLI versions", a
   ]);
 });
 
+test("an unreadable plugin version compares neither pair", async () => {
+  const session = createServiceSession({
+    env: { FIRSTDRAFT_PLUGIN_VERSION: "dev" },
+    notify: () => assert.fail("No version line was expected"),
+  });
+  const request = session.fetch(async () =>
+    versionedResponse({
+      latest: "99.0.0",
+      minimum: "99.0.0",
+      latestCli: "99.0.0",
+      minimumCli: "99.0.0",
+    }),
+  );
+  await request(new URL("/v1/account", ORIGIN), {});
+  await request(new URL("/v1/account", ORIGIN), {});
+  assert.equal(await session.settle(Promise.resolve("done")), "done");
+});
+
 test("each setup reads only its own pair of version headers", async () => {
   for (const [
     env,
@@ -604,7 +622,7 @@ test("a daily cap reports rate_limited with when to try again", async (context) 
   assert.deepEqual(JSON.parse(result.stderr), {
     error: "rate_limited",
     detail:
-      "First Draft refused a request because this account reached one of its limits. The refused request did nothing, and the CLI sent nothing after it. Try again after 2026-11-21T00:00:00Z; response.detail, when present, says which limit.",
+      "First Draft refused a request because a limit was reached. The refused request did nothing, and the CLI sent nothing after it. Try again after 2026-11-21T00:00:00Z; response.detail, when present, says which limit.",
     status: 429,
     retry_at: "2026-11-21T00:00:00Z",
     response: LIMIT_PROBLEM,

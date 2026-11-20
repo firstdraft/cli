@@ -122,23 +122,28 @@ export function createServiceSession({
   // A plugin is compared with the plugin versions First Draft names; a CLI
   // run without one, such as a direct npm installation, with the CLI
   // versions. The two packages are numbered separately.
-  /** @type {{component: "plugin" | "cli", label: string, version: Version, latestHeader: string, minimumHeader: string}} */
+  // A plugin version that is set but unreadable says a plugin is present
+  // without saying which, so neither pair is compared.
+  const pluginSet = (env[PLUGIN_VERSION_VARIABLE] ?? "").trim() !== "";
+  /** @type {{component: "plugin" | "cli", label: string, version: Version, latestHeader: string, minimumHeader: string} | null} */
   const installed =
-    plugin === null
-      ? {
-          component: "cli",
-          label: "CLI",
-          version: /** @type {Version} */ (semver(VERSION)),
-          latestHeader: "firstdraft-latest-cli",
-          minimumHeader: "firstdraft-minimum-cli",
-        }
-      : {
-          component: "plugin",
-          label: "plugin",
-          version: plugin,
-          latestHeader: "firstdraft-latest-plugin",
-          minimumHeader: "firstdraft-minimum-plugin",
-        };
+    pluginSet && plugin === null
+      ? null
+      : plugin === null
+        ? {
+            component: "cli",
+            label: "CLI",
+            version: /** @type {Version} */ (semver(VERSION)),
+            latestHeader: "firstdraft-latest-cli",
+            minimumHeader: "firstdraft-minimum-cli",
+          }
+        : {
+            component: "plugin",
+            label: "plugin",
+            version: plugin,
+            latestHeader: "firstdraft-latest-plugin",
+            minimumHeader: "firstdraft-minimum-plugin",
+          };
   /** @type {ServiceStopError | null} */
   let stop = null;
   let blocked = false;
@@ -152,8 +157,12 @@ export function createServiceSession({
    * @returns {Promise<Response>} the response, rebuilt when its body was read
    */
   async function observe(origin, response) {
-    const latest = semver(response.headers.get(installed.latestHeader));
+    const latest =
+      installed === null
+        ? null
+        : semver(response.headers.get(installed.latestHeader));
     if (
+      installed !== null &&
       updateLine === null &&
       latest !== null &&
       compareVersions(installed.version, latest) < 0
@@ -191,8 +200,15 @@ export function createServiceSession({
       return response;
     }
 
-    const minimum = semver(response.headers.get(installed.minimumHeader));
-    if (minimum !== null && compareVersions(installed.version, minimum) < 0) {
+    const minimum =
+      installed === null
+        ? null
+        : semver(response.headers.get(installed.minimumHeader));
+    if (
+      installed !== null &&
+      minimum !== null &&
+      compareVersions(installed.version, minimum) < 0
+    ) {
       stop = new UpdateRequiredError({
         component: installed.component,
         installed: installed.version.text,
@@ -396,7 +412,7 @@ export function stopSentence(stop) {
       ? `First Draft at ${stop.origin} serves prerelease API contract ${stop.contract}, which CLI ${VERSION} does not accept.`
       : `First Draft at ${stop.origin} serves API contract ${stop.contract}, which is ${stop.kind} than CLI ${VERSION} accepts.`;
   }
-  return "First Draft refused a request because this account reached one of its limits.";
+  return "First Draft refused a request because a limit was reached.";
 }
 
 /**

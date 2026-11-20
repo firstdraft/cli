@@ -78,12 +78,13 @@ one `First Draft: ` line that names the required update ([update line and refusa
 - `api_contract_unsupported`: First Draft serves an API contract outside `accepted_api_contract`. When `api_contract`
   is newer, update and continue as above. When it is older, the CLI is newer than that origin's Service; use the CLI
   that the origin supports.
-- `rate_limited`: First Draft answered `429` because the account reached a limit. The refused request did nothing.
-  `response.code` names the limit: `compilation_limit_reached` or `project_limit_reached` for the Compilations or
+- `rate_limited`: First Draft answered `429` because a limit was reached. The refused request did nothing.
+  `response.code`, when present, names the limit: `compilation_limit_reached` or `project_limit_reached` for the Compilations or
   new Projects an account may start in a day, and `reports_rate_limited` for its reports in an hour.
   `response.detail` says when the next one can start, and `retry_at`, when present, is that UTC time from
-  `Retry-After`. Wait until then and run the command again. When `current` is present, follow that Compilation as
-  above instead.
+  `Retry-After`. Wait until then and run the command again; without either, wait a minute. `login --interactive` meets
+  a limit shared by every CLI that starts a device login at once. When `current` is present, follow that Compilation
+  as above instead.
 
 A local failure while handling the stopping response, such as `local_state_not_saved` or `materialization_failed`,
 is reported as itself, with its recovery data, after the stop line.
@@ -100,9 +101,10 @@ phase-specific recovery:
   one this folder last pushed: the first push may have landed, or another copy of the Project pushed. If another
   copy holds newer work, continue from that copy. Otherwise start a new Project, which forks this one: run
   `firstdraft plan init --name <name>` in a new folder, copy `.firstdraft/foundation-plan.json` from the old folder
-  over the new one, and push or compile from there with the same options and the old folder's origin (`api_url` in
-  its `.firstdraft/state.json`): `--staging` for staging, or the same `FIRSTDRAFT_API_URL` for a custom origin. A
-  new folder has no pinned origin, so without one the push goes to production. Never construct an ETag from the Plan
+  over the new one, and push or compile from there with the same options and the old folder's origin: the `api_url`
+  in its `.firstdraft/state.json`, or, when a first push never saved one, the origin that push used. Select it with
+  `--staging` for staging, or the same `FIRSTDRAFT_API_URL` for a custom origin. A new folder has no pinned origin,
+  so without one the push goes to production. Never construct an ETag from the Plan
   digest or edit `.firstdraft/state.json`.
 - `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started,
   but its identity is unknown. The CLI never repeats that `POST` itself. Run the same `plan compile` command, with
@@ -244,7 +246,7 @@ stopped without following the replacement.
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | ---: | -------------------------------------------------------------------------------------------------------- |
 | Any leaf command                                       | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                                 |
 | Network commands except `logout`                       | `update_required`, `api_contract_unsupported`                                                      |    1 | First Draft needs a newer plugin, or serves another API contract ([recovery](#update-and-limit-errors)). |
-| Network commands except `logout`                       | `rate_limited`                                                                                     |    1 | The account reached a limit; `retry_at` says when to try again.                                          |
+| Network commands except `logout`                       | `rate_limited`                                                                                     |    1 | First Draft refused a request at a limit; `retry_at` says when to try again.                             |
 | `plan init`                                            | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                              |
 | Network commands                                       | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                          |
 | `login`                                                | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.                 |

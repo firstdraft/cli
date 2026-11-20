@@ -1378,7 +1378,7 @@ function requestOutcomeUnknownOutput(status) {
   return jsonOutput({
     error: "request_outcome_unknown",
     detail:
-      "The Plan may have been accepted, but the response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects it with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and push from there to this folder's origin (api_url in .firstdraft/state.json), with --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.",
+      "The Plan may have been accepted, but the response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects it with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and push from there to this folder's origin: the api_url in its .firstdraft/state.json, or, when a first push never saved one, the origin that push used. Use --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.",
     ...(status === undefined ? {} : { status }),
   });
 }
