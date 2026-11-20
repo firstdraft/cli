@@ -376,7 +376,7 @@ const PLAN_PUSH_INVALID_ARGUMENTS_DETAIL =
 const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.";
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
+  "The Plan may have been accepted, but the response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects it with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and push from there to this folder's origin (api_url in .firstdraft/state.json), with --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
 const AUTHENTICATION_REQUIRED_DETAIL =
   "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.";
@@ -419,7 +419,7 @@ const PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL =
 const PLAN_COMPILE_NOT_PUSHED_DETAIL =
   "The current Foundation Plan could not be associated with a pushed Project.";
 const PLAN_COMPILE_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The current Plan may have been accepted, but its response could not be verified. Stop and reconcile before compiling again.";
+  "The current Plan may have been accepted, but its response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects the push with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and compile from there with the same options and this folder's origin (api_url in .firstdraft/state.json), with --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.";
 const PLAN_COMPILE_PLAN_REJECTED_DETAIL =
   "First Draft rejected the current Foundation Plan.";
 const PLAN_COMPILE_ANALYSIS_REJECTED_DETAIL =
@@ -429,7 +429,7 @@ const PLAN_COMPILE_ANALYSIS_NOT_VALID_DETAIL =
 const PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL =
   "The local Foundation Plan changed after validation. Run 'firstdraft plan compile' again to submit the current bytes.";
 const PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "A Compilation may have started, but its response could not be verified. Do not rerun 'firstdraft plan compile' or start another Compilation until the current Project is reconciled.";
+  "A Compilation may have started, but its response could not be verified. Run the same command once more, with the same options and environment. If First Draft answers compilation_active, check the Compilation it names with 'firstdraft compilation status', and cancel it with 'firstdraft compilation cancel' only if it is stuck.";
 const PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL =
   "First Draft rejected the direct Compilation request.";
 const PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL =

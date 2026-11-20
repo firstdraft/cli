@@ -64,18 +64,26 @@ writes a note on standard error; revoke the token on `/api-tokens` if it may sti
 `plan compile` supplies `phase: "push" | "compilation" | "publication"` when `request_outcome_unknown` requires
 phase-specific recovery:
 
-- `phase: "push"` means the Plan mutation may have been accepted. Stop and reconcile local Head state. Until First
-  Draft has a Foundation Plan Head reconciliation endpoint, an accepted request whose response cannot be verified
-  may require manual recovery. Do not construct an ETag from the Plan digest or trust an unverified response.
-- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started, but its retained identity is unknown.
-  The CLI never repeats that `POST`. Do not start another Compilation until the Project is reconciled through First
-  Draft or an operator can identify the retained work.
+- `phase: "push"`, and `request_outcome_unknown` from `plan push`, mean the Plan may have been accepted, but the
+  response could not be verified, so local state was not changed. Run the same command once more, with the same
+  options and environment; a first push without a pinned origin otherwise goes to production. If First Draft accepts
+  it, carry on. If it answers `server_rejected` with status `412` (`precondition_failed`), its Plan is no longer the
+  one this folder last pushed: the first push may have landed, or another copy of the Project pushed. If another
+  copy holds newer work, continue from that copy. Otherwise start a new Project, which forks this one: run
+  `firstdraft plan init --name <name>` in a new folder, copy `.firstdraft/foundation-plan.json` from the old folder
+  over the new one, and push or compile from there with the same options and the old folder's origin (`api_url` in
+  its `.firstdraft/state.json`): `--staging` for staging, or the same `FIRSTDRAFT_API_URL` for a custom origin. A
+  new folder has no pinned origin, so without one the push goes to production. Never construct an ETag from the Plan
+  digest or edit `.firstdraft/state.json`.
+- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started,
+  but its identity is unknown. The CLI never repeats that `POST` itself. Run the same `plan compile` command, with
+  the same options and environment, once more. If a Compilation is still active, First Draft refuses with
+  `compilation_active` and names it; follow [stuck Compilation recovery](#stuck-compilation-recovery). Otherwise the
+  rerun starts a new Compilation; one that the first attempt may have started costs only service time and one of the
+  day's Compilations.
 - `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
   commands. After the prior invocation exits, wait and rerun `plan compile --github` with unchanged Plan bytes to safely
   reconcile or resume the retained singleton.
-
-`plan push` also reports `request_outcome_unknown` if a failure happens after sending its request. Local state remains
-unchanged. Stop and reconcile rather than assuming the request failed and repeating the mutation.
 
 If a verified Plan response cannot replace local state, preserve the printed `recovery_state`; an adjacent `.tmp`
 file may contain the same private recovery copy. Do not push again until the accepted ETag state is repaired.
@@ -95,12 +103,12 @@ starts a new Compilation after analysis.
 
 ## Direct Compilation recovery
 
-Do not blindly rerun `plan compile` after its Compilation start was accepted or may have been accepted.
-That command creates new work; it is not a retained-Compilation reconciliation command.
+Do not rerun `plan compile` after its Compilation start was accepted: that command creates new work; it is not a
+retained-Compilation reconciliation command.
 
 If `request_outcome_unknown` reports `phase: "compilation"`, the start request did not yield a validated retained
-ID. The CLI sent exactly one `POST` and did not retry it. Stop until First Draft or an operator can reconcile the
-Project and identify whether work was retained.
+ID. The CLI sent exactly one `POST` and did not retry it. Rerun `plan compile` once, as
+[ambiguous mutations](#ambiguous-mutations) describes.
 
 Once the start response has yielded a validated retained Compilation, later status, artifact, authentication, and
 materialization failure envelopes include that last validated projection as `current`. Preserve
