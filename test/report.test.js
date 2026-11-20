@@ -646,6 +646,13 @@ test("redaction keeps relative paths and URLs and replaces what identifies a com
     ["found /.dockerenv here", "found [path] here"],
     ['ruby "-I/Team Notes/lib" x.rb', 'ruby "-I[path]" x.rb'],
     [
+      `env "BUILD_LABEL=O'Brien West" bin/rspec`,
+      `env "BUILD_LABEL=[value]" bin/rspec`,
+    ],
+    [`env 'LABEL=say "hi" now' x`, "env 'LABEL=[value]' x"],
+    ['ruby "-IC:\\My Work\\lib" -e 1', 'ruby "-I[path]" -e 1'],
+    ["ruby /Program\\ Files/setup.rb", "ruby [path]"],
+    [
       "env 'BUILD_LABEL=North West' bin/rspec",
       "env 'BUILD_LABEL=[value]' bin/rspec",
     ],

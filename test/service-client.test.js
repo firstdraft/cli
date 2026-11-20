@@ -351,6 +351,23 @@ test("a 429 that is the command's first response still carries the update notice
   assert.match(String(lines[0]), /^First Draft: an update is available/);
 });
 
+test("a 429 without Retry-After or a problem says to wait a minute", async () => {
+  const result = await invoke(["account"], {
+    fetchFunction: async () =>
+      new Response('{"error":"temporarily_unavailable"}', {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      }),
+  });
+  assert.equal(result.status, 1);
+  assert.deepEqual(JSON.parse(result.stderr), {
+    error: "rate_limited",
+    detail:
+      "First Draft refused a request because a limit was reached. The refused request did nothing, and the CLI sent nothing after it. Try again in a minute.",
+    status: 429,
+  });
+});
+
 test("a 429 reports the limit even when the response also requires an update", async () => {
   for (const headers of [
     { "FirstDraft-Minimum-CLI": "99.0.0" },

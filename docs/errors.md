@@ -82,7 +82,7 @@ one `First Draft: ` line that names the required update ([update line and refusa
   `response.code`, when present, names the limit: `compilation_limit_reached` or `project_limit_reached` for the Compilations or
   new Projects an account may start in a day, and `reports_rate_limited` for its reports in an hour.
   `response.detail` says when the next one can start, and `retry_at`, when present, is that UTC time from
-  `Retry-After`. Wait until then and run the command again; without either, wait a minute. `login --interactive` meets
+  `Retry-After`. Wait until then and run the command again; without either, the detail says to wait a minute. `login --interactive` meets
   a limit shared by every CLI that starts a device login at once. When `current` is present, follow that Compilation
   as above instead.
 

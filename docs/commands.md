@@ -72,8 +72,10 @@ slow down, and stops when the code expires.
 
 Neither flow sends this computer's hostname. Their requests carry `FirstDraft-Client` like every other request
 ([What the CLI sends](#what-the-cli-sends)). A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
-`authorization_expired`. Other failures exit with `login_failed`. No credential is saved unless the login succeeds.
-See [Errors and recovery](errors.md#login-and-logout-errors).
+`authorization_expired`. A First Draft limit or a required update ends it with `rate_limited`, `update_required`, or
+`api_contract_unsupported` ([update line and refusals](#update-line-and-refusals)). Other failures exit with
+`login_failed`. No credential is saved unless the login succeeds. See
+[Errors and recovery](errors.md#login-and-logout-errors).
 
 ### Saved credentials
 

@@ -52,15 +52,18 @@ const OPTION_PATH = new RegExp(
   String.raw`(?<=(?:^|[\s'"(])--?[A-Za-z][A-Za-z0-9-]*(?:=|[ \t]+)?)[\\/](?:\\ |${SEGMENT})+(?:\\ |${PATH_CHARACTER})*`,
   "g",
 );
+// A shell-escaped space continues an unquoted path.
+const ESCAPED_PATH = String.raw`(?:\\ |${PATH_CHARACTER})`;
 const ABSOLUTE_PATH = new RegExp(
-  String.raw`${PATH_START}(?:~[\\/]${PATH_CHARACTER}+|[A-Za-z]:[\\/]${PATH_CHARACTER}*|[\\/]{2}${SEGMENT}+${PATH_CHARACTER}*|[\\/]${SEGMENT}+(?:[\\/]${PATH_CHARACTER}*)?)`,
+  String.raw`${PATH_START}(?:~[\\/]${ESCAPED_PATH}+|[A-Za-z]:[\\/]${ESCAPED_PATH}*|[\\/]{2}${SEGMENT}+${ESCAPED_PATH}*|[\\/](?:\\ |${SEGMENT})+(?:[\\/]${ESCAPED_PATH}*)?)`,
   "g",
 );
 const QUOTED = /(['"`])([^'"`\n]+)\1/g;
 const ABSOLUTE_START =
   /^(?:file:\/\/|~[\\/]|[A-Za-z]:[\\/]|[\\/]{1,2}[^\s\\/])/i;
 // A quoted option and its path together, such as "-I/Team Notes/lib".
-const QUOTED_OPTION = /^(--?[A-Za-z][A-Za-z0-9-]*=?)(.*)$/;
+// The shortest option prefix comes first, so -IC:\lib keeps its drive letter.
+const QUOTED_OPTION = /^(--?[A-Za-z][A-Za-z0-9-]*?=?)((?:[A-Za-z]:)?[\\/~].*)$/;
 const FILE_URL = new RegExp(String.raw`\bfile:\/\/${PATH_CHARACTER}*`, "gi");
 // NAME=value, as a shell sets an environment variable for one command.
 // A value may be quoted, or unquoted with backslash escapes.
@@ -78,8 +81,11 @@ const COMMAND_ASSIGNMENT = new RegExp(
   "g",
 );
 // An assignment quoted as a whole, as in env 'LABEL=North West' bin/rspec.
-const QUOTED_ASSIGNMENT = /(['"])([A-Z_][A-Z0-9_]*)=[^'"\n]*\1/g;
-const QUOTED_COMMAND_ASSIGNMENT = /(['"])([A-Za-z_][A-Za-z0-9_]*)=[^'"\n]*\1/g;
+// Each quote ends only at its own kind, so "LABEL=O'Brien" is one value.
+const QUOTED_ASSIGNMENT =
+  /"([A-Z_][A-Z0-9_]*)=[^"\n]*"|'([A-Z_][A-Z0-9_]*)=[^'\n]*'/g;
+const QUOTED_COMMAND_ASSIGNMENT =
+  /"([A-Za-z_][A-Za-z0-9_]*)=[^"\n]*"|'([A-Za-z_][A-Za-z0-9_]*)=[^'\n]*'/g;
 // Credential formats that need no digit, as the Service also scrubs them.
 const CREDENTIAL =
   /\b(?:eyJ[\w-]*\.[\w-]+\.[\w-]*|fd_[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[\w-]{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16})/g;
@@ -190,7 +196,7 @@ export function failureReportBody(
       rerun: clip(
         redact(
           rerun
-            .replace(QUOTED_COMMAND_ASSIGNMENT, "$1$2=[value]$1")
+            .replace(QUOTED_COMMAND_ASSIGNMENT, quotedAssignment)
             .replace(COMMAND_ASSIGNMENT, "$1=[value]"),
           cwd,
         ),
@@ -242,7 +248,7 @@ export function redact(text, cwd) {
     .replace(CONTROL, "")
     .replace(EMAIL, "[email]")
     .replace(CREDENTIAL, "[token]")
-    .replace(QUOTED_ASSIGNMENT, "$1$2=[value]$1")
+    .replace(QUOTED_ASSIGNMENT, quotedAssignment)
     .replace(ASSIGNMENT, "$1=[value]")
     .replace(QUOTED, (match, quote, inner) => {
       if (ABSOLUTE_START.test(inner)) {
@@ -267,6 +273,17 @@ export function redact(text, cwd) {
     .replace(TOKEN_CANDIDATE, (match) =>
       /\d/.test(match) && /[A-Za-z]/.test(match) ? "[token]" : match,
     );
+}
+
+/**
+ * @param {string} match
+ * @param {string | undefined} doubleQuoted
+ * @param {string | undefined} singleQuoted
+ */
+function quotedAssignment(match, doubleQuoted, singleQuoted) {
+  return doubleQuoted === undefined
+    ? `'${singleQuoted}=[value]'`
+    : `"${doubleQuoted}=[value]"`;
 }
 
 /** @param {string} text @param {number} limit */

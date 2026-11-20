@@ -3826,15 +3826,21 @@ function writeServiceStop(writer, error) {
     return 1;
   }
 
+  const retryAt = error instanceof RateLimitedError ? error.retryAt : undefined;
+  const limit = error instanceof RateLimitedError ? error.response : null;
+  // A limit without Retry-After or a problem detail, such as the one shared
+  // by device logins, lasts about a minute.
   const retry =
-    error instanceof RateLimitedError && error.retryAt !== undefined
-      ? `Try again after ${error.retryAt}`
-      : "Try again later";
+    retryAt !== undefined
+      ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+      : limit
+        ? "Try again when response.detail says."
+        : "Try again in a minute.";
   writeJson(writer, {
     error: "rate_limited",
     detail:
       `${stopSentence(error)} The refused request did nothing, and the CLI sent nothing after it. ` +
-      `${retry}; response.detail, when present, says which limit.` +
+      retry +
       (current === undefined
         ? ""
         : ` A Compilation had already started: follow it with 'firstdraft compilation status ${current.compilation.id}' instead of compiling again.`),
