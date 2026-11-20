@@ -44,7 +44,7 @@ export class ServiceStopError extends Error {
 export class UpdateRequiredError extends ServiceStopError {
   /** @param {{component: "plugin" | "cli", installed: string, minimum: string}} options */
   constructor({ component, installed, minimum }) {
-    super("First Draft requires a newer plugin.");
+    super("First Draft requires a newer plugin or CLI.");
     this.component = component;
     this.installed = installed;
     this.minimum = minimum;
@@ -119,14 +119,26 @@ export function createServiceSession({
       : []),
     ...(PLATFORM.test(platform) ? [`os/${platform}`] : []),
   ].join("; ");
-  /** @type {{component: "plugin" | "cli", version: Version}} */
+  // A plugin is compared with the plugin versions First Draft names; a CLI
+  // run without one, such as a direct npm installation, with the CLI
+  // versions. The two packages are numbered separately.
+  /** @type {{component: "plugin" | "cli", label: string, version: Version, latestHeader: string, minimumHeader: string}} */
   const installed =
     plugin === null
       ? {
           component: "cli",
+          label: "CLI",
           version: /** @type {Version} */ (semver(VERSION)),
+          latestHeader: "firstdraft-latest-cli",
+          minimumHeader: "firstdraft-minimum-cli",
         }
-      : { component: "plugin", version: plugin };
+      : {
+          component: "plugin",
+          label: "plugin",
+          version: plugin,
+          latestHeader: "firstdraft-latest-plugin",
+          minimumHeader: "firstdraft-minimum-plugin",
+        };
   /** @type {ServiceStopError | null} */
   let stop = null;
   let blocked = false;
@@ -140,15 +152,15 @@ export function createServiceSession({
    * @returns {Promise<Response>} the response, rebuilt when its body was read
    */
   async function observe(origin, response) {
-    const latest = semver(response.headers.get("firstdraft-latest-plugin"));
+    const latest = semver(response.headers.get(installed.latestHeader));
     if (
       updateLine === null &&
       latest !== null &&
       compareVersions(installed.version, latest) < 0
     ) {
       updateLine =
-        `First Draft: an update is available (plugin ${latest.text}; this setup has ` +
-        `${installed.component === "plugin" ? "plugin" : "CLI"} ${installed.version.text}). ` +
+        `First Draft: an update is available (${installed.label} ${latest.text}; this setup has ` +
+        `${installed.label} ${installed.version.text}). ` +
         `Tell the person the update steps are at ${UPDATE_URL}\n`;
     }
 
@@ -179,7 +191,7 @@ export function createServiceSession({
       return response;
     }
 
-    const minimum = semver(response.headers.get("firstdraft-minimum-plugin"));
+    const minimum = semver(response.headers.get(installed.minimumHeader));
     if (minimum !== null && compareVersions(installed.version, minimum) < 0) {
       stop = new UpdateRequiredError({
         component: installed.component,
@@ -376,7 +388,8 @@ function acceptsContract(contract) {
  */
 export function stopSentence(stop) {
   if (stop instanceof UpdateRequiredError) {
-    return `First Draft requires plugin ${stop.minimum} or later, and this setup has ${stop.component === "plugin" ? "plugin" : "CLI"} ${stop.installed}.`;
+    const label = stop.component === "plugin" ? "plugin" : "CLI";
+    return `First Draft requires ${label} ${stop.minimum} or later, and this setup has ${label} ${stop.installed}.`;
   }
   if (stop instanceof ApiContractUnsupportedError) {
     return stop.kind === "prerelease"

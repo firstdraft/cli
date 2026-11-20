@@ -127,22 +127,51 @@ test("an older plugin prints one update line per command, however many requests 
   ]);
 });
 
-test("without a plugin version the CLI compares its own version", async () => {
+test("without a plugin version the CLI compares itself with the CLI versions", async () => {
   /** @type {string[]} */
   const lines = [];
   const session = createServiceSession({
     env: {},
     notify: (line) => lines.push(line),
   });
-  await session.fetch(async () => versionedResponse({ latest: "99.0.0" }))(
-    new URL("/v1/account", ORIGIN),
-    {},
-  );
-  session.flush();
+  await session.fetch(async () =>
+    versionedResponse({
+      latest: "99.0.0",
+      minimum: "99.0.0",
+      latestCli: "98.0.0",
+    }),
+  )(new URL("/v1/account", ORIGIN), {});
+  assert.equal(await session.settle(Promise.resolve("done")), "done");
 
   assert.deepEqual(lines, [
-    `First Draft: an update is available (plugin 99.0.0; this setup has CLI ${VERSION}). Tell the person the update steps are at ${UPDATE_URL}\n`,
+    `First Draft: an update is available (CLI 98.0.0; this setup has CLI ${VERSION}). Tell the person the update steps are at ${UPDATE_URL}\n`,
   ]);
+});
+
+test("each setup reads only its own pair of version headers", async () => {
+  for (const [
+    env,
+    versions,
+  ] of /** @type {[Record<string, string>, Record<string, string>][]} */ ([
+    // A plugin ignores the CLI versions.
+    [
+      { FIRSTDRAFT_PLUGIN_VERSION: "0.10.0" },
+      { latestCli: "99.0.0", minimumCli: "99.0.0" },
+    ],
+    // A bare CLI ignores the plugin versions, and an older Service sends no CLI pair.
+    [{}, { latest: "99.0.0", minimum: "99.0.0" }],
+    [{}, {}],
+  ])) {
+    const session = createServiceSession({
+      env,
+      notify: () =>
+        assert.fail(`No line was expected for ${JSON.stringify(versions)}`),
+    });
+    const request = session.fetch(async () => versionedResponse(versions));
+    await request(new URL("/v1/account", ORIGIN), {});
+    await request(new URL("/v1/account", ORIGIN), {});
+    assert.equal(await session.settle(Promise.resolve("done")), "done");
+  }
 });
 
 test("a current, newer, or unreadable latest version prints nothing", async () => {
@@ -306,7 +335,7 @@ test("a 429 that is the command's first response still carries the update notice
 
 test("a 429 reports the limit even when the response also requires an update", async () => {
   for (const headers of [
-    { "FirstDraft-Minimum-Plugin": "99.0.0" },
+    { "FirstDraft-Minimum-CLI": "99.0.0" },
     { "FirstDraft-API-Contract": "0.10.0" },
   ]) {
     const session = createServiceSession({
@@ -473,7 +502,7 @@ test("plan compile sends nothing after a response below the minimum", async (con
     env: {},
     fetchFunction: async (input, init) => {
       requests.push(`${init?.method} ${new URL(String(input)).pathname}`);
-      return acceptedPush(cwd, { minimum: "99.0.0" });
+      return acceptedPush(cwd, { minimumCli: "99.0.0" });
     },
   });
 
@@ -484,9 +513,9 @@ test("plan compile sends nothing after a response below the minimum", async (con
   assert.equal(result.stdout, "");
   assert.deepEqual(errorEnvelope(result.stderr), {
     error: "update_required",
-    detail: `First Draft requires plugin 99.0.0 or later, and this setup has CLI ${VERSION}. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then run the same command again, with the same options.`,
+    detail: `First Draft requires CLI 99.0.0 or later, and this setup has CLI ${VERSION}. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then run the same command again, with the same options.`,
     cli_version: VERSION,
-    minimum_plugin_version: "99.0.0",
+    minimum_cli_version: "99.0.0",
     update_url: UPDATE_URL,
   });
   assert.equal(readState(cwd).foundation_plan_etag, ETAG);
@@ -531,15 +560,15 @@ test("a stop after a Compilation started names it instead of advising another", 
       const error = await fetchFunction(url, {}).catch((cause) => cause);
       throw new CompilationRetainedError(error, /** @type {any} */ (current));
     },
-    fetchFunction: async () => versionedResponse({ minimum: "99.0.0" }),
+    fetchFunction: async () => versionedResponse({ minimumCli: "99.0.0" }),
   });
 
   assert.equal(result.status, 1);
   assert.deepEqual(errorEnvelope(result.stderr), {
     error: "update_required",
-    detail: `First Draft requires plugin 99.0.0 or later, and this setup has CLI ${VERSION}. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then follow the Compilation that had already started with 'firstdraft compilation status ${COMPILATION_ID}' instead of compiling again.`,
+    detail: `First Draft requires CLI 99.0.0 or later, and this setup has CLI ${VERSION}. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then follow the Compilation that had already started with 'firstdraft compilation status ${COMPILATION_ID}' instead of compiling again.`,
     cli_version: VERSION,
-    minimum_plugin_version: "99.0.0",
+    minimum_cli_version: "99.0.0",
     update_url: UPDATE_URL,
     current,
   });
@@ -621,12 +650,12 @@ function limitResponse(retryAfter) {
 }
 
 /**
- * @param {{latest?: string, minimum?: string, contract?: string}} versions
+ * @param {{latest?: string, minimum?: string, latestCli?: string, minimumCli?: string, contract?: string}} versions
  * @param {string | null} [body]
  * @param {Record<string, string>} [headers]
  */
 function versionedResponse(
-  { latest, minimum, contract },
+  { latest, minimum, latestCli, minimumCli, contract },
   body = null,
   headers = {},
 ) {
@@ -638,6 +667,12 @@ function versionedResponse(
       ...(minimum === undefined
         ? {}
         : { "FirstDraft-Minimum-Plugin": minimum }),
+      ...(latestCli === undefined
+        ? {}
+        : { "FirstDraft-Latest-CLI": latestCli }),
+      ...(minimumCli === undefined
+        ? {}
+        : { "FirstDraft-Minimum-CLI": minimumCli }),
       ...(contract === undefined
         ? {}
         : { "FirstDraft-API-Contract": contract }),
@@ -647,7 +682,7 @@ function versionedResponse(
 
 /**
  * @param {string} cwd
- * @param {{latest?: string, minimum?: string, contract?: string}} versions
+ * @param {{latest?: string, minimum?: string, latestCli?: string, minimumCli?: string, contract?: string}} versions
  */
 function acceptedPush(cwd, versions) {
   const source = readFileSync(

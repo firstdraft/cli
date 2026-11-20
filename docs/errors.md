@@ -69,9 +69,9 @@ finished. The CLI finishes handling that response, so a push it accepted still s
 nothing more. When the stopping response was the command's last, the command reports its own result instead, after
 one `First Draft: ` line that names the required update ([update line and refusals](commands.md#update-line-and-refusals)).
 
-- `update_required`: First Draft's `FirstDraft-Minimum-Plugin` is newer than this setup's plugin, or than the CLI
-  when no plugin version is set. `minimum_plugin_version`, `cli_version`, and, when known, `plugin_version` name the
-  versions. Tell the person to update with the steps at `update_url` (`https://firstdraft.com/update`), then run the
+- `update_required`: First Draft's `FirstDraft-Minimum-Plugin` is newer than this setup's plugin, or, when no plugin
+  version is set, its `FirstDraft-Minimum-CLI` is newer than this CLI. `plugin_version` and `minimum_plugin_version`,
+  or `minimum_cli_version`, name the versions, beside `cli_version`. Tell the person to update with the steps at `update_url` (`https://firstdraft.com/update`), then run the
   same command again with the same options; the CLI saved the ETag of any push that First Draft accepted. When
   `current` is present, a Compilation had already started: follow `current.compilation.id` with
   `compilation status` instead of compiling again.

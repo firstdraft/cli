@@ -3797,10 +3797,12 @@ function writeServiceStop(writer, error) {
       error: "update_required",
       detail: `${stopSentence(error)} ${stopped} ${update} ${next}`,
       ...(error.component === "plugin"
-        ? { plugin_version: error.installed }
-        : {}),
-      cli_version: VERSION,
-      minimum_plugin_version: error.minimum,
+        ? {
+            plugin_version: error.installed,
+            cli_version: VERSION,
+            minimum_plugin_version: error.minimum,
+          }
+        : { cli_version: VERSION, minimum_cli_version: error.minimum }),
       update_url: UPDATE_URL,
       ...(current === undefined ? {} : { current }),
     });

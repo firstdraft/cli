@@ -165,16 +165,18 @@ Beyond the header, a command sends only what it needs:
 
 ### Update line and refusals
 
-First Draft answers each routed `/v1` request with `FirstDraft-Latest-Plugin`, `FirstDraft-Minimum-Plugin`, and
-`FirstDraft-API-Contract`. The CLI checks every response it receives for them; an OAuth answer or a missing route
-may carry none, so it then checks nothing. The CLI compares the plugin version from `FIRSTDRAFT_PLUGIN_VERSION`, or
-its own version when that variable is unset, with the first two. The update notice therefore comes from First Draft's
-answer to the command being run, not from a request of its own.
+First Draft answers each routed `/v1` request with `FirstDraft-API-Contract` and two pairs of versions:
+`FirstDraft-Latest-Plugin` and `FirstDraft-Minimum-Plugin` for the plugin, and `FirstDraft-Latest-CLI` and
+`FirstDraft-Minimum-CLI` for this package, which is numbered separately. The CLI checks every response it receives;
+an OAuth answer or a missing route may carry none of them, so it then checks nothing. With
+`FIRSTDRAFT_PLUGIN_VERSION` set, the CLI compares that plugin version with the plugin pair. Without it, it compares
+its own version with the CLI pair, and a Service that sends no CLI pair produces no line and no refusal. The update
+notice therefore comes from First Draft's answer to the command being run, not from a request of its own.
 
 - **Older than the latest:** the CLI writes one line on standard error, once per command and just before the
   command's own result, whether or not a terminal is attached, so an agent sees it and can pass it on:
   `First Draft: an update is available (plugin <latest>; this setup has plugin <installed>). Tell the person the update steps are at https://firstdraft.com/update`.
-  Without a plugin version the line says `CLI <installed>`.
+  Without a plugin version the line names `CLI <latest>` and `CLI <installed>`.
 - **Older than the minimum, or a contract other than API `0.9.x`:** the CLI finishes handling that response, so
   local state stays in step with First Draft, and sends nothing more. When the command still had a request to send,
   it exits with `update_required` or `api_contract_unsupported` instead of its own result. When that response was the
