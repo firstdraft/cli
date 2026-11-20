@@ -139,7 +139,7 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-10` and a
+This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11` and a
 client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
 without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
 existing `.firstdraft` path.
@@ -440,7 +440,7 @@ never starts replacement work. An incomplete rollback leaves `.firstdraft-root-o
 reconciliation before this command can run again.
 
 Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.23` and target profile
-`rails-sketch/2026-10`, in addition to matching the retained Compilation's provenance and verifying file integrity.
+`rails-sketch/2026-11`, in addition to matching the retained Compilation's provenance and verifying file integrity.
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
