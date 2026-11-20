@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { run } from "../src/cli.js";
 import { MAX_PLAN_STATUS_RESPONSE_BYTES } from "../src/commands/plan-status.js";
 import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
+import { VERSION } from "../src/version.js";
 
 /** @typedef {{input: string | URL | Request, init: RequestInit | undefined}} FetchCall */
 
@@ -147,13 +148,11 @@ test("plan status makes one bounded GET to only the pinned origin", async (conte
   assert.equal(call.init?.method, "GET");
   assert.equal(call.init?.redirect, "error");
   assert.equal(call.init?.signal, signal);
-  assert.deepEqual(
-    new Headers(call.init?.headers),
-    new Headers({
-      Accept: "application/json, application/problem+json",
-      Authorization: `Bearer ${API_TOKEN}`,
-    }),
-  );
+  assert.deepEqual(Object.fromEntries(new Headers(call.init?.headers)), {
+    accept: "application/json, application/problem+json",
+    authorization: `Bearer ${API_TOKEN}`,
+    "firstdraft-client": `cli/${VERSION}; os/${process.platform}`,
+  });
   assert.equal(call.init?.body, undefined);
   assert.doesNotMatch(result.stdout, /api\.example|opaque|canary-secret/);
 });
@@ -1120,6 +1119,7 @@ async function invoke(argv, overrides = {}) {
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
     apiToken: API_TOKEN,
+    env: {},
     ...overrides,
   });
 

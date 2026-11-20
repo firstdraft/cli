@@ -15,11 +15,14 @@ Usage:
   firstdraft [options]
 
 Commands:
-  compilation  Inspect, download, and cancel Compilations
-  generate     Generate local values
-  login        Log in to First Draft and save a token
-  logout       Revoke and remove the saved token
-  plan         Work with Foundation Plans
+  account       Show whether this account sends reports
+  compilation   Inspect, download, and cancel Compilations
+  conversation  Send a planning conversation to First Draft
+  generate      Generate local values
+  login         Log in to First Draft and save a token
+  logout        Revoke and remove the saved token
+  plan          Work with Foundation Plans
+  report        Send a progress or failure report to First Draft
 
 Options:
       --staging  Use staging for API commands (production is the default)

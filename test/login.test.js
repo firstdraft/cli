@@ -16,6 +16,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { run } from "../src/cli.js";
+import { VERSION } from "../src/version.js";
 
 const PRODUCTION = "https://firstdraft.com";
 const STAGING = "https://staging.firstdraft.com";
@@ -90,7 +91,6 @@ test("browser login exchanges a PKCE code from the loopback callback and saves t
   const configHome = temporaryConfigHome(context);
   const result = await invoke(context, ["login"], {
     configHome,
-    hostname: () => "canary-laptop\u001b[31m",
     onStderr: (text) => {
       const url = authorizationUrlIn(text);
       if (!url) return;
@@ -110,6 +110,10 @@ test("browser login exchanges a PKCE code from the loopback callback and saves t
       assert.equal(
         new Headers(init?.headers).get("content-type"),
         "application/x-www-form-urlencoded",
+      );
+      assert.equal(
+        new Headers(init?.headers).get("firstdraft-client"),
+        `cli/${VERSION}; os/${process.platform}`,
       );
       assert(authorization);
       const form = new URLSearchParams(String(init?.body));
@@ -143,7 +147,8 @@ test("browser login exchanges a PKCE code from the loopback callback and saves t
   assert.equal(params.get("code_challenge_method"), "S256");
   assert.match(String(params.get("code_challenge")), /^[A-Za-z0-9_-]{43}$/);
   assert.match(String(params.get("state")), /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(params.get("device_name"), "canary-laptop[31m");
+  // The computer's hostname is no longer sent as a device name.
+  assert.equal(params.get("device_name"), null);
   assert.match(
     String(params.get("redirect_uri")),
     /^http:\/\/127\.0\.0\.1:\d+\/callback$/,
@@ -555,7 +560,6 @@ test("device login prints the code, honors interval and slow_down, and saves the
     const polls = [];
     const outcomes = ["authorization_pending", "slow_down", null];
     const result = await invoke(context, ["login", flag], {
-      hostname: () => "canary-host",
       loginSleep: clock.sleep,
       loginNow: clock.now,
       startLoopbackServer: async () => assert.fail("No server was expected"),
@@ -564,7 +568,7 @@ test("device login prints the code, honors interval and slow_down, and saves the
         const form = new URLSearchParams(String(init?.body));
         assert.equal(form.get("client_id"), "firstdraft-cli");
         if (endpoint.pathname === "/oauth/device_authorization") {
-          assert.equal(form.get("device_name"), "canary-host");
+          assert.equal(form.get("device_name"), null);
           return deviceAuthorizationResponse();
         }
         assert.equal(endpoint.href, `${PRODUCTION}/oauth/token`);
@@ -687,7 +691,6 @@ async function invoke(context, argv, options = {}) {
     stagingApiToken: "",
     env: { XDG_CONFIG_HOME: configHome },
     homedir: () => assert.fail("The home directory must not be used"),
-    hostname: () => "test-host",
     loginNow: () => Date.parse("2026-09-29T12:00:00.000Z"),
     fetchFunction: async () => assert.fail("No network request was expected"),
     ...rest,

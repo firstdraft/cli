@@ -21,6 +21,7 @@ const DEFAULT_FILE_SYSTEM = { lstatSync, readFileSync };
 
 export class PlanStateConfigurationError extends Error {}
 export class PlanStateLocalError extends Error {}
+export class PlanStateNotPushedError extends Error {}
 
 /**
  * @param {object} options
@@ -37,6 +38,35 @@ export function readPlanState({ cwd, fileSystem = DEFAULT_FILE_SYSTEM }) {
   );
 
   return parsePlanState(source);
+}
+
+/**
+ * The Project and API origin that a successful plan push pinned, read from
+ * the Project's directory or, in an application that adopted the current
+ * directory, from the planning state archived at .firstdraft/design.
+ *
+ * @param {object} options
+ * @param {string} options.cwd
+ * @param {PlanStateFileSystem} [options.fileSystem]
+ */
+export function readPinnedProject({ cwd, fileSystem }) {
+  // Only an adopted root, whose real .firstdraft holds no state.json, falls
+  // back; any other local problem is reported for this directory.
+  const adoptedRoot =
+    isDirectory(path.join(cwd, ".firstdraft"), fileSystem) &&
+    isAbsent(path.join(cwd, ".firstdraft", "state.json"), fileSystem) &&
+    isDirectory(path.join(cwd, ".firstdraft", "design"), fileSystem);
+  const state = readPlanState({
+    cwd: adoptedRoot ? path.join(cwd, ".firstdraft", "design") : cwd,
+    fileSystem,
+  });
+  if (state.api_url === undefined) {
+    throw new PlanStateNotPushedError(
+      "The local Foundation Plan has not been pushed.",
+    );
+  }
+
+  return { apiUrl: state.api_url, projectId: state.project_id };
 }
 
 /** @param {string} value */
@@ -70,6 +100,35 @@ export function normalizeApiUrl(value) {
   }
 
   return url.origin;
+}
+
+/**
+ * @param {string} directory
+ * @param {PlanStateFileSystem} [fileSystem]
+ */
+function isDirectory(directory, fileSystem = DEFAULT_FILE_SYSTEM) {
+  try {
+    return fileSystem.lstatSync(directory).isDirectory();
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+
+    return false;
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @param {PlanStateFileSystem} [fileSystem]
+ */
+function isAbsent(filePath, fileSystem = DEFAULT_FILE_SYSTEM) {
+  try {
+    fileSystem.lstatSync(filePath);
+    return false;
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+
+    return error.code === "ENOENT";
+  }
 }
 
 /** @param {unknown} value @returns {value is string} */

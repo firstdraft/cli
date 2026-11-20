@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { FOUNDATION_PLAN_FORMAT } from "../src/compilation-artifact.js";
+import { API_CONTRACT_RANGE } from "../src/service-client.js";
 
 const packageMetadata = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -40,6 +41,11 @@ test("release compatibility declares the coordinated CLI contract", () => {
   ]);
   assert.ok(Array.isArray(compatibility.requires.api_contract));
   assert.notEqual(compatibility.requires.api_contract.length, 0);
+  assert.deepEqual(
+    compatibility.requires.api_contract,
+    [...API_CONTRACT_RANGE],
+    "Declare the API range that src/service-client.js refuses outside of",
+  );
   assert.deepEqual(
     compatibility.requires.foundation_plan_formats,
     [FOUNDATION_PLAN_FORMAT],

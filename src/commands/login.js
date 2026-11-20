@@ -1,4 +1,3 @@
-import { hostname as osHostname } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
@@ -26,8 +25,6 @@ import {
 } from "../oauth.js";
 import { normalizeApiUrl } from "../plan-state.js";
 import { DEFAULT_API_URL } from "./plan-push.js";
-
-const MAX_DEVICE_NAME_LENGTH = 100;
 
 export class LoginDeniedError extends Error {}
 export class LoginExpiredError extends Error {}
@@ -67,7 +64,6 @@ export function resolveLoginOrigin({ apiUrl, staging = false }) {
  * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
  * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [sleep]
  * @property {() => number} [now]
- * @property {() => string} [hostname]
  * @property {import("../oauth.js").StartLoopbackServer} [startLoopback]
  * @property {import("../credentials.js").CredentialStore} [credentials]
  */
@@ -86,14 +82,12 @@ export async function login({
   createRequestSignal,
   sleep = defaultSleep,
   now = Date.now,
-  hostname = osHostname,
   startLoopback = startLoopbackServer,
   credentials = {},
 }) {
   // Reject an unreadable or invalid store before any network request.
   // A later write can still fail after a token has been issued.
   readStore(credentials);
-  const deviceName = safeDeviceName(hostname);
   const request = { origin, fetchFunction, createRequestSignal };
 
   /** @param {import("../oauth.js").AccessToken} token */
@@ -111,11 +105,10 @@ export async function login({
 
   try {
     if (device) {
-      save(await deviceLogin({ ...request, deviceName, prompt, sleep, now }));
+      save(await deviceLogin({ ...request, prompt, sleep, now }));
     } else {
       await browserLogin({
         ...request,
-        deviceName,
         prompt,
         sleep,
         startLoopback,
@@ -130,7 +123,6 @@ export async function login({
 
 /**
  * @param {import("../oauth.js").RequestOptions & {
- *   deviceName: string | undefined,
  *   prompt: (text: string) => void,
  *   sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>,
  *   startLoopback: import("../oauth.js").StartLoopbackServer,
@@ -138,7 +130,6 @@ export async function login({
  * }} options
  */
 async function browserLogin({
-  deviceName,
   prompt,
   sleep,
   startLoopback,
@@ -165,7 +156,6 @@ async function browserLogin({
       redirectUri: listener.redirectUri,
       state,
       challenge,
-      deviceName,
     });
     prompt(
       `To log in to ${request.origin}, open this URL in your browser:\n\n  ${url}\n\n` +
@@ -210,17 +200,13 @@ async function browserLogin({
 
 /**
  * @param {import("../oauth.js").RequestOptions & {
- *   deviceName: string | undefined,
  *   prompt: (text: string) => void,
  *   sleep: (delayMs: number) => Promise<void>,
  *   now: () => number,
  * }} options
  */
-async function deviceLogin({ deviceName, prompt, sleep, now, ...request }) {
-  const authorization = await requestDeviceAuthorization({
-    ...request,
-    deviceName,
-  });
+async function deviceLogin({ prompt, sleep, now, ...request }) {
+  const authorization = await requestDeviceAuthorization(request);
   prompt(
     `To log in to ${request.origin}, open this URL in a browser on any device:\n\n` +
       `  ${authorization.verificationUri}\n\n` +
@@ -291,21 +277,6 @@ function loginError(error) {
     status: error.status,
     cause: error,
   });
-}
-
-/** @param {() => string} hostname */
-function safeDeviceName(hostname) {
-  let name;
-  try {
-    name = hostname();
-  } catch {
-    return undefined;
-  }
-  // eslint-disable-next-line no-control-regex
-  const cleaned = name.replace(/[\u0000-\u001f\u007f]/g, "").trim();
-  return cleaned.length === 0
-    ? undefined
-    : cleaned.slice(0, MAX_DEVICE_NAME_LENGTH);
 }
 
 /** @param {number} delayMs @param {AbortSignal} [signal] */

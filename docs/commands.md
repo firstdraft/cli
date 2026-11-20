@@ -5,9 +5,10 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 
 The current `0.9.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, and retained-Compilation inspection and cancellation.
-CLI `0.9.x` requires the service's `0.8.x` API contract. The
-[changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
+Compile-and-materialize and private publish orchestration, retained-Compilation inspection and cancellation, the
+account's report setting, progress and failure reports, and conversation upload. CLI `0.9.x` requires the
+service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes
+each version. [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
 
@@ -25,6 +26,10 @@ CLI `0.9.x` requires the service's `0.8.x` API contract. The
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                        |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation    |
 | `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                |
+| `firstdraft account`                  | Yes     | Show whether the account sends reports                      |
+| `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come  |
+| `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code   |
+| `firstdraft conversation send`        | Yes     | Print, then send, one conversation the person agreed to     |
 
 ## Select an environment and authenticate
 
@@ -65,8 +70,8 @@ The CLI prints a verification URL, a short user code, and a URL that already inc
 any device, confirm the code, and approve. The CLI polls at the server's interval, adds five seconds when asked to
 slow down, and stops when the code expires.
 
-Both flows send this machine's hostname as the device name shown on the approval page and in the token's name on
-`/api-tokens`. A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
+Neither flow sends this computer's hostname. Their requests carry `FirstDraft-Client` like every other request
+([What the CLI sends](#what-the-cli-sends)). A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
 `authorization_expired`. Other failures exit with `login_failed`. No credential is saved unless the login succeeds.
 See [Errors and recovery](errors.md#login-and-logout-errors).
 
@@ -130,6 +135,58 @@ The CLI sends the selected token as a Bearer credential on every API request. It
 print it, or require it for local commands. Revoke a token in the environment that issued it if it is exposed. A
 missing token, or First Draft's validated `401` problem response with the `authentication_required` code, produces
 that stable CLI error.
+
+## What the CLI sends
+
+The CLI sends nothing on its own: no telemetry, no background request, and no separate update check. A command sends
+only its own requests, listed under [Service endpoints](#service-endpoints); `plan init`, `generate`, and `--help`
+make none. Each request carries the selected token (except the OAuth requests of `login` and `logout`) and this
+header:
+
+```text
+FirstDraft-Client: cli/<version>; plugin/<version>; agent/<name>; os/<platform>
+```
+
+`cli` is this package's version. `plugin` and `agent` come from `FIRSTDRAFT_PLUGIN_VERSION` and `FIRSTDRAFT_AGENT`,
+which the First Draft plugin's launcher sets to its own version and to the agent's name, such as `claude-code` or
+`codex`. `os` is Node.js's `process.platform`, such as `darwin`, `linux`, or `win32`. A part that is unset, or is not a
+plain version or name, is left out. The header carries no hostname, user name, path, or token. A setup that runs the
+CLI without the plugin's launcher, such as a direct npm installation, may set the two variables itself.
+
+Beyond the header, a command sends only what it needs:
+
+| Commands                                  | Request content                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it      |
+| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                 |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                   |
+| `report progress`, `report failure`       | The report that the command prints just before sending it          |
+| `conversation send`                       | The file the person agreed to send, unchanged, under its base name |
+
+### Update line and refusals
+
+First Draft answers each routed `/v1` request with `FirstDraft-Latest-Plugin`, `FirstDraft-Minimum-Plugin`, and
+`FirstDraft-API-Contract`. The CLI checks every response it receives for them; an OAuth answer or a missing route
+may carry none, so it then checks nothing. The CLI compares the plugin version from `FIRSTDRAFT_PLUGIN_VERSION`, or
+its own version when that variable is unset, with the first two. The update notice therefore comes from First Draft's
+answer to the command being run, not from a request of its own.
+
+- **Older than the latest:** the CLI writes one line on standard error, once per command and just before the
+  command's own result, whether or not a terminal is attached, so an agent sees it and can pass it on:
+  `First Draft: an update is available (plugin <latest>; this setup has plugin <installed>). Tell the person the update steps are at https://firstdraft.com/update`.
+  Without a plugin version the line says `CLI <installed>`.
+- **Older than the minimum, or a contract other than API `0.9.x`:** the CLI finishes handling that response, so
+  local state stays in step with First Draft, and sends nothing more. When the command still had a request to send,
+  it exits with `update_required` or `api_contract_unsupported` instead of its own result. When that response was the
+  command's last, the command reports its own result, after one `First Draft: ` line on standard error that names
+  the stop and says the command finished. For an older contract, or a prerelease of a release inside the accepted range, it says to use the CLI that origin supports instead of updating; a prerelease of a newer release counts as newer. Either replaces the update line above.
+- **A `429` answer**, which First Draft sends with `Retry-After` when an account reaches a limit, such as its
+  Compilations for the day or its reports for the hour: the request did nothing, and whatever else the response
+  says, the command exits with `rate_limited` and the time to try again.
+
+A header value that is not a version is ignored, and a prerelease contract counts as outside the range. `logout`
+always finishes removing the local token, so neither the stop line nor a refusal replaces its result.
+[Errors and recovery](errors.md#update-and-limit-errors) explains each error.
 
 ## Start a Foundation Plan
 
@@ -386,11 +443,12 @@ progress to stderr, with every line prefixed by `First Draft:`. It reports analy
 terminal failure or cancellation, the current GitHub phase, and an allowlisted reason, retry count, and exact UTC
 retry time when a GitHub preflight check is delayed. A retained retry with no next time is reported as paused and
 requiring operator recovery. Progress never includes IDs, hashes, repository names or URLs, raw server projections,
-local paths, or environment values. Success writes exactly the validated private GitHub repository URL plus a
+local paths, or environment values. The [update line](#update-line-and-refusals), which can appear among the
+progress lines, names only versions and the public update page. Success writes exactly the validated private GitHub repository URL plus a
 newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
 stderr document after the progress lines.
 
-The closed API `0.8.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
+The closed API `0.9.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
 `github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
 `github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
 `github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
@@ -497,33 +555,108 @@ If the Compilation was started by `plan compile --github`, Cancel also cancels t
 Publication is a Project singleton in this release, so `plan compile --github` cannot start another one for that
 Project.
 
+## Read the account
+
+```sh
+firstdraft account
+```
+
+The command makes one `GET` and prints `{"reports": "on"}` or `{"reports": "off"}`. Reports are off until the person
+says yes, when approving `firstdraft login` or later on their First Draft account page, where they can also turn
+reports off again; an agent cannot turn them on. The command is not tied to a
+Project: like `login`, it uses production, `--staging`, or `FIRSTDRAFT_API_URL`, with that origin's token. It prints
+no other account fact.
+
+## Send progress and failure reports
+
+When reports are on, an agent tells First Draft how far a generated application has come, and about an unexpected
+failure in generated code. Run these from the generated application's root after root adoption, where the CLI finds
+the Project's state archived at `.firstdraft/design`, or from the Project's directory:
+
+```sh
+firstdraft report progress <compilation-id> --step specs_first_run --examples 120 --failures 14 \
+  --behavior-to-write-failures 12 --items-remaining 9
+firstdraft report failure <compilation-id> --kind spec_failure \
+  --rerun "bin/rspec ./spec/models/movie_spec.rb:42" --error-class NoMethodError \
+  --message "undefined method 'stars' for nil" --frame "app/models/movie.rb:12:in 'Movie#average'" \
+  --fix-summary "Guarded a nil rating in Movie#average"
+```
+
+`<compilation-id>` is `compilation.id` from `plan compile`. `--step` is `setup`, `specs_first_run`,
+`behavior_written`, `specs_passing`, or `preview_started`. The counts are optional whole numbers: examples in the spec
+run, failing examples, failing examples that the README's Behavior to write names, and Behavior to write items still
+to write. The report carries the given counts under `counts`.
+
+A failure report needs `--kind` (`spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`), `--rerun` (the
+command that reproduces the failure), and `--error-class` (the exception class, or the lint rule's name). `--message`,
+`--frame` (repeatable: a place in the application such as `app/models/post.rb:12`), `--fix-summary` (one line on the
+agent's fix), `--ruby-version`, and `--rails-version` are optional. Before it prints the report, the CLI removes
+terminal escapes and control characters, then replaces email addresses with `[email]`, the value of an
+environment-style `NAME=value` assignment (in `--rerun`, of any `name=value` assignment) with `[value]`, absolute
+paths (also after an option such as `-I`, in quotes, or as a `file://` URL) with `[path]`, and recognized credential
+formats, and runs of 32 or more letters, digits, `_`, or `-` that mix letters and digits, with `[token]`. An absolute
+path inside the current directory becomes relative to it instead. A frame outside it, absolute, or reached through
+`..` is left out. It keeps the first
+300 characters of the rerun command and of the message, 200 of the fix summary, and 20 frames. This is a safeguard,
+not a guarantee, so read the printed report. A failure report carries no diff, environment variable, or file
+contents.
+
+Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:` and the exact JSON
+body on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
+`Sent.` once First Draft acknowledges the stored report with `201`; any other success is `report_unavailable`. When the
+account has reports off, First Draft answers `403 reports_off` and keeps nothing; the command writes
+a line that says so and exits 0, so the agent's work continues. Neither command retries.
+
+## Send a planning conversation
+
+Only when the person says yes, and each time:
+
+```sh
+firstdraft conversation send <file> --person-agreed
+```
+
+Show the person the file first. Without `--person-agreed`, the command stops with `consent_required` before it reads
+anything. With it, the command reads the Project pinned by a successful push, then the file, which must be a regular
+file of 1 byte to 32 MiB. It writes `Sending <absolute path> (<n> bytes, SHA-256 <hex>) for Project <id> to <origin>.`
+on standard output, then sends the file's bytes unchanged, once, as the `conversation[file]` part of a
+`multipart/form-data` `POST`, named by its base name only. The CLI does not redact the file. Run the command from the
+generated application's root after root adoption, or from the Project's directory.
+
+First Draft does not accept conversations yet. Until its service does, the command ends with status `404`: as
+`conversation_unavailable` when the answer is not a problem document, or as `conversation_rejected` when it is.
+
 ## Service endpoints
 
-The CLI calls these Service API routes. The `/v1` routes go to the origin pinned for the Project and send the
-selected token as a Bearer credential. The `/oauth` routes go to the origin selected for `login` or `logout` and
-send form-encoded OAuth parameters without a Bearer credential. Every request refuses redirects and has a bounded
+The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
+`/v1/account` goes to the origin selected as for `login`, and the others go to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
+without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
 `SERVICE_ROUTES` differ, or when no file in `src/` uses a declared route.
 
-| Method | Path                                                               | Purpose                              |
-| ------ | ------------------------------------------------------------------ | ------------------------------------ |
-| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                        | Create or replace the Head           |
-| `GET`  | `/v1/projects/{project_id}/analysis`                               | Read the Head's current analysis     |
-| `POST` | `/v1/projects/{project_id}/compilations`                           | Start a Compilation of the Head      |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`          | Read one retained Compilation        |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`   | Cancel that Compilation              |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact` | Download that Compilation's artifact |
-| `PUT`  | `/v1/projects/{project_id}/github-publication`                     | Start or rejoin the Publication      |
-| `GET`  | `/v1/projects/{project_id}/github-publication`                     | Poll or reconcile the Publication    |
-| `POST` | `/oauth/token`                                                     | Exchange a login grant for a token   |
-| `POST` | `/oauth/device_authorization`                                      | Start a device-flow login            |
-| `POST` | `/oauth/revoke`                                                    | Revoke a saved token                 |
+| Method | Path                                                                       | Purpose                              |
+| ------ | -------------------------------------------------------------------------- | ------------------------------------ |
+| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                | Create or replace the Head           |
+| `GET`  | `/v1/projects/{project_id}/analysis`                                       | Read the Head's current analysis     |
+| `POST` | `/v1/projects/{project_id}/compilations`                                   | Start a Compilation of the Head      |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                  | Read one retained Compilation        |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`           | Cancel that Compilation              |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`         | Download that Compilation's artifact |
+| `PUT`  | `/v1/projects/{project_id}/github-publication`                             | Start or rejoin the Publication      |
+| `GET`  | `/v1/projects/{project_id}/github-publication`                             | Poll or reconcile the Publication    |
+| `GET`  | `/v1/account`                                                              | Read whether the account reports     |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports` | Send a progress report               |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`  | Send a failure report                |
+| `POST` | `/v1/projects/{project_id}/conversations`                                  | Send a planning conversation         |
+| `POST` | `/oauth/token`                                                             | Exchange a login grant for a token   |
+| `POST` | `/oauth/device_authorization`                                              | Start a device-flow login            |
+| `POST` | `/oauth/revoke`                                                            | Revoke a saved token                 |
 
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
-`compilation cancel` cancels it.
+`compilation cancel` cancels it. `account` reads `/v1/account`. `report progress` and `report failure` post their
+report, and `conversation send` posts its file.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
@@ -531,10 +664,13 @@ CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 The first push sends `If-None-Match: *`. Later pushes, the Compilation start `POST`, and the Publication `PUT` send
 the saved Head ETag in `If-Match`. The cancel `POST` sends no precondition header.
 
-The `/v1` routes belong to the API-contract range that `release/compatibility.json` accepts. The CLI does not read the
-Service's `FirstDraft-API-Contract` response header. Instead, the Service's release compatibility check compares the
-declared ranges before a release. The Service documents the routes in its Foundation Plan machine reference,
-`docs/architecture/reference/README.md` in the private `firstdraft/firstdraft` repository.
+The `/v1` routes belong to API contract `0.9.x`. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
+`release/compatibility.json` declares it for the Service's release compatibility check, and
+`test/release-compatibility.test.js` keeps the two equal. The CLI reads `FirstDraft-API-Contract` on every response
+and stops at a Service outside the range, as [update line and refusals](#update-line-and-refusals) describes: with
+`api_contract_unsupported` when the command had a request still to send. The Service documents the routes in its
+Foundation Plan machine reference, `docs/architecture/reference/README.md` in the private `firstdraft/firstdraft`
+repository.
 
 ### Head and its ETag
 
@@ -568,8 +704,10 @@ Use this checklist when a change adds a command or subcommand. Each step names t
      `COMPILATION_HELP`, or `GENERATE_HELP`. A new group also needs a line in `ROOT_HELP` and a branch in `run`.
    - Add the branch in `runPlan`, `runCompilation`, or `runGenerate`, and a `run<Group><Name>` function.
    - Parse arguments with strict `parseArgs`. Invalid syntax writes `invalid_arguments` and exits 2.
-   - A command that calls the Service also accepts `--staging` and calls `authenticateApiCommand`. It maps each
-     error class to one `writeJson(stderr, …)` envelope and its exit status.
+   - A command that calls the Service also accepts `--staging` and calls `authenticateApiCommand` with
+     `service.fetch(fetchFunction)`, and awaits its module through `service.settle(…)` so that
+     [refusals](#update-line-and-refusals) replace its result. It maps each error class to one
+     `writeJson(stderr, …)` envelope and its exit status.
 3. **Test it.**
    - Add `test/<group>-<name>.test.js`. Cover the help text, invalid arguments, the success output, and every
      handled `error` value.
@@ -577,7 +715,8 @@ Use this checklist when a change adds a command or subcommand. Each step names t
      or `GENERATE_HELP` in `test/generate-uuid.test.js`. No test asserts the whole `compilation` group help.
    - Append a command that calls the Service to `REMOTE_COMMANDS` in `test/api-environments.test.js`. Some tests
      there select entries by index, so add it at the end. The command's first request must reach the pinned origin
-     with that origin's token, and one `401` must produce `authentication_required`.
+     with that origin's token, and one `401` must produce `authentication_required`. A command not tied to a Project,
+     such as `account`, selects its origin as `login` does; test that in its own file instead.
    - Add packed-package cases to `scripts/smoke-package.js`, including at least an invalid-arguments case.
 4. **Package it.** Add each new `src/` file to the exact list in `scripts/check-pack.js`. `firstdraft/skills` keeps
    a copy of that list as `packedFileAllowlist` in `script/cli-contract/config.mjs`. The copy must change when
@@ -596,6 +735,6 @@ Use this checklist when a change adds a command or subcommand. Each step names t
    [version rule](https://github.com/firstdraft/cli/blob/main/RELEASING.md#versions), and apply it with the
    [version pull request](https://github.com/firstdraft/cli/blob/main/RELEASING.md#prepare-the-version-pull-request)
    steps. If the command needs a route or response that the accepted API range lacks, the Service ships it first
-   under a new API-contract version. Then raise `requires.api_contract` in `release/compatibility.json`, and align
-   the Skills CLI requirement. Because the CLI does not read the contract header, an older Service rejects the new
-   route as not found.
+   under a new API-contract version. Then raise `requires.api_contract` in `release/compatibility.json` and
+   `API_CONTRACT_RANGE` in `src/service-client.js`, and align the Skills CLI requirement. The CLI then stops at a
+   Service outside the new range, as [update line and refusals](#update-line-and-refusals) describes.
