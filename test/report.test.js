@@ -500,6 +500,14 @@ test("rerun keeps only an RSpec run of the application's specs", () => {
       "env 'RAILS_ENV=test' bin/rspec spec/models/movie_spec.rb -e 'creates a movie'",
       undefined,
     ],
+    // A spec directory with a trailing slash is sent without it.
+    ["bundle exec rspec spec/models/", "bundle exec rspec spec/models"],
+    [
+      "rspec ./spec/requests// spec/models/a_spec.rb:3",
+      "rspec ./spec/requests spec/models/a_spec.rb:3",
+    ],
+    ["rspec spec/", undefined],
+    ["rspec spec//models/a_spec.rb", undefined],
     ["bin/rubocop", undefined],
     ["bin/rails runner 1", undefined],
     ["rspec", undefined],

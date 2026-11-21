@@ -36,7 +36,8 @@ const MAX_ERROR_CLASS = 200;
 const MAX_RERUN = 300;
 const MAX_FRAME = 300;
 const MAX_VERSION = 32;
-const SAFE_PATH = String.raw`[A-Za-z0-9_./-]+`;
+// Components of safe characters, each separated by one slash.
+const SAFE_PATH = String.raw`[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*`;
 // bundle exec rspec ./spec/models/post_spec.rb:42, bin/rspec spec/x_spec.rb
 const RERUN = new RegExp(
   String.raw`^(?:bundle exec |bin/)?rspec(?: (?:\./)?spec/${SAFE_PATH}(?::\d+)*)+$`,
@@ -226,9 +227,10 @@ export function rspecRun(command) {
     start += 1;
   }
 
+  // A spec directory may be written with a trailing slash: spec/models/.
   const run = words
     .slice(start)
-    .map((word) => word.raw)
+    .map((word) => word.raw.replace(/^((?:\.\/)?spec\/.*[^/])\/+$/, "$1"))
     .join(" ");
   return run.length <= MAX_RERUN && RERUN.test(run) && !PARENT_SEGMENT.test(run)
     ? run
