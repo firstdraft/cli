@@ -139,6 +139,7 @@ test("without a plugin version the CLI compares itself with the CLI versions", a
       latest: "99.0.0",
       minimum: "99.0.0",
       latestCli: "98.0.0",
+      minimumCli: "0.1.0",
     }),
   )(new URL("/v1/account", ORIGIN), {});
   assert.equal(await session.settle(Promise.resolve("done")), "done");
@@ -148,22 +149,55 @@ test("without a plugin version the CLI compares itself with the CLI versions", a
   ]);
 });
 
-test("an unreadable plugin version compares neither pair", async () => {
-  const session = createServiceSession({
-    env: { FIRSTDRAFT_PLUGIN_VERSION: "dev" },
-    notify: () => assert.fail("No version line was expected"),
-  });
-  const request = session.fetch(async () =>
-    versionedResponse({
-      latest: "99.0.0",
-      minimum: "99.0.0",
-      latestCli: "99.0.0",
-      minimumCli: "99.0.0",
-    }),
-  );
-  await request(new URL("/v1/account", ORIGIN), {});
-  await request(new URL("/v1/account", ORIGIN), {});
-  assert.equal(await session.settle(Promise.resolve("done")), "done");
+test("a set but unreadable plugin version compares neither pair and says so", async () => {
+  for (const pluginVersion of ["dev", "", "  "]) {
+    /** @type {string[]} */
+    const lines = [];
+    const session = createServiceSession({
+      env: { FIRSTDRAFT_PLUGIN_VERSION: pluginVersion },
+      notify: (line) => lines.push(line),
+    });
+    assert.equal(session.clientHeader.includes("plugin/"), false);
+    const request = session.fetch(async () =>
+      versionedResponse({
+        latest: "99.0.0",
+        minimum: "99.0.0",
+        latestCli: "99.0.0",
+        minimumCli: "99.0.0",
+      }),
+    );
+    await request(new URL("/v1/account", ORIGIN), {});
+    await request(new URL("/v1/account", ORIGIN), {});
+    assert.equal(await session.settle(Promise.resolve("done")), "done");
+    assert.deepEqual(lines, [
+      `First Draft: FIRSTDRAFT_PLUGIN_VERSION is set but is not a plugin version, so the CLI could not tell whether this setup is current. The update steps are at ${UPDATE_URL}\n`,
+    ]);
+  }
+});
+
+test("half a version pair is not compared", async () => {
+  for (const [
+    env,
+    versions,
+  ] of /** @type {[Record<string, string>, Record<string, string>][]} */ ([
+    [{}, { minimumCli: "99.0.0" }],
+    [{}, { latestCli: "99.0.0" }],
+    [{ FIRSTDRAFT_PLUGIN_VERSION: "0.10.0" }, { minimum: "99.0.0" }],
+    [
+      { FIRSTDRAFT_PLUGIN_VERSION: "0.10.0" },
+      { latest: "99.0.0", minimum: "soon" },
+    ],
+  ])) {
+    const session = createServiceSession({
+      env,
+      notify: () =>
+        assert.fail(`No line was expected for ${JSON.stringify(versions)}`),
+    });
+    const request = session.fetch(async () => versionedResponse(versions));
+    await request(new URL("/v1/account", ORIGIN), {});
+    await request(new URL("/v1/account", ORIGIN), {});
+    assert.equal(await session.settle(Promise.resolve("done")), "done");
+  }
 });
 
 test("each setup reads only its own pair of version headers", async () => {
@@ -245,10 +279,9 @@ test("a stop that did not cut the command short keeps its result and names the s
       env: { FIRSTDRAFT_PLUGIN_VERSION: "0.9.3" },
       notify: (line) => lines.push(line),
     });
-    await session.fetch(async () => versionedResponse({ minimum: "0.10.0" }))(
-      new URL("/v1/account", ORIGIN),
-      {},
-    );
+    await session.fetch(async () =>
+      versionedResponse({ latest: "0.10.0", minimum: "0.10.0" }),
+    )(new URL("/v1/account", ORIGIN), {});
 
     const outcome = await session.settle(work).then(
       (value) => value,
@@ -345,6 +378,7 @@ test("a 429 that is the command's first response still carries the update notice
   });
   const limited = limitResponse("60");
   limited.headers.set("FirstDraft-Latest-Plugin", "0.10.1");
+  limited.headers.set("FirstDraft-Minimum-Plugin", "0.9.0");
   await session.fetch(async () => limited)(new URL("/v1/account", ORIGIN), {});
   await assert.rejects(session.settle(Promise.resolve()), RateLimitedError);
   assert.equal(lines.length, 1);
@@ -514,7 +548,7 @@ test("plan push keeps its accepted result below the minimum and names the stop",
     env: { FIRSTDRAFT_PLUGIN_VERSION: "0.9.3" },
     fetchFunction: async () => {
       requests += 1;
-      return acceptedPush(cwd, { minimum: "0.10.0" });
+      return acceptedPush(cwd, { latest: "0.10.0", minimum: "0.10.0" });
     },
   });
 
@@ -537,7 +571,7 @@ test("plan compile sends nothing after a response below the minimum", async (con
     env: {},
     fetchFunction: async (input, init) => {
       requests.push(`${init?.method} ${new URL(String(input)).pathname}`);
-      return acceptedPush(cwd, { minimumCli: "99.0.0" });
+      return acceptedPush(cwd, { latestCli: "99.0.0", minimumCli: "99.0.0" });
     },
   });
 
@@ -595,7 +629,8 @@ test("a stop after a Compilation started names it instead of advising another", 
       const error = await fetchFunction(url, {}).catch((cause) => cause);
       throw new CompilationRetainedError(error, /** @type {any} */ (current));
     },
-    fetchFunction: async () => versionedResponse({ minimumCli: "99.0.0" }),
+    fetchFunction: async () =>
+      versionedResponse({ latestCli: "99.0.0", minimumCli: "99.0.0" }),
   });
 
   assert.equal(result.status, 1);

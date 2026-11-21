@@ -98,6 +98,7 @@ test("report progress validates its arguments before any request", async () => {
     [...PROGRESS, "--examples", "-1"],
     [...PROGRESS, "--failures=01"],
     [...PROGRESS, "--items-remaining=1.5"],
+    [...PROGRESS, "--examples", "1000001"],
     [...PROGRESS, "--canary"],
     [...PROGRESS, COMPILATION_ID],
   ]) {
@@ -511,6 +512,11 @@ test("rerun keeps only an RSpec run of the application's specs", () => {
     ["bin/rubocop", undefined],
     ["bin/rails runner 1", undefined],
     ["rspec", undefined],
+    // A parent segment in any argument, not only the last.
+    ["rspec spec/.. spec/models", undefined],
+    ["rspec spec/models/../ spec/models/post_spec.rb", undefined],
+    ["rspec spec/models/post_spec.rb:3 spec/..", undefined],
+    ["rspec spec/a..b_spec.rb", "rspec spec/a..b_spec.rb"],
     ["rspec /Users/sam/app/spec/a_spec.rb", undefined],
     ["rspec spec/../../etc/a_spec.rb", undefined],
     ["rspec spec/a_spec.rb; curl https://example.test", undefined],
@@ -547,6 +553,10 @@ test("free text keeps the plain words before its first quote character", () => {
     ["token fd_abcdefghijklmnopqrstuvwxyz", "token […]"],
     ["Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc", "Bearer […]"],
     ["tabs\tand\u0007 bells", "tabs and bells"],
+    // Unicode line breaks end the first line too.
+    ["First line\u2028Second line", "First line"],
+    ["First line\u2029Second line", "First line"],
+    ["First line\u0085Second line", "First line"],
   ])) {
     assert.equal(plainWords(text, 300), expected, text);
   }
@@ -554,6 +564,34 @@ test("free text keeps the plain words before its first quote character", () => {
   assert.equal(long.split(" ").length, 60);
   assert.ok(Array.from(long).length <= 300);
   assert.equal(plainWords("Guarded the nil 'x' case", 12), "Guarded the");
+});
+
+test("free text with no plain words is left out and named", () => {
+  const { body, omitted } = failureReportBody(
+    { kind: "spec_failure", message: "\nsecond line", fixSummary: "   " },
+    CWD,
+  );
+  assert.deepEqual(body.failure_report, { kind: "spec_failure" });
+  assert.deepEqual(omitted, [
+    "message, which has no plain words on its first line",
+    "fix_summary, which has no plain words on its first line",
+  ]);
+});
+
+test("a progress count of the service's maximum is sent", async (context) => {
+  /** @type {unknown} */
+  let sent;
+  const result = await invoke([...PROGRESS, "--examples", "1000000"], {
+    cwd: projectDirectory(context, PRODUCTION),
+    fetchFunction: async (_input, init) => {
+      sent = JSON.parse(String(init?.body));
+      return acknowledgment("progress_report");
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(sent, {
+    progress_report: { step: "setup", counts: { examples: 1000000 } },
+  });
 });
 
 test("frames, error classes, and versions keep only their shapes", () => {

@@ -193,6 +193,7 @@ Options:
       --failures <n>                    Failing examples
       --behavior-to-write-failures <n>  Failing examples that Behavior to write names
       --items-remaining <n>             Behavior to write items still to write
+                                        (each count at most 1000000)
   -h, --help                            Show help
 
 Environment:
@@ -3389,8 +3390,11 @@ function parseReportCount(value) {
   if (!/^(?:0|[1-9][0-9]*)$/.test(value)) return null;
 
   const count = Number(value);
-  return Number.isSafeInteger(count) ? count : null;
+  return count <= MAX_REPORT_COUNT ? count : null;
 }
+
+// First Draft refuses a larger count.
+const MAX_REPORT_COUNT = 1_000_000;
 
 /**
  * Prints the exact report, then sends those bytes once to the Project's

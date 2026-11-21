@@ -46,7 +46,8 @@ const ERROR_CLASS = /^(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*$/;
 const FRAME = new RegExp(
   String.raw`^(?:\./)?((?:app|lib|config|db|spec)/${SAFE_PATH}):(\d{1,7})(?::in .*)?$`,
 );
-const PARENT_SEGMENT = /(?:^|\/)\.\.(?:\/|:|$)/;
+// Checked in every argument and frame: spec/.. spec/models has one too.
+const PARENT_SEGMENT = /(?:^|[/\s:])\.\.(?=[/\s:]|$)/;
 // 4.0.6, 8.1.4.1, 8.2.0.beta1, 3.4.0-preview2
 const VERSION_NUMBER =
   /^\d{1,4}(?:\.\d{1,4}){0,3}(?:[.-](?:alpha|beta|rc|pre|preview)\d{0,3})?$/;
@@ -181,10 +182,16 @@ export function failureReportBody(
   }
   const shapedMessage =
     message === undefined ? undefined : plainWords(message, MAX_MESSAGE);
+  if (message !== undefined && !shapedMessage) {
+    omitted.push("message, which has no plain words on its first line");
+  }
   const shapedFixSummary =
     fixSummary === undefined
       ? undefined
       : plainWords(fixSummary, MAX_FIX_SUMMARY);
+  if (fixSummary !== undefined && !shapedFixSummary) {
+    omitted.push("fix_summary, which has no plain words on its first line");
+  }
 
   return {
     body: {
@@ -315,7 +322,7 @@ function appFrame(frame, cwd) {
  * @param {number} limit
  */
 export function plainWords(text, limit) {
-  const [firstLine = ""] = text.split(/\r\n|\r|\n/, 1);
+  const [firstLine = ""] = text.split(/\r\n|[\r\n\u0085\u2028\u2029]/, 1);
   const line = firstLine.replace(/\t/g, " ").replace(CONTROL, "");
   const quote = line.search(QUOTE);
   const words = (quote === -1 ? line : line.slice(0, quote))

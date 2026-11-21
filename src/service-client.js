@@ -123,9 +123,10 @@ export function createServiceSession({
   // A plugin is compared with the plugin versions First Draft names; a CLI
   // run without one, such as a direct npm installation, with the CLI
   // versions. The two packages are numbered separately.
-  // A plugin version that is set but unreadable says a plugin is present
-  // without saying which, so neither pair is compared.
-  const pluginSet = (env[PLUGIN_VERSION_VARIABLE] ?? "").trim() !== "";
+  // A plugin version that is set, even blank, but unreadable says a plugin is
+  // present without saying which, so neither pair is compared, and the
+  // command's one version line says why.
+  const pluginSet = env[PLUGIN_VERSION_VARIABLE] !== undefined;
   /** @type {{component: "plugin" | "cli", label: string, version: Version, latestHeader: string, minimumHeader: string} | null} */
   const installed =
     pluginSet && plugin === null
@@ -158,20 +159,38 @@ export function createServiceSession({
    * @returns {Promise<Response>} the response, rebuilt when its body was read
    */
   async function observe(origin, response) {
-    const latest =
+    // A pair is compared only when both of its versions are readable.
+    const pair =
       installed === null
         ? null
-        : semver(response.headers.get(installed.latestHeader));
+        : versionPair(
+            response,
+            installed.latestHeader,
+            installed.minimumHeader,
+          );
     if (
       installed !== null &&
       updateLine === null &&
-      latest !== null &&
-      compareVersions(installed.version, latest) < 0
+      pair !== null &&
+      compareVersions(installed.version, pair.latest) < 0
     ) {
       updateLine =
-        `First Draft: an update is available (${installed.label} ${latest.text}; this setup has ` +
+        `First Draft: an update is available (${installed.label} ${pair.latest.text}; this setup has ` +
         `${installed.label} ${installed.version.text}). ` +
         `Tell the person the update steps are at ${UPDATE_URL}\n`;
+    }
+    if (
+      installed === null &&
+      updateLine === null &&
+      versionPair(
+        response,
+        "firstdraft-latest-plugin",
+        "firstdraft-minimum-plugin",
+      ) !== null
+    ) {
+      updateLine =
+        `First Draft: ${PLUGIN_VERSION_VARIABLE} is set but is not a plugin version, so the CLI could not ` +
+        `tell whether this setup is current. The update steps are at ${UPDATE_URL}\n`;
     }
 
     // A 429 refused the request, whatever else the response says.
@@ -201,19 +220,15 @@ export function createServiceSession({
       return response;
     }
 
-    const minimum =
-      installed === null
-        ? null
-        : semver(response.headers.get(installed.minimumHeader));
     if (
       installed !== null &&
-      minimum !== null &&
-      compareVersions(installed.version, minimum) < 0
+      pair !== null &&
+      compareVersions(installed.version, pair.minimum) < 0
     ) {
       stop = new UpdateRequiredError({
         component: installed.component,
         installed: installed.version.text,
-        minimum: minimum.text,
+        minimum: pair.minimum.text,
       });
       return response;
     }
@@ -285,6 +300,20 @@ export function createServiceSession({
       flush({ versionStopReported: false });
     },
   };
+}
+
+/**
+ * Both versions of a latest-and-minimum pair, or null unless both are
+ * readable.
+ *
+ * @param {Response} response
+ * @param {string} latestHeader
+ * @param {string} minimumHeader
+ */
+function versionPair(response, latestHeader, minimumHeader) {
+  const latest = semver(response.headers.get(latestHeader));
+  const minimum = semver(response.headers.get(minimumHeader));
+  return latest === null || minimum === null ? null : { latest, minimum };
 }
 
 /**

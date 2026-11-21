@@ -6,8 +6,8 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 The current `0.9.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, retained-Compilation inspection and cancellation, the
-account's report setting, progress and failure reports, and conversation upload. CLI `0.9.x` requires the
-service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes
+account's report setting, progress and failure reports, and conversation upload. This development version requires
+the service's `0.9.x` API contract; the release that carries it names its own version in the changelog. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes
 each version. [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
@@ -173,7 +173,10 @@ First Draft answers each routed `/v1` request with `FirstDraft-API-Contract` and
 `FirstDraft-Minimum-CLI` for this package, which is numbered separately. The CLI checks every response it receives;
 an OAuth answer or a missing route may carry none of them, so it then checks nothing. With
 `FIRSTDRAFT_PLUGIN_VERSION` set, the CLI compares that plugin version with the plugin pair. Without it, it compares
-its own version with the CLI pair, and a Service that sends no CLI pair produces no line and no refusal. The update
+its own version with the CLI pair. A pair is compared only when both of its versions are readable, so a Service that
+sends no CLI pair, or half of one, produces no line and no refusal. A `FIRSTDRAFT_PLUGIN_VERSION` that is set but is
+not a version, even blank, compares neither pair; the command's one line then says the CLI could not tell whether the
+setup is current. The update
 notice therefore comes from First Draft's answer to the command being run, not from a request of its own.
 
 - **Older than the latest:** the CLI writes one line on standard error, once per command and just before the
@@ -589,7 +592,8 @@ firstdraft report failure <compilation-id> --kind spec_failure \
 ```
 
 `<compilation-id>` is `compilation.id` from `plan compile`. `--step` is `setup`, `specs_first_run`,
-`behavior_written`, `specs_passing`, or `preview_started`. The counts are optional whole numbers: examples in the spec
+`behavior_written`, `specs_passing`, or `preview_started`. The counts are optional whole numbers of at most 1000000:
+examples in the spec
 run, failing examples, failing examples that the README's Behavior to write names, and Behavior to write items still
 to write. The report carries the given counts under `counts`.
 
@@ -609,8 +613,8 @@ Free text keeps plain words only: the CLI takes the first line, replaces everyth
 quote character (`'`, `"`, or a backtick, including an apostrophe inside a word) to the end of the line with one `[…]`,
 replaces each earlier word that contains `=`, `/`, `\`, or `@` or is longer than 24 characters with `[…]`, and keeps the
 words that fit the length limit. A `lint_failure` therefore sends no rule name, and a rerun command that is not an
-RSpec run is left out. A failure report carries no diff, environment variable, path outside the application, or
-file contents.
+RSpec run is left out. The CLI reads no file for a failure report and attaches no diff or environment variable, but
+the plain words of a message or fix summary it is given can still quote code, so pass only text that may be sent.
 
 Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the exact JSON
 body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
