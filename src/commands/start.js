@@ -37,12 +37,16 @@ export function readLoginState({
 /**
  * The one request `firstdraft start` makes. A response that told the CLI to
  * stop, such as a minimum version this setup is below, leaves it not ready,
- * so it replaces the result although no later request was left to send.
+ * so it replaces the result, a failed one included, although no later
+ * request was left to send.
  *
  * @param {import("./account.js").ReadAccountOptions & {service: import("../service-client.js").ServiceSession}} options
  */
 export async function readReadiness({ service, ...request }) {
-  const account = await readAccount(request);
+  const account = await readAccount(request).catch((error) => {
+    service.throwIfStopped();
+    throw error;
+  });
   service.throwIfStopped();
   return account;
 }

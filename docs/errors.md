@@ -36,7 +36,7 @@ command's recovery instructions below. If a saved login is rejected, run `firstd
 From `start`, `authentication_required` means it is not ready: no token exists for the origin, so it made no
 request, or First Draft rejected the token it sent. Its standard output says which and names the next step: the
 [agent's two login steps](commands.md#log-in-from-an-agent), or, for a rejected environment token, asking the person
-to replace or unset it.
+to replace or unset it. No handled error from `start` carries `response`, so none repeats text First Draft wrote.
 
 ## Login and logout errors
 

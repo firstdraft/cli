@@ -405,6 +405,95 @@ test("an unreadable account leaves start not ready and safe to retry", async (co
   assert.equal(JSON.parse(limited.stderr).error, "rate_limited");
 });
 
+test("a version refusal wins over a failed account read", async (context) => {
+  for (const [response, error] of [
+    [
+      () => {
+        const rejected = unauthorized();
+        return new Response(rejected.body, {
+          status: 401,
+          headers: {
+            "Content-Type": "application/problem+json",
+            "FirstDraft-Latest-CLI": "99.0.0",
+            "FirstDraft-Minimum-CLI": "99.0.0",
+          },
+        });
+      },
+      "update_required",
+    ],
+    [
+      () =>
+        new Response(JSON.stringify({ reports: "maybe" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "FirstDraft-API-Contract": "0.10.0",
+          },
+        }),
+      "api_contract_unsupported",
+    ],
+  ]) {
+    const result = await invoke(context, ["start"], {
+      saved: { [PRODUCTION]: SAVED_TOKEN },
+      fetchFunction: async () => /** @type {() => Response} */ (response)(),
+    });
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stdout,
+      lines(
+        `First Draft CLI ${VERSION}.`,
+        `This computer has a saved login for ${PRODUCTION}.`,
+      ),
+    );
+    assert.equal(JSON.parse(result.stderr).error, error);
+  }
+});
+
+test("start passes on none of the text in First Draft's problem answers", async (context) => {
+  for (const [status, headers] of [
+    [401, {}],
+    [429, { "Retry-After": "60" }],
+    [503, {}],
+  ]) {
+    const result = await invoke(context, ["start", "--staging"], {
+      saved: { [STAGING]: SAVED_TOKEN },
+      serviceNow: () => Date.parse("2026-11-21T12:00:00Z"),
+      fetchFunction: async () =>
+        new Response(
+          JSON.stringify({
+            type: "about:blank",
+            title: "Problem for canary@example.com",
+            status,
+            code: status === 401 ? "authentication_required" : "canary_code",
+            detail: "Write to canary@example.com.",
+          }),
+          {
+            status: /** @type {number} */ (status),
+            headers: {
+              "Content-Type": "application/problem+json",
+              .../** @type {Record<string, string>} */ (headers),
+            },
+          },
+        ),
+    });
+    assert.equal(result.status, 1);
+    const envelope = JSON.parse(result.stderr);
+    assert.equal(envelope.response, undefined);
+    assert.doesNotMatch(result.stdout + result.stderr, /canary/);
+    if (status === 429) {
+      assert.equal(envelope.error, "rate_limited");
+      assert.equal(envelope.retry_at, "2026-11-21T12:01:00Z");
+      assert.match(envelope.detail, /Try again after 2026-11-21T12:01:00Z\.$/);
+    }
+    if (status === 503) {
+      assert.equal(
+        envelope.detail,
+        "Could not read the account, so the CLI could not check the login or the reports choice. This read-only request is safe to retry: run 'firstdraft start --staging' again.",
+      );
+    }
+  }
+});
+
 /** @param {...string} values */
 function lines(...values) {
   return values.map((value) => `${value}\n`).join("");

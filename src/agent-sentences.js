@@ -131,7 +131,7 @@ export function deviceLoginPendingLines(login) {
 /** @param {string} origin */
 export function deviceLoginExpiredLines(origin) {
   return [
-    `Expired: the link and the code expired before the person approved, so this computer is not logged in to ${origin}.`,
+    `Expired: the link and the code expired before the person approved, so no new login was saved for ${origin}.`,
     `To try again, run ${commandLine(origin, "login --no-wait")}.`,
   ];
 }
@@ -139,7 +139,7 @@ export function deviceLoginExpiredLines(origin) {
 /** @param {string} origin */
 export function deviceLoginRefusedLines(origin) {
   return [
-    `Refused: the person denied the login, so this computer is not logged in to ${origin}.`,
+    `Refused: the person denied this login, so no new login was saved for ${origin}.`,
     `Ask the person before you start another login with ${commandLine(origin, "login --no-wait")}.`,
   ];
 }

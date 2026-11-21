@@ -563,12 +563,8 @@ const LOGIN_EXPIRED_DETAIL =
   "The login was not approved before it expired. No credential was saved. Run 'firstdraft login' again to retry.";
 const LOGIN_FAILED_DETAIL =
   "The login could not be completed. No credential was saved. Run 'firstdraft login' again, or use 'firstdraft login --interactive' if this machine has no browser.";
-const DEVICE_LOGIN_FILE_DETAIL =
-  "The device login file at credentials_path could not be used. Remove it, then run 'firstdraft start' to see whether this computer is logged in.";
 const START_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft start --help' for usage.";
-const START_ACCOUNT_UNAVAILABLE_DETAIL =
-  "Could not read the account, so the CLI could not check the login or the reports choice. This read-only request is safe to retry: run 'firstdraft start' again.";
 const LOGIN_CREDENTIALS_DETAIL =
   "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login' again.";
 const CREDENTIALS_LOCKED_RECOVERY =
@@ -1893,8 +1889,9 @@ async function runLoginFinish({
   service,
 }) {
   const restart = commandLine(origin, "login --no-wait");
+  let finished;
   try {
-    await service.settle(
+    finished = await service.settle(
       finishDeviceLogin({
         origin,
         fetchFunction: service.fetch(fetchFunction),
@@ -1942,6 +1939,11 @@ async function runLoginFinish({
   }
 
   writeLines(stdout, deviceLoginFinishedLines(origin));
+  if (finished.leftover !== null) {
+    stderr.write(
+      `Note: ${finished.leftover} could not be removed. It holds only a spent device code; remove it.\n`,
+    );
+  }
   writeEnvironmentTokenNote(stderr, origin, { apiToken, stagingApiToken });
   return 0;
 }
@@ -1983,7 +1985,7 @@ function writeLoginError(stderr, error, origin, details) {
           ? details.failed
           : error.reason === "device_login_invalid" ||
               error.reason === "device_login_unavailable"
-            ? DEVICE_LOGIN_FILE_DETAIL
+            ? `The device login file at credentials_path could not be used. Remove it, then run ${commandLine(origin, "start")} to see whether this computer is logged in.`
             : error.phase === "write"
               ? `First Draft issued a token, but it could not be saved. Revoke the new token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry login.`
               : LOGIN_CREDENTIALS_DETAIL,
@@ -3485,17 +3487,19 @@ async function runStart({
             ? `First Draft did not accept the saved login for ${origin}. ${logIn}`
             : `First Draft did not accept ${login.environmentVariable}. Ask the person to replace it or unset it.`,
         status: error.status,
-        response: error.response,
       });
       return 1;
     }
 
     writeLines(stdout, loginSentences);
+    // `start` passes on no text that First Draft wrote, so its errors leave
+    // out the problem's own words.
     const status =
-      writeAccountCommandError(stderr, error) ??
+      writeAccountCommandError(stderr, error, { serviceText: false }) ??
       writeAccountReadError(stderr, error, {
-        unavailable: START_ACCOUNT_UNAVAILABLE_DETAIL,
+        unavailable: `Could not read the account, so the CLI could not check the login or the reports choice. This read-only request is safe to retry: run ${commandLine(origin, "start")} again.`,
         invalid: ACCOUNT_INVALID_RESPONSE_DETAIL,
+        serviceText: false,
       });
     if (status !== null) return status;
 
@@ -3506,10 +3510,15 @@ async function runStart({
 /**
  * @param {Writer} writer
  * @param {unknown} error
- * @param {{unavailable: string, invalid: string}} details
+ * @param {{unavailable: string, invalid: string, serviceText?: boolean}} details
+ *   `serviceText: false` leaves out the problem First Draft sent
  * @returns {number | null}
  */
-function writeAccountReadError(writer, error, { unavailable, invalid }) {
+function writeAccountReadError(
+  writer,
+  error,
+  { unavailable, invalid, serviceText = true },
+) {
   if (error instanceof AccountUnavailableError) {
     if (isAuthenticationProblem(error.status, error.response)) {
       writeAuthenticationRequired(writer, error.status, error.response);
@@ -3519,7 +3528,7 @@ function writeAccountReadError(writer, error, { unavailable, invalid }) {
       error: "account_unavailable",
       detail: unavailable,
       ...(typeof error.status === "number" ? { status: error.status } : {}),
-      ...(error.response ? { response: error.response } : {}),
+      ...(serviceText && error.response ? { response: error.response } : {}),
     });
     return 1;
   }
@@ -3961,9 +3970,10 @@ function authenticateAccountCommand(
  *
  * @param {Writer} writer
  * @param {unknown} error
+ * @param {{serviceText?: boolean}} [options] passed to writeServiceStop
  */
-function writeAccountCommandError(writer, error) {
-  const stopStatus = writeServiceStop(writer, error);
+function writeAccountCommandError(writer, error, options) {
+  const stopStatus = writeServiceStop(writer, error, options);
   if (stopStatus !== null) return stopStatus;
 
   if (error instanceof ApiAuthenticationRequiredError) {
@@ -3989,9 +3999,11 @@ function writeAccountCommandError(writer, error) {
  *
  * @param {Writer} writer
  * @param {unknown} error
+ * @param {{serviceText?: boolean}} [options] `serviceText: false` leaves out
+ *   the problem First Draft sent with a limit, and the advice to read it
  * @returns {number | null}
  */
-function writeServiceStop(writer, error) {
+function writeServiceStop(writer, error, { serviceText = true } = {}) {
   if (!(error instanceof ServiceStopError)) return null;
 
   const current =
@@ -4042,12 +4054,15 @@ function writeServiceStop(writer, error) {
   }
 
   const retryAt = error instanceof RateLimitedError ? error.retryAt : undefined;
-  const limit = error instanceof RateLimitedError ? error.response : null;
+  const limit =
+    serviceText && error instanceof RateLimitedError ? error.response : null;
   // A limit without Retry-After or a problem detail, such as the one shared
   // by device logins, lasts about a minute.
   const retry =
     retryAt !== undefined
-      ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+      ? serviceText
+        ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+        : `Try again after ${retryAt}.`
       : limit
         ? "Try again when response.detail says."
         : "Try again in a minute.";
@@ -4063,9 +4078,7 @@ function writeServiceStop(writer, error) {
     ...(error instanceof RateLimitedError && error.retryAt !== undefined
       ? { retry_at: error.retryAt }
       : {}),
-    ...(error instanceof RateLimitedError && error.response
-      ? { response: error.response }
-      : {}),
+    ...(limit ? { response: limit } : {}),
     ...(current === undefined ? {} : { current }),
   });
   return 1;

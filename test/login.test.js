@@ -866,10 +866,16 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   const clock = fakeClock();
   const configHome = await startedLogin(context, clock);
   let polls = 0;
+  /** @type {(number | undefined)[]} */
+  const timeouts = [];
   const pending = await invoke(context, ["login", "--finish"], {
     configHome,
     loginSleep: clock.sleep,
     loginNow: clock.now,
+    createRequestSignal: (timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return new AbortController().signal;
+    },
     fetchFunction: async () => {
       polls += 1;
       return jsonResponse(400, { error: "authorization_pending" });
@@ -877,8 +883,13 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   });
 
   assert.equal(pending.status, 1);
-  assert.equal(polls, 4);
-  assert.deepEqual(clock.delays, [5000, 5000, 5000]);
+  assert.equal(polls, 3);
+  assert.deepEqual(clock.delays, [5000, 5000]);
+  assert.deepEqual(
+    timeouts,
+    [15000, 10000, 5000],
+    "each request ends by the end of the wait",
+  );
   assert.equal(
     pending.stdout,
     lines(
@@ -895,7 +906,22 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   });
   assert.equal(
     waitingLogin(configHome).next_poll_at,
-    "2026-09-29T12:00:20.000Z",
+    "2026-09-29T12:00:15.000Z",
+  );
+
+  clock.delays.length = 0;
+  const again = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () =>
+      jsonResponse(400, { error: "authorization_pending" }),
+  });
+  assert.equal(errorEnvelope(again.stderr).error, "authorization_pending");
+  assert.deepEqual(
+    clock.delays,
+    [5000, 5000],
+    "a later --finish keeps to the interval and to its own 15 seconds",
   );
 
   clock.delays.length = 0;
@@ -906,11 +932,54 @@ test("login --finish waits briefly, then says it is still waiting and when to po
     fetchFunction: async () => tokenResponse(),
   });
   assert.equal(finished.status, 0, finished.stderr);
-  assert.deepEqual(
-    clock.delays,
-    [5000],
-    "a later --finish keeps to the interval since the last poll",
+  assert.deepEqual(clock.delays, [5000]);
+});
+
+test("login --finish treats a pending answer that arrives after the expiry as expired", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  await clock.sleep(899_000);
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () => {
+      await clock.sleep(1500);
+      return jsonResponse(400, { error: "authorization_pending" });
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(errorEnvelope(result.stderr).error, "authorization_expired");
+  assert.match(result.stdout, /^Expired: /);
+  assert.deepEqual(readdirSync(path.join(configHome, "firstdraft")), []);
+});
+
+test("login --finish succeeds when only the spent device login cannot be removed", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  const file = path.join(configHome, "firstdraft", "device-login.json");
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    credentialsFileSystem: {
+      ...fs,
+      rmSync: (target, options) => {
+        if (String(target) === file) {
+          throw Object.assign(new Error("canary"), { code: "EACCES" });
+        }
+        fs.rmSync(target, options);
+      },
+    },
+    fetchFunction: async () => tokenResponse(),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Logged in: /);
+  assert.equal(
+    result.stderr,
+    `Note: ${file} could not be removed. It holds only a spent device code; remove it.\n`,
   );
+  assert.equal(storedCredentials(configHome)[PRODUCTION]?.access_token, TOKEN);
 });
 
 test("login --finish slows down when First Draft asks and keeps the longer interval", async (context) => {
@@ -941,7 +1010,7 @@ test("login --finish says plainly when the login was refused or expired, and rem
       "access_denied",
       "authorization_denied",
       [
-        `Refused: the person denied the login, so this computer is not logged in to ${PRODUCTION}.`,
+        `Refused: the person denied this login, so no new login was saved for ${PRODUCTION}.`,
         "Ask the person before you start another login with 'firstdraft login --no-wait'.",
       ],
       "The login was denied in the browser. No credential was saved. Ask the person before you start another login with 'firstdraft login --no-wait'.",
@@ -950,7 +1019,7 @@ test("login --finish says plainly when the login was refused or expired, and rem
       "expired_token",
       "authorization_expired",
       [
-        `Expired: the link and the code expired before the person approved, so this computer is not logged in to ${PRODUCTION}.`,
+        `Expired: the link and the code expired before the person approved, so no new login was saved for ${PRODUCTION}.`,
         "To try again, run 'firstdraft login --no-wait'.",
       ],
       "The login expired before the person approved it. No credential was saved. Run 'firstdraft login --no-wait' to start again.",
@@ -1098,6 +1167,11 @@ test("login --finish reports an issued token it could not save", async (context)
   assert.equal(envelope.phase, "write");
   assert.equal(envelope.reason, "credentials_unavailable");
   assert.match(envelope.detail, /issued a token, but it could not be saved/);
+  assert.equal(
+    existsSync(path.join(configHome, "firstdraft", "device-login.json")),
+    false,
+    "the spent grant is removed even when the token cannot be saved",
+  );
   assertNoSecrets(result);
 });
 

@@ -298,21 +298,25 @@ export async function startDeviceLogin({
 }
 
 /**
- * The second step: polls the waiting device login at its interval for at
- * most FINISH_WAIT_MS and saves the token once the person has approved.
- * Removes the saved device login when the grant has ended, and otherwise
- * keeps it with the next time First Draft accepts a poll.
+ * The second step: polls the waiting device login at its interval, for at
+ * most FINISH_WAIT_MS from the start of the command with each request
+ * included, and saves the token once the person has approved. Removes the
+ * saved device login when the grant has ended, and otherwise keeps it with
+ * the next time First Draft accepts a poll.
  *
  * @param {DeviceLoginOptions} options
+ * @returns {Promise<{origin: string, leftover: string | null}>} `leftover`
+ *   names the spent device login file when it could not be removed
  */
 export async function finishDeviceLogin({
   origin,
   fetchFunction,
-  createRequestSignal,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs ?? 0),
   sleep = defaultSleep,
   now = Date.now,
   credentials = {},
 }) {
+  const deadline = now() + FINISH_WAIT_MS;
   const waiting = withDeviceLogin(credentials, () =>
     readDeviceLogin(credentials),
   );
@@ -321,34 +325,36 @@ export async function finishDeviceLogin({
   }
   readStore(credentials);
 
-  const discard = () =>
+  const expired = () => {
     withDeviceLogin(credentials, () => deleteDeviceLogin(credentials));
+    return new LoginExpiredError("The device code expired.");
+  };
   let { interval } = waiting;
   // Never more than one interval away, even after the clock moved back.
   let nextPollAt = Math.min(waiting.nextPollAt, now() + interval * 1000);
-  /** @param {number} at */
-  const keep = (at) => {
-    nextPollAt = at + interval * 1000;
+  const keep = () => {
+    nextPollAt = now() + interval * 1000;
     withDeviceLogin(credentials, () =>
       writeDeviceLogin(credentials, { ...waiting, interval, nextPollAt }),
     );
   };
-  const deadline = Math.max(now(), nextPollAt) + FINISH_WAIT_MS;
 
   while (true) {
+    if (now() >= waiting.expiresAt) throw expired();
+    if (nextPollAt >= deadline || nextPollAt >= waiting.expiresAt) {
+      throw new LoginPendingError({ ...waiting, interval, nextPollAt });
+    }
     const delayMs = nextPollAt - now();
     if (delayMs > 0) await sleep(delayMs);
-    if (now() >= waiting.expiresAt) {
-      discard();
-      throw new LoginExpiredError("The device code expired.");
-    }
+    if (now() >= waiting.expiresAt) throw expired();
 
     let result;
     try {
       result = await requestDeviceToken({
         origin,
         fetchFunction,
-        createRequestSignal,
+        createRequestSignal: () =>
+          createRequestSignal(Math.max(1, deadline - now())),
         deviceCode: waiting.deviceCode,
       });
     } catch (error) {
@@ -357,27 +363,48 @@ export async function finishDeviceLogin({
         error.code !== undefined &&
         ENDED_GRANT_CODES.includes(error.code)
       ) {
-        discard();
+        withDeviceLogin(credentials, () => deleteDeviceLogin(credentials));
       } else {
         // The poll may have reached First Draft, so the next one waits.
-        keep(now());
+        keep();
       }
       throw loginError(error);
     }
 
     if (!("pending" in result)) {
+      // The grant is spent once it issues a token, so its file goes first,
+      // whether or not the token can then be saved.
+      const removed = removeSpentDeviceLogin(credentials);
       saveToken(credentials, origin, result, now);
-      discard();
-      return { origin };
+      return {
+        origin,
+        leftover: removed ? null : deviceLoginPath(credentials),
+      };
     }
 
     if (result.pending === "slow_down") {
       interval += SLOW_DOWN_INCREMENT_MS / 1000;
     }
-    keep(now());
-    if (nextPollAt > deadline || nextPollAt >= waiting.expiresAt) {
-      throw new LoginPendingError({ ...waiting, interval, nextPollAt });
-    }
+    // A pending answer that arrived after the expiry is an expired grant.
+    if (now() >= waiting.expiresAt) throw expired();
+    keep();
+  }
+}
+
+/**
+ * Removes a device login whose grant has issued its token. A spent device
+ * code authenticates nothing, so a file that cannot be removed does not fail
+ * the login; the caller says where it is.
+ *
+ * @param {import("../credentials.js").CredentialStore} credentials
+ */
+function removeSpentDeviceLogin(credentials) {
+  try {
+    deleteDeviceLogin(credentials);
+    return true;
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+    return false;
   }
 }
 

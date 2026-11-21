@@ -106,26 +106,27 @@ the second is the plain verification link. On staging, each command the CLI prin
 The person approves on that page, where First Draft also asks the reports question until it has an answer.
 
 The device code is a credential, so the CLI never prints it; only the link and the user code appear. `--no-wait` saves
-the waiting login, device code included, as `device-login.json` beside `credentials.json`, with mode `0600` in the
-`0700` directory. The file holds one waiting login, and another `--no-wait` replaces it. As with `login`, an unusable
+the waiting login, device code included, as `device-login.json` beside `credentials.json`, with mode `0600`; the
+directory is created with mode `0700` when it does not exist. The file holds one waiting login, and another `--no-wait` replaces it. As with `login`, an unusable
 credentials file stops it before any request.
 
 `--finish` reads that file for the selected origin and polls First Draft at the grant's interval for at most 15
-seconds. It waits first when the previous poll was less than an interval ago, and a `slow_down` answer lengthens the
+seconds from its start, each request included. It waits first when the previous poll was less than an interval ago, and a `slow_down` answer lengthens the
 interval by five seconds; the file keeps both for the next `--finish`. It then says on standard output which of these
 happened, and every outcome but the first also ends with its handled error on standard error:
 
-- **Logged in** (exit 0): it saves the token as `login` does, removes the file, and prints
-  `Logged in: this computer is now logged in to <origin>.` and `Run 'firstdraft start' again.`
+- **Logged in** (exit 0): it removes the file, saves the token as `login` does, and prints
+  `Logged in: this computer is now logged in to <origin>.` and `Run 'firstdraft start' again.` If the file cannot be
+  removed, a note on standard error names it; it then holds only a spent device code.
 - **Still waiting** (`authorization_pending`): `Still waiting: the person has not approved the login yet.`, the link
   lines again, and
   `The link and the code expire at <UTC time>. When the person says they approved, run 'firstdraft login --finish' again.`
   The file stays.
 - **Expired** (`authorization_expired`):
-  `Expired: the link and the code expired before the person approved, so this computer is not logged in to <origin>.`
+  `Expired: the link and the code expired before the person approved, so no new login was saved for <origin>.`
   and `To try again, run 'firstdraft login --no-wait'.`
 - **Refused** (`authorization_denied`):
-  `Refused: the person denied the login, so this computer is not logged in to <origin>.` and
+  `Refused: the person denied this login, so no new login was saved for <origin>.` and
   `Ask the person before you start another login with 'firstdraft login --no-wait'.`
 - **No waiting login** (`login_not_started`), when none was started for this origin or it already ended:
   `No login is waiting: this computer has no device login for <origin> that has not ended.` and
@@ -265,10 +266,11 @@ An agent runs `firstdraft start` once, before other First Draft work; the Skill 
 firstdraft start
 ```
 
-It prints plain text for the agent on standard output, one fact per line. The sentences are fixed and ship in
-`src/agent-sentences.js`, where `login --no-wait` and `login --finish` take theirs. First Draft's answer only chooses
-among them: the only values they carry are the origin, versions, and the name of a token variable. It prints no token
-and no account fact other than whether reports are on.
+It prints plain text for the agent on standard output, one fact per line. The sentences are fixed. The update line is
+the one every command prints, and the rest ship in `src/agent-sentences.js`, where `login --no-wait` and
+`login --finish` take theirs. First Draft's answer only chooses among them: the only values they carry are the origin,
+versions, and the name of a token variable. It prints no token and no account fact other than whether reports are on,
+and its handled errors leave out the problem text First Draft sent.
 
 With a token for the origin, from the environment or a saved login, `start` makes one request, `GET /v1/account`, and
 reads the version headers on that answer as every command does. Without one, it makes no request. It exits 0 only when
