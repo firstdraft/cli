@@ -41,7 +41,8 @@ accepted API contract to `0.9.x`.
   stop never replaces the result of `logout`.
 - A `429` on any command except `logout`, `login` included, fails with `rate_limited`. It carries `status` 429,
   `retry_at` from `Retry-After` when that is readable, First Draft's problem in `response` when it sent a valid one
-  of at most 64 KiB, and `current` when a Compilation had already started. Its detail says to try again after
+  of at most 64 KiB, except from `start`, which passes on no text First Draft wrote, and `current` when a
+  Compilation had already started. Its detail says to try again after
   `retry_at`, when `response.detail` says, or in a minute. When `current` is present, the detail says to follow that
   Compilation with `compilation status` instead of compiling again.
 - `firstdraft account` prints `{"reports": "on"}` or `{"reports": "off"}` for the signed-in account, at the origin

@@ -2,7 +2,8 @@ import { STAGING_API_URL } from "./api-authentication.js";
 
 // The plain sentences the CLI prints for an agent, kept here so they are
 // written once. `firstdraft start` and the two steps of the agent's device
-// login print only these. A First Draft answer only chooses among them, and
+// login print only these, besides the update line every command shares
+// (src/service-client.js). A First Draft answer only chooses among them, and
 // the only values they carry are an origin, versions, a token variable's
 // name, and a device login's validated link, user code, and expiry.
 // docs/commands.md quotes them and the Skill copies them, so a change here is
@@ -122,7 +123,7 @@ export function deviceLoginFinishedLines(origin) {
 /** @param {DeviceLoginLink} login */
 export function deviceLoginPendingLines(login) {
   return [
-    "Still waiting: the person has not approved the login yet.",
+    "Still waiting: First Draft has not confirmed that the person approved the login.",
     ...linkLines(login),
     `The link and the code expire at ${utcTime(login.expiresAt)}. When the person says they approved, run ${commandLine(login.origin, "login --finish")} again.`,
   ];
@@ -131,7 +132,7 @@ export function deviceLoginPendingLines(login) {
 /** @param {string} origin */
 export function deviceLoginExpiredLines(origin) {
   return [
-    `Expired: the link and the code expired before the person approved, so no new login was saved for ${origin}.`,
+    `Expired: the link and the code expired before this computer finished the login, so no new login was saved for ${origin}.`,
     `To try again, run ${commandLine(origin, "login --no-wait")}.`,
   ];
 }

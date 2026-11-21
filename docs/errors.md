@@ -47,7 +47,7 @@ to replace or unset it. No handled error from `start` carries `response`, so non
 - `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before
   approval. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
   After `login --finish`, start again with `login --no-wait`, which prints a new link and code.
-- `authorization_pending`, from `login --finish`: the person has not approved yet, and the CLI stopped after its
+- `authorization_pending`, from `login --finish`: First Draft has not confirmed an approval yet, and the CLI stopped after its
   short wait. The link and the code still work until the time it prints; when the person says they approved, run
   `login --finish` again.
 - `login_not_started`, from `login --finish`: no waiting login started with `login --no-wait` exists for the

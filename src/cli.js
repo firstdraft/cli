@@ -1859,6 +1859,7 @@ async function runLoginNoWait({
       denied: LOGIN_DENIED_DETAIL,
       expired: LOGIN_EXPIRED_DETAIL,
       failed: `The login could not be started. No credential was saved. Run ${commandLine(origin, "login --no-wait")} again.`,
+      retry: commandLine(origin, "login --no-wait"),
     });
     if (status !== null) return status;
 
@@ -1906,7 +1907,7 @@ async function runLoginFinish({
       writeLines(stdout, deviceLoginPendingLines(error.login));
       writeJson(stderr, {
         error: "authorization_pending",
-        detail: `The person has not approved the login yet, and the CLI stopped waiting. When the person says they approved, run ${commandLine(origin, "login --finish")} again.`,
+        detail: `First Draft has not confirmed that the person approved the login, and the CLI stopped waiting. When the person says they approved, run ${commandLine(origin, "login --finish")} again.`,
       });
       return 1;
     }
@@ -1927,11 +1928,12 @@ async function runLoginFinish({
     }
     const status = writeLoginError(stderr, error, origin, {
       denied: `The login was denied in the browser. No credential was saved. Ask the person before you start another login with ${restart}.`,
-      expired: `The login expired before the person approved it. No credential was saved. Run ${restart} to start again.`,
+      expired: `The login expired before this computer finished it. No credential was saved. Run ${restart} to start again.`,
       failed:
         error instanceof LoginFailedError && error.reason === "invalid_grant"
           ? `The login could not be finished, and no credential was saved. Start again with ${restart}.`
           : `The login could not be finished, and no credential was saved. Run ${commandLine(origin, "login --finish")} again; if it fails again, start over with ${restart}.`,
+      retry: commandLine(origin, "login --finish"),
     });
     if (status !== null) return status;
 
@@ -1954,7 +1956,8 @@ async function runLoginFinish({
  * @param {Writer} stderr
  * @param {unknown} error
  * @param {string} origin
- * @param {{denied: string, expired: string, failed: string}} details
+ * @param {{denied: string, expired: string, failed: string, retry?: string}} details
+ *   `retry` names the command to run again after a credentials read failure
  * @returns {number | null}
  */
 function writeLoginError(stderr, error, origin, details) {
@@ -1988,7 +1991,9 @@ function writeLoginError(stderr, error, origin, details) {
             ? `The device login file at credentials_path could not be used. Remove it, then run ${commandLine(origin, "start")} to see whether this computer is logged in.`
             : error.phase === "write"
               ? `First Draft issued a token, but it could not be saved. Revoke the new token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry login.`
-              : LOGIN_CREDENTIALS_DETAIL,
+              : details.retry === undefined
+                ? LOGIN_CREDENTIALS_DETAIL
+                : `The credentials file could not be read. No network request was made. Repair or remove it, then run ${details.retry} again.`,
       ...(error.phase === undefined ? {} : { phase: error.phase }),
       ...(error.reason === undefined ? {} : { reason: error.reason }),
       ...(error.status === undefined ? {} : { status: error.status }),

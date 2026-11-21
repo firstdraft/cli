@@ -118,12 +118,12 @@ happened, and every outcome but the first also ends with its handled error on st
 - **Logged in** (exit 0): it removes the file, saves the token as `login` does, and prints
   `Logged in: this computer is now logged in to <origin>.` and `Run 'firstdraft start' again.` If the file cannot be
   removed, a note on standard error names it; it then holds only a spent device code.
-- **Still waiting** (`authorization_pending`): `Still waiting: the person has not approved the login yet.`, the link
+- **Still waiting** (`authorization_pending`): `Still waiting: First Draft has not confirmed that the person approved the login.`, the link
   lines again, and
   `The link and the code expire at <UTC time>. When the person says they approved, run 'firstdraft login --finish' again.`
   The file stays.
 - **Expired** (`authorization_expired`):
-  `Expired: the link and the code expired before the person approved, so no new login was saved for <origin>.`
+  `Expired: the link and the code expired before this computer finished the login, so no new login was saved for <origin>.`
   and `To try again, run 'firstdraft login --no-wait'.`
 - **Refused** (`authorization_denied`):
   `Refused: the person denied this login, so no new login was saved for <origin>.` and

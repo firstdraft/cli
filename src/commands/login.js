@@ -347,14 +347,18 @@ export async function finishDeviceLogin({
     const delayMs = nextPollAt - now();
     if (delayMs > 0) await sleep(delayMs);
     if (now() >= waiting.expiresAt) throw expired();
+    // A timer can wake late; no poll starts after the wait has ended.
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      throw new LoginPendingError({ ...waiting, interval, nextPollAt });
+    }
 
     let result;
     try {
       result = await requestDeviceToken({
         origin,
         fetchFunction,
-        createRequestSignal: () =>
-          createRequestSignal(Math.max(1, deadline - now())),
+        createRequestSignal: () => createRequestSignal(remainingMs),
         deviceCode: waiting.deviceCode,
       });
     } catch (error) {

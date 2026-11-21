@@ -779,7 +779,7 @@ test("login --no-wait stops before the link when the login cannot be kept", asyn
   assert.deepEqual(errorEnvelope(unreadable.stderr), {
     error: "login_failed",
     detail:
-      "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login' again.",
+      "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login --no-wait' again.",
     reason: "credentials_invalid",
     phase: "read",
     credentials_path: credentialsFile,
@@ -893,7 +893,7 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   assert.equal(
     pending.stdout,
     lines(
-      "Still waiting: the person has not approved the login yet.",
+      "Still waiting: First Draft has not confirmed that the person approved the login.",
       STARTED_LINES[0] ?? "",
       STARTED_LINES[1] ?? "",
       "The link and the code expire at 2026-09-29T12:15:00Z. When the person says they approved, run 'firstdraft login --finish' again.",
@@ -902,7 +902,7 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   assert.deepEqual(errorEnvelope(pending.stderr), {
     error: "authorization_pending",
     detail:
-      "The person has not approved the login yet, and the CLI stopped waiting. When the person says they approved, run 'firstdraft login --finish' again.",
+      "First Draft has not confirmed that the person approved the login, and the CLI stopped waiting. When the person says they approved, run 'firstdraft login --finish' again.",
   });
   assert.equal(
     waitingLogin(configHome).next_poll_at,
@@ -933,6 +933,52 @@ test("login --finish waits briefly, then says it is still waiting and when to po
   });
   assert.equal(finished.status, 0, finished.stderr);
   assert.deepEqual(clock.delays, [5000]);
+});
+
+test("login --finish sends no poll after its wait has ended, even when a timer wakes late", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  let polls = 0;
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: (delayMs) => clock.sleep(delayMs + 10_200),
+    loginNow: clock.now,
+    fetchFunction: async () => {
+      polls += 1;
+      return jsonResponse(400, { error: "authorization_pending" });
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(errorEnvelope(result.stderr).error, "authorization_pending");
+  assert.equal(polls, 1, "the poll after the late wakeup is not sent");
+});
+
+test("a credentials file that cannot be read names the same login step, staging included", async (context) => {
+  const configHome = temporaryConfigHome(context);
+  const started = await invoke(context, ["--staging", "login", "--no-wait"], {
+    configHome,
+    fetchFunction: async () =>
+      jsonResponse(200, {
+        ...deviceAuthorizationBody(),
+        verification_uri: `${STAGING}/device`,
+        verification_uri_complete: `${STAGING}/device?user_code=BCDF-GHJK`,
+      }),
+  });
+  assert.equal(started.status, 0, started.stderr);
+  writeFileSync(
+    path.join(configHome, "firstdraft", "credentials.json"),
+    "{canary",
+  );
+  for (const step of ["--no-wait", "--finish"]) {
+    const result = await invoke(context, ["login", step, "--staging"], {
+      configHome,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(
+      errorEnvelope(result.stderr).detail,
+      `The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login ${step} --staging' again.`,
+    );
+  }
 });
 
 test("login --finish treats a pending answer that arrives after the expiry as expired", async (context) => {
@@ -1019,10 +1065,10 @@ test("login --finish says plainly when the login was refused or expired, and rem
       "expired_token",
       "authorization_expired",
       [
-        `Expired: the link and the code expired before the person approved, so no new login was saved for ${PRODUCTION}.`,
+        `Expired: the link and the code expired before this computer finished the login, so no new login was saved for ${PRODUCTION}.`,
         "To try again, run 'firstdraft login --no-wait'.",
       ],
-      "The login expired before the person approved it. No credential was saved. Run 'firstdraft login --no-wait' to start again.",
+      "The login expired before this computer finished it. No credential was saved. Run 'firstdraft login --no-wait' to start again.",
     ],
     [
       "invalid_grant",
