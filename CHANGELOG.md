@@ -39,8 +39,10 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
   the command keeps its result after one `First Draft: ... This command finished; ... before the next one.` line. A
   stop never replaces the result of `logout`.
 - A `429` on any command except `logout`, `login` included, fails with `rate_limited`. It carries `status` 429,
-  `retry_at` from `Retry-After` when that is readable, and First Draft's problem in `response` when it sent a valid
-  one of at most 64 KiB. Its detail says to try again after `retry_at`, when `response.detail` says, or in a minute.
+  `retry_at` from `Retry-After` when that is readable, First Draft's problem in `response` when it sent a valid one
+  of at most 64 KiB, and `current` when a Compilation had already started. Its detail says to try again after
+  `retry_at`, when `response.detail` says, or in a minute. When `current` is present, the detail says to follow that
+  Compilation with `compilation status` instead of compiling again.
 - `firstdraft account` prints `{"reports": "on"}` or `{"reports": "off"}` for the signed-in account, at the origin
   that `login` would select.
 - `firstdraft report progress` and `firstdraft report failure` first read the account at the Project's pinned origin,
@@ -51,9 +53,11 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
   `preview_started`, with optional counts of at most 1000000. `--kind` is `spec_failure`, `setup_failure`,
   `boot_error`, or `lint_failure`. A failure report keeps each field only in its shape: an RSpec run of the
   application's specs, a Ruby constant, up to 20 application frames sent as `path:LINE`, version numbers, and the plain
-  words of the first line of the message (at most 300 characters) and fix summary (at most 200). A `Left out:` line
-  names each field and frame left out; the printed JSON is exactly what is sent. Both commands find the Project from
-  the generated application's root after root adoption, or from the Project's directory.
+  words of the first line of the message (at most 300 characters) and fix summary (at most 200). When anything is
+  left out, a `Left out:` line names each field left out, counts the frames that are not in the application's files
+  with a line number, and says when frames after the first 20 were dropped; the printed JSON is exactly what is
+  sent. Both commands find the Project from the generated application's root after root adoption, or from the
+  Project's directory.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
