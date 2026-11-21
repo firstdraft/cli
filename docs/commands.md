@@ -618,8 +618,10 @@ the plain words of a message or fix summary it is given can still quote code, so
 
 Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push. Unless
 First Draft answers `{"reports": "on"}`, no report is sent. With reports off, the command writes a line that says so
-and exits 0, so the agent's work continues. When the account cannot be read, the command fails with
-`account_unavailable`, or with `invalid_server_response` when the answer breaks the account's contract.
+and exits 0, so the agent's work continues. When the account read fails, no report is sent either. The command then
+ends with `account_unavailable`, with `invalid_server_response` when the answer breaks the account's contract, or with
+an error that any request can give: [`authentication_required`](errors.md#environment-and-credential-errors), or
+`rate_limited` or an update refusal ([update and limit errors](errors.md#update-and-limit-errors)).
 
 With reports on, the command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the
 exact JSON body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output. It then
