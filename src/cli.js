@@ -207,19 +207,18 @@ nothing and the command still exits 0.
 const REPORT_FAILURE_HELP = `First Draft CLI
 
 Usage:
-  firstdraft report failure <compilation-id> --kind <kind> --rerun <command>
-    --error-class <name> [options]
+  firstdraft report failure <compilation-id> --kind <kind> [options]
 
 Options:
       --staging               Use staging; reject a different saved origin
       --kind <kind>           spec_failure, setup_failure, boot_error, or
                               lint_failure
-      --rerun <command>       Command that reproduces the failure
-      --error-class <name>    Exception class, or the lint rule's name
-      --message <text>        Error message (first 300 characters)
+      --rerun <command>       The RSpec run that reproduces the failure
+      --error-class <name>    The exception's Ruby constant
+      --message <text>        Error message (first line, plain words)
       --frame <path:line>     Backtrace frame in the application, repeatable
                               (first 20)
-      --fix-summary <text>    One line on the fix (first 200 characters)
+      --fix-summary <text>    One line on the fix (plain words)
       --ruby-version <v>      Ruby version
       --rails-version <v>     Rails version
   -h, --help                  Show help
@@ -228,11 +227,11 @@ Environment:
   FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
-The command replaces email addresses, absolute paths, NAME=value assignments,
-and token-like strings, leaves out frames outside the current directory, prints
-the exact report, then sends it once to the origin pinned by a successful plan
-push. Run it from the generated application's root. When the account
-has reports off, First Draft keeps nothing and the command still exits 0.
+The command keeps each field only in its shape: an RSpec run of the
+application's specs, a Ruby constant, frames in the application's files,
+version numbers, and the plain words of free text. It prints the exact report
+and what it left out, then sends it once to the origin pinned by a successful
+plan push. Run it from the generated application's root.
 `;
 
 const CONVERSATION_HELP = `First Draft CLI
@@ -3292,7 +3291,7 @@ async function runReportProgress(options) {
       wrapper: "progress_report",
       route: SERVICE_ROUTES.sendProgressReport,
       compilationId,
-      body: () => progressReportBody(step, counts),
+      body: () => ({ body: progressReportBody(step, counts), omitted: [] }),
     },
   );
 }
@@ -3352,12 +3351,7 @@ async function runReportFailure(options) {
     parsed.positionals.length !== 1 ||
     !isUuidV7(compilationId) ||
     kind === undefined ||
-    !FAILURE_KINDS.includes(kind) ||
-    !hasText(rerun) ||
-    !hasText(errorClass) ||
-    [rubyVersion, railsVersion].some(
-      (version) => version !== undefined && !RUNTIME_VERSION.test(version),
-    )
+    !FAILURE_KINDS.includes(kind)
   ) {
     return invalid();
   }
@@ -3387,13 +3381,6 @@ async function runReportFailure(options) {
   );
 }
 
-const RUNTIME_VERSION = /^[0-9][0-9A-Za-z.+-]{0,31}$/;
-
-/** @param {string | undefined} value @returns {value is string} */
-function hasText(value) {
-  return value !== undefined && value.trim() !== "";
-}
-
 /**
  * @param {string} value
  * @returns {number | null} null when the value is not a count
@@ -3410,7 +3397,7 @@ function parseReportCount(value) {
  * pinned origin.
  *
  * @param {ServiceCommandOptions} options
- * @param {{noun: string, wrapper: string, route: {method: string, path: string}, compilationId: string, body: (cwd: string) => unknown}} report
+ * @param {{noun: string, wrapper: string, route: {method: string, path: string}, compilationId: string, body: (cwd: string) => {body: unknown, omitted: string[]}}} report
  */
 async function sendReportCommand(
   options,
@@ -3424,9 +3411,13 @@ async function sendReportCommand(
       return 1;
     }
 
-    const text = `${JSON.stringify(body(pinned.cwd), null, 2)}\n`;
+    const shaped = body(pinned.cwd);
+    const text = `${JSON.stringify(shaped.body, null, 2)}\n`;
     stdout.write(
-      `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}`,
+      `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}` +
+        (shaped.omitted.length === 0
+          ? ""
+          : `Left out: ${shaped.omitted.join("; ")}.\n`),
     );
     const { outcome } = await service.settle(
       sendReport({

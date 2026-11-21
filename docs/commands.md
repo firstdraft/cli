@@ -72,8 +72,9 @@ slow down, and stops when the code expires.
 
 Neither flow sends this computer's hostname. Their requests carry `FirstDraft-Client` like every other request
 ([What the CLI sends](#what-the-cli-sends)). A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
-`authorization_expired`. A First Draft limit or a required update ends it with `rate_limited`, `update_required`, or
-`api_contract_unsupported` ([update line and refusals](#update-line-and-refusals)). Other failures exit with
+`authorization_expired`. A First Draft limit ends it with `rate_limited`. A required update or an unsupported API
+contract replaces its result with `update_required` or `api_contract_unsupported` only when it stops a request the
+login still had to send, as [update line and refusals](#update-line-and-refusals) describes. Other failures exit with
 `login_failed`. No credential is saved unless the login succeeds. See
 [Errors and recovery](errors.md#login-and-logout-errors).
 
@@ -592,22 +593,26 @@ firstdraft report failure <compilation-id> --kind spec_failure \
 run, failing examples, failing examples that the README's Behavior to write names, and Behavior to write items still
 to write. The report carries the given counts under `counts`.
 
-A failure report needs `--kind` (`spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`), `--rerun` (the
-command that reproduces the failure), and `--error-class` (the exception class, or the lint rule's name). `--message`,
-`--frame` (repeatable: a place in the application such as `app/models/post.rb:12`), `--fix-summary` (one line on the
-agent's fix), `--ruby-version`, and `--rails-version` are optional. Before it prints the report, the CLI removes
-terminal escapes and control characters, then replaces email addresses with `[email]`, the value of an
-environment-style `NAME=value` assignment (in `--rerun`, of any `name=value` assignment) with `[value]`, absolute
-paths (also after an option such as `-I`, in quotes, or as a `file://` URL) with `[path]`, and recognized credential
-formats, and runs of 32 or more letters, digits, `_`, or `-` that mix letters and digits, with `[token]`. An absolute
-path inside the current directory becomes relative to it instead. A frame outside it, absolute, or reached through
-`..` is left out. It keeps the first
-300 characters of the rerun command and of the message, 200 of the fix summary, and 20 frames. This is a safeguard,
-not a guarantee, so read the printed report. A failure report carries no diff, environment variable, or file
+A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`). Each other
+field is sent only in its shape, and left out otherwise:
+
+| Option                              | Field         | What it may contain                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--rerun`                           | `rerun`       | An RSpec run of the application's specs: an optional `bundle exec ` or `bin/`, `rspec`, then one or more paths under `spec/` made of letters, digits, `_`, `.`, `/`, and `-`, each with optional `:LINE` parts. Leading environment assignments, with or without `env`, are dropped first. |
+| `--error-class`                     | `error_class` | A Ruby constant path, such as `ActiveRecord::RecordInvalid`.                                                                                                                                                                                                                               |
+| `--frame`                           | `frames`      | Up to 20 frames in the application's files: a relative path under `app/`, `lib/`, `config/`, `db/`, or `spec/` made of the same characters, with a line number, sent as `path:LINE`. A path inside the current directory may be absolute.                                                  |
+| `--message`                         | `message`     | Plain words: the first line, at most 300 characters.                                                                                                                                                                                                                                       |
+| `--fix-summary`                     | `fix_summary` | Plain words: the first line, at most 200 characters.                                                                                                                                                                                                                                       |
+| `--ruby-version`, `--rails-version` | `versions`    | Version numbers, such as `3.4.7`.                                                                                                                                                                                                                                                          |
+
+Free text keeps plain words only. After taking the first line and cutting it, the CLI replaces with `[…]` every span
+in single quotes, double quotes, or backticks, and every word that contains `=`, `/`, `\`, `@`, or a quote, or is
+longer than 24 characters. A `lint_failure` therefore sends no rule name, and a rerun command that is not an RSpec run
+is left out. A failure report carries no diff, environment variable, path outside the application, or file
 contents.
 
-Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:` and the exact JSON
-body on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
+Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the exact JSON
+body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
 `Sent.` once First Draft acknowledges the stored report with `201`; any other success is `report_unavailable`. When the
 account has reports off, First Draft answers `403 reports_off` and keeps nothing; the command writes
 a line that says so and exits 0, so the agent's work continues. Neither command retries.

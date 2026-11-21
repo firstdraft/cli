@@ -26,77 +26,36 @@ export const FAILURE_KINDS = Object.freeze([
 ]);
 const MAX_FAILURE_FRAMES = 20;
 
-// Code points kept in each free-text field after redaction.
+// A failure report carries only fields of a known shape. Free text keeps
+// plain words, and anything that does not fit its shape is left out, so the
+// rules say what may leave the computer rather than guessing what a secret
+// looks like. The Service refuses the same shapes.
 const MAX_MESSAGE = 300;
 const MAX_FIX_SUMMARY = 200;
 const MAX_ERROR_CLASS = 200;
 const MAX_RERUN = 300;
 const MAX_FRAME = 300;
-
-// eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const MAX_VERSION = 32;
+const SAFE_PATH = String.raw`[A-Za-z0-9_./-]+`;
+// bundle exec rspec ./spec/models/post_spec.rb:42, bin/rspec spec/x_spec.rb
+const RERUN = new RegExp(
+  String.raw`^(?:bundle exec |bin/)?rspec(?: (?:\./)?spec/${SAFE_PATH}(?::\d+)*)+$`,
+);
+const ERROR_CLASS = /^[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*$/;
+const FRAME = new RegExp(
+  String.raw`^(?:\./)?((?:app|lib|config|db|spec)/${SAFE_PATH}):(\d+)(?::in .*)?$`,
+);
+const PARENT_SEGMENT = /(?:^|\/)\.\.(?:\/|:|$)/;
+const VERSION_NUMBER = /^\d+(?:\.\d+){0,3}$/;
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
-// An absolute path: one in a home directory, on a drive, on a network share
-// (\\host\share or //host/share), or from the root with at least two
-// segments. It may start a word or follow a command option such as -I or
-// --require=. A URL's path, a relative path such as app/models/post.rb, and
-// ./spec/... are not matched. A path in quotes may contain spaces.
-const PATH_CHARACTER = String.raw`[^\s'"` + "`" + String.raw`()<>[\]{},;]`;
-const SEGMENT = String.raw`[^\s\\/'"` + "`" + String.raw`()<>[\]{},;]`;
-const PATH_START = String.raw`(?:(?<![\w.~:/\\-])|(?<=(?:^|[\s'"(])--?[A-Za-z][A-Za-z0-9-]*=?))`;
-// After an option such as -I, a path directly under the root counts too.
-// The path may be the next argument, and may contain escaped spaces.
-const OPTION_PATH = new RegExp(
-  String.raw`(?<=(?:^|[\s'"(])--?[A-Za-z][A-Za-z0-9-]*(?:=|[ \t]+)?)[\\/](?:\\ |${SEGMENT})+(?:\\ |${PATH_CHARACTER})*`,
-  "g",
-);
-// A shell-escaped space continues an unquoted path.
-const ESCAPED_PATH = String.raw`(?:\\ |${PATH_CHARACTER})`;
-const ABSOLUTE_PATH = new RegExp(
-  String.raw`${PATH_START}(?:~[\\/]${ESCAPED_PATH}+|[A-Za-z]:[\\/]${ESCAPED_PATH}*|[\\/]{2}${SEGMENT}+${ESCAPED_PATH}*|[\\/](?:\\ |${SEGMENT})+(?:[\\/]${ESCAPED_PATH}*)?)`,
-  "g",
-);
-const QUOTED = /(['"`])([^'"`\n]+)\1/g;
-const ABSOLUTE_START =
-  /^(?:file:\/\/|~[\\/]|[A-Za-z]:[\\/]|[\\/]{1,2}[^\s\\/])/i;
-// A quoted option and its path together, such as "-I/Team Notes/lib".
-// The shortest option prefix comes first, so -IC:\lib keeps its drive letter.
-const QUOTED_OPTION = /^(--?[A-Za-z][A-Za-z0-9-]*?=?)((?:[A-Za-z]:)?[\\/~].*)$/;
-const FILE_URL = new RegExp(String.raw`\bfile:\/\/${PATH_CHARACTER}*`, "gi");
-// NAME=value, as a shell sets an environment variable for one command.
-// A value may be quoted, or unquoted with backslash escapes.
-// The whole shell word: quoted parts (which may span lines), escapes, and
-// plain characters, in any order.
-const ASSIGNMENT_VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'[^']*'|\\.|[^\s\\'"])+`;
-const ASSIGNMENT = new RegExp(
-  String.raw`(?<![\w-])([A-Z_][A-Z0-9_]*)=${ASSIGNMENT_VALUE}`,
-  "g",
-);
-// In a command line, a lowercase name such as npm_config_registry is an
-// assignment too; elsewhere name=value is ordinary text.
-const COMMAND_ASSIGNMENT = new RegExp(
-  String.raw`(?<![\w-])([A-Za-z_][A-Za-z0-9_]*)=${ASSIGNMENT_VALUE}`,
-  "g",
-);
-// An assignment quoted as a whole, as in env 'LABEL=North West' bin/rspec.
-// Each quote ends only at its own kind, so "LABEL=O'Brien" is one value.
-const QUOTED_ASSIGNMENT =
-  /"([A-Z_][A-Z0-9_]*)=[^"\n]*"|'([A-Z_][A-Z0-9_]*)=[^'\n]*'/g;
-const QUOTED_COMMAND_ASSIGNMENT =
-  /"([A-Za-z_][A-Za-z0-9_]*)=[^"\n]*"|'([A-Za-z_][A-Za-z0-9_]*)=[^'\n]*'/g;
-// Credential formats that need no digit, as the Service also scrubs them.
-const CREDENTIAL =
-  /\b(?:eyJ[\w-]*\.[\w-]+\.[\w-]*|fd_[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|sk-[\w-]{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16})/g;
-// A frame outside the application: redacted, absolute, or through "..". The
-// Service accepts only paths inside the project.
-const OUTSIDE_FRAME =
-  /^(?:\[path\]|[\\/~]|[A-Za-z]:)|(?:^|[\\/])\.\.(?:[\\/]|:|$)/;
-// Long runs of token characters that mix letters and digits, such as API
-// tokens, digests, and UUIDs.
-const TOKEN_CANDIDATE = /[A-Za-z0-9_-]{32,}/g;
-const REDACTED_PATH = "[path]";
+const QUOTED_SPAN = /'[^']*'|"[^"]*"|`[^`]*`/g;
+// A word that can carry a value: an assignment, a path or URL, an address, a
+// quote, or anything long enough to be a token.
+const VALUE_WORD = /[=/\\@'"`]/;
+const MAX_PLAIN_WORD = 24;
+const PLACEHOLDER = "[…]";
 
 export class ReportRejectedError extends Error {
   /**
@@ -146,8 +105,8 @@ export function progressReportBody(step, counts) {
 /**
  * @typedef {object} FailureReport
  * @property {string} kind one of FAILURE_KINDS
- * @property {string} rerun
- * @property {string} errorClass
+ * @property {string} [rerun]
+ * @property {string} [errorClass]
  * @property {string} [message]
  * @property {readonly string[]} [frames]
  * @property {string} [fixSummary]
@@ -156,13 +115,11 @@ export function progressReportBody(step, counts) {
  */
 
 /**
- * Builds the failure report that is printed and sent. Every free-text field
- * is redacted, then cut to its limit, so the printed report is exactly what
- * leaves the computer. A frame outside `cwd` is left out, because a report
- * describes generated code.
+ * Shapes the failure report that is printed and sent. Each field keeps only
+ * what fits its shape; `omitted` says, for the preview, what was left out.
  *
  * @param {FailureReport} report
- * @param {string} cwd absolute paths inside it become relative
+ * @param {string} cwd an absolute frame inside it becomes relative
  */
 export function failureReportBody(
   {
@@ -177,113 +134,191 @@ export function failureReportBody(
   },
   cwd,
 ) {
-  /** @param {string} text @param {number} limit */
-  const field = (text, limit) => clip(redact(text, cwd), limit);
-  const kept = frames
-    .map((frame) => field(frame, MAX_FRAME))
-    .filter((frame) => !OUTSIDE_FRAME.test(frame))
-    // The Service accepts frames with / separators only.
-    .map((frame) => frame.replace(/^[^:]*/, (file) => file.replace(/\\/g, "/")))
-    .slice(0, MAX_FAILURE_FRAMES);
-  const versions = {
-    ...(rubyVersion === undefined ? {} : { ruby: rubyVersion }),
-    ...(railsVersion === undefined ? {} : { rails: railsVersion }),
-  };
+  /** @type {string[]} */
+  const omitted = [];
+  const shapedRerun = rerun === undefined ? undefined : rspecRun(rerun);
+  if (rerun !== undefined && shapedRerun === undefined) {
+    omitted.push("rerun, which is not an RSpec run of the application's specs");
+  }
+  const shapedErrorClass =
+    errorClass !== undefined &&
+    errorClass.length <= MAX_ERROR_CLASS &&
+    ERROR_CLASS.test(errorClass)
+      ? errorClass
+      : undefined;
+  if (errorClass !== undefined && shapedErrorClass === undefined) {
+    omitted.push("error_class, which is not a Ruby constant");
+  }
+  const shapedFrames = frames
+    .map((frame) => appFrame(frame, cwd))
+    .filter((frame) => frame !== undefined);
+  if (shapedFrames.length < frames.length) {
+    const dropped = frames.length - shapedFrames.length;
+    omitted.push(
+      `${dropped} ${dropped === 1 ? "frame" : "frames"} not in the application's files with a line number`,
+    );
+  }
+  if (shapedFrames.length > MAX_FAILURE_FRAMES) {
+    omitted.push(`frames after the first ${MAX_FAILURE_FRAMES}`);
+  }
+  /** @type {Record<string, string>} */
+  const versions = {};
+  for (const [name, value] of /** @type {const} */ ([
+    ["ruby", rubyVersion],
+    ["rails", railsVersion],
+  ])) {
+    if (value === undefined) continue;
+    if (value.length <= MAX_VERSION && VERSION_NUMBER.test(value)) {
+      versions[name] = value;
+    } else {
+      omitted.push(`the ${name} version, which is not a version number`);
+    }
+  }
+  const shapedMessage =
+    message === undefined ? undefined : plainWords(message, MAX_MESSAGE);
+  const shapedFixSummary =
+    fixSummary === undefined
+      ? undefined
+      : plainWords(fixSummary, MAX_FIX_SUMMARY);
 
   return {
-    failure_report: {
-      kind,
-      rerun: clip(
-        redact(
-          rerun
-            .replace(QUOTED_COMMAND_ASSIGNMENT, quotedAssignment)
-            .replace(COMMAND_ASSIGNMENT, "$1=[value]"),
-          cwd,
-        ),
-        MAX_RERUN,
-      ),
-      error_class: field(errorClass, MAX_ERROR_CLASS),
-      ...(message === undefined
-        ? {}
-        : { message: field(message, MAX_MESSAGE) }),
-      ...(kept.length === 0 ? {} : { frames: kept }),
-      ...(fixSummary === undefined
-        ? {}
-        : { fix_summary: field(fixSummary, MAX_FIX_SUMMARY) }),
-      ...(Object.keys(versions).length === 0 ? {} : { versions }),
+    body: {
+      failure_report: {
+        kind,
+        ...(shapedRerun === undefined ? {} : { rerun: shapedRerun }),
+        ...(shapedErrorClass === undefined
+          ? {}
+          : { error_class: shapedErrorClass }),
+        ...(shapedMessage ? { message: shapedMessage } : {}),
+        ...(shapedFrames.length === 0
+          ? {}
+          : { frames: shapedFrames.slice(0, MAX_FAILURE_FRAMES) }),
+        ...(shapedFixSummary ? { fix_summary: shapedFixSummary } : {}),
+        ...(Object.keys(versions).length === 0 ? {} : { versions }),
+      },
     },
+    omitted,
   };
 }
 
 /**
- * Removes terminal escapes and control characters other than tab and
- * newline, then replaces email addresses, absolute paths, and token-like
- * strings. An absolute path inside `cwd` becomes relative to it.
+ * The command without its leading environment assignments, when what is left
+ * is an RSpec run of the application's specs.
+ *
+ * @param {string} command
+ * @returns {string | undefined}
+ */
+export function rspecRun(command) {
+  const words = shellWords(command);
+  if (words === null) return undefined;
+
+  let start = 0;
+  if (
+    words[0]?.value === "env" &&
+    words[1] !== undefined &&
+    ASSIGNMENT_WORD.test(words[1].value)
+  ) {
+    start = 1;
+  }
+  while (ASSIGNMENT_WORD.test(words[start]?.value ?? "")) {
+    start += 1;
+  }
+
+  const run = words
+    .slice(start)
+    .map((word) => word.raw)
+    .join(" ");
+  return run.length <= MAX_RERUN && RERUN.test(run) && !PARENT_SEGMENT.test(run)
+    ? run
+    : undefined;
+}
+
+/**
+ * Splits a command into shell words, keeping each word's text as written
+ * and its value with quotes and escapes removed. Returns null for an
+ * unterminated quote.
+ *
+ * @param {string} command
+ * @returns {{raw: string, value: string}[] | null}
+ */
+function shellWords(command) {
+  /** @type {{raw: string, value: string}[]} */
+  const words = [];
+  let raw = "";
+  let value = "";
+  let inWord = false;
+  let index = 0;
+  while (index < command.length) {
+    const character = /** @type {string} */ (command[index]);
+    if (/\s/.test(character)) {
+      if (inWord) words.push({ raw, value });
+      raw = "";
+      value = "";
+      inWord = false;
+      index += 1;
+      continue;
+    }
+
+    inWord = true;
+    if (character === "'" || character === '"') {
+      const close = command.indexOf(character, index + 1);
+      if (close === -1) return null;
+      raw += command.slice(index, close + 1);
+      value += command.slice(index + 1, close);
+      index = close + 1;
+    } else if (character === "\\" && index + 1 < command.length) {
+      raw += command.slice(index, index + 2);
+      value += command[index + 1];
+      index += 2;
+    } else {
+      raw += character;
+      value += character;
+      index += 1;
+    }
+  }
+  if (inWord) words.push({ raw, value });
+  return words;
+}
+
+/**
+ * A frame in the application's own files, as `path:line`.
+ *
+ * @param {string} frame
+ * @param {string} cwd
+ * @returns {string | undefined}
+ */
+function appFrame(frame, cwd) {
+  const root = `${cwd.replace(/[\\/]+$/, "")}/`;
+  const relative = frame.startsWith(root) ? frame.slice(root.length) : frame;
+  const match = FRAME.exec(
+    relative.replace(/^[^:]*/, (file) => file.replace(/\\/g, "/")),
+  );
+  if (match === null || PARENT_SEGMENT.test(match[1] ?? "")) return undefined;
+
+  const shaped = `${match[1]}:${match[2]}`;
+  return shaped.length <= MAX_FRAME ? shaped : undefined;
+}
+
+/**
+ * The first line of free text, cut to `limit`, with every span that can
+ * carry a value replaced by a placeholder, so plain words remain.
  *
  * @param {string} text
- * @param {string} cwd
+ * @param {number} limit
  */
-export function redact(text, cwd) {
-  const root = cwd.replace(/[\\/]+$/, "");
-  /** @param {string} match */
-  const replacePath = (match) => {
-    const inside =
-      root !== "" &&
-      (match.startsWith(`${root}/`) || match.startsWith(`${root}\\`));
-    const relative = match.slice(root.length + 1);
-    return inside && relative !== "" ? relative : REDACTED_PATH;
-  };
-  // The current directory may contain spaces, which end an unquoted path, so
-  // its prefix is removed before paths are matched.
-  const rootPrefix =
-    root === ""
-      ? null
-      : new RegExp(
-          `${PATH_START}${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\\\/](?=${PATH_CHARACTER})`,
-          "g",
-        );
-
-  const quotedPathsRedacted = text
-    .replace(ANSI_ESCAPE, "")
-    .replace(CONTROL, "")
-    .replace(EMAIL, "[email]")
-    .replace(CREDENTIAL, "[token]")
-    .replace(QUOTED_ASSIGNMENT, quotedAssignment)
-    .replace(ASSIGNMENT, "$1=[value]")
-    .replace(QUOTED, (match, quote, inner) => {
-      if (ABSOLUTE_START.test(inner)) {
-        return `${quote}${replacePath(inner)}${quote}`;
-      }
-      const [, option, operand] = QUOTED_OPTION.exec(inner) ?? [];
-      return option !== undefined &&
-        operand !== undefined &&
-        ABSOLUTE_START.test(operand)
-        ? `${quote}${option}${replacePath(operand)}${quote}`
-        : match;
-    })
-    .replace(FILE_URL, REDACTED_PATH);
-
-  return (
-    rootPrefix === null
-      ? quotedPathsRedacted
-      : quotedPathsRedacted.replace(rootPrefix, "")
-  )
-    .replace(OPTION_PATH, replacePath)
-    .replace(ABSOLUTE_PATH, replacePath)
-    .replace(TOKEN_CANDIDATE, (match) =>
-      /\d/.test(match) && /[A-Za-z]/.test(match) ? "[token]" : match,
-    );
-}
-
-/**
- * @param {string} match
- * @param {string | undefined} doubleQuoted
- * @param {string | undefined} singleQuoted
- */
-function quotedAssignment(match, doubleQuoted, singleQuoted) {
-  return doubleQuoted === undefined
-    ? `'${singleQuoted}=[value]'`
-    : `"${doubleQuoted}=[value]"`;
+export function plainWords(text, limit) {
+  const [firstLine = ""] = text.split(/\r\n|\r|\n/, 1);
+  return clip(firstLine.replace(/\t/g, " ").replace(CONTROL, ""), limit)
+    .replace(QUOTED_SPAN, PLACEHOLDER)
+    .split(/\s+/)
+    .filter((word) => word !== "")
+    .map((word) =>
+      word === PLACEHOLDER ||
+      (!VALUE_WORD.test(word) && Array.from(word).length <= MAX_PLAIN_WORD)
+        ? word
+        : PLACEHOLDER,
+    )
+    .join(" ");
 }
 
 /** @param {string} text @param {number} limit */

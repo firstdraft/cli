@@ -11,7 +11,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { run } from "../src/cli.js";
-import { failureReportBody, redact } from "../src/commands/report.js";
+import {
+  failureReportBody,
+  plainWords,
+  rspecRun,
+} from "../src/commands/report.js";
 
 const PRODUCTION = "https://firstdraft.com";
 const STAGING = "https://staging.firstdraft.com";
@@ -30,8 +34,6 @@ const FAILURE = [
   COMPILATION_ID,
   "--kind",
   "boot_error",
-  "--rerun",
-  "bin/rails runner 1",
   "--error-class",
   "NameError",
 ];
@@ -353,40 +355,13 @@ test("report failures are handled without retrying", async (context) => {
 });
 
 test("report failure validates its arguments before any request", async () => {
-  const [, , , ...required] = FAILURE;
   for (const argv of [
-    ["report", "failure", COMPILATION_ID, ...required.slice(2)],
-    [
-      "report",
-      "failure",
-      COMPILATION_ID,
-      ...required.slice(0, 2),
-      ...required.slice(4),
-    ],
-    ["report", "failure", COMPILATION_ID, ...required.slice(0, 4)],
+    ["report", "failure", COMPILATION_ID],
+    ["report", "failure", COMPILATION_ID, "--kind", "lint"],
     [...FAILURE, "--kind", "lint_failure"],
-    [
-      "report",
-      "failure",
-      COMPILATION_ID,
-      "--kind",
-      "lint",
-      ...required.slice(2),
-    ],
-    [
-      "report",
-      "failure",
-      COMPILATION_ID,
-      ...required.slice(0, 2),
-      "--rerun",
-      " ",
-      ...required.slice(4),
-    ],
-    [...FAILURE.slice(0, -1), " "],
-    [...FAILURE, "--ruby-version", "three"],
-    [...FAILURE, "--rails-version", "8 1"],
     [...FAILURE, "--fix-summary", "a", "--fix-summary", "b"],
-    ["report", "failure", "canary", ...required],
+    [...FAILURE, "--canary"],
+    ["report", "failure", "canary", "--kind", "boot_error"],
   ]) {
     const result = await invoke(argv);
     assert.equal(result.status, 2, argv.join(" "));
@@ -398,17 +373,10 @@ test("report failure validates its arguments before any request", async () => {
   }
 });
 
-test("report failure redacts, cuts, and prints exactly what it sends", async (context) => {
+test("report failure prints exactly the shaped report and what it left out", async (context) => {
   const cwd = projectDirectory(context, PRODUCTION);
   /** @type {string | undefined} */
   let sent;
-  const frames = [
-    "/usr/lib/ruby/3.4.0/forwardable.rb:238:in 'Forwardable#delegate'",
-    ...Array.from(
-      { length: 22 },
-      (_, index) => `${cwd}/app/models/movie.rb:${index + 1}:in 'Movie#rate'`,
-    ),
-  ];
   const result = await invoke(
     [
       "report",
@@ -417,18 +385,21 @@ test("report failure redacts, cuts, and prints exactly what it sends", async (co
       "--kind",
       "spec_failure",
       "--rerun",
-      `bundle exec rspec ${cwd}/spec/models/movie_spec.rb:42`,
+      "RAILS_ENV=test bundle exec rspec ./spec/models/movie_spec.rb:42",
       "--error-class",
       "NoMethodError",
       "--message",
-      `undefined method 'stars' for nil\u001b[31m in /home/sam/.gem/x.rb mail sam@example.com token fd_${"a1".repeat(20)} ${"m".repeat(400)}`,
-      ...frames.flatMap((frame) => ["--frame", frame]),
+      "undefined method 'stars' for nil in /home/sam/x.rb\nsecond line",
+      "--frame",
+      `${cwd}/app/models/movie.rb:12:in 'Movie#rate'`,
+      "--frame",
+      "/usr/lib/ruby/3.4.0/forwardable.rb:238",
       "--fix-summary",
-      `Guarded nil ratings. ${"s".repeat(300)}`,
+      "Guarded nil ratings in Movie#rate.",
       "--ruby-version",
       "3.4.7",
       "--rails-version",
-      "8.1.4",
+      "8.1.4-canary",
     ],
     {
       cwd,
@@ -445,84 +416,172 @@ test("report failure redacts, cuts, and prints exactly what it sends", async (co
 
   assert.equal(result.status, 0, result.stderr);
   assert(sent);
+  assert.deepEqual(JSON.parse(sent), {
+    failure_report: {
+      kind: "spec_failure",
+      rerun: "bundle exec rspec ./spec/models/movie_spec.rb:42",
+      error_class: "NoMethodError",
+      message: "undefined method […] for nil in […]",
+      frames: ["app/models/movie.rb:12"],
+      fix_summary: "Guarded nil ratings in Movie#rate.",
+      versions: { ruby: "3.4.7" },
+    },
+  });
   assert.equal(
     result.stdout,
-    `Sending this failure report for Compilation ${COMPILATION_ID} to ${PRODUCTION}:\n${sent}Sent.\n`,
+    `Sending this failure report for Compilation ${COMPILATION_ID} to ${PRODUCTION}:\n${sent}` +
+      "Left out: 1 frame not in the application's files with a line number; the rails version, which is not a version number.\n" +
+      "Sent.\n",
   );
-  const report = JSON.parse(sent).failure_report;
-  assert.deepEqual(Object.keys(report), [
-    "kind",
-    "rerun",
-    "error_class",
-    "message",
-    "frames",
-    "fix_summary",
-    "versions",
-  ]);
-  assert.equal(report.rerun, "bundle exec rspec spec/models/movie_spec.rb:42");
-  assert.equal(
-    report.message,
-    `undefined method 'stars' for nil in [path] mail [email] token [token] ${"m".repeat(400)}`.slice(
-      0,
-      300,
-    ),
-  );
-  assert.equal(report.frames.length, 20);
-  assert.equal(report.frames[0], "app/models/movie.rb:1:in 'Movie#rate'");
-  assert.equal(Array.from(report.fix_summary).length, 200);
-  assert.ok(report.fix_summary.startsWith("Guarded nil ratings. "));
-  assert.deepEqual(report.versions, { ruby: "3.4.7", rails: "8.1.4" });
-  assert.doesNotMatch(sent, /\/home|\/usr|sam@|fd_|\\u001b|\/private|\/var/);
 });
 
-test("a failure report carries only the optional fields that were given", async (context) => {
+test("a failure report carries only the fields that fit their shapes", async (context) => {
   /** @type {unknown} */
   let sent;
-  const result = await invoke(FAILURE, {
-    cwd: projectDirectory(context, PRODUCTION),
-    fetchFunction: async (_input, init) => {
-      sent = JSON.parse(String(init?.body));
-      return acknowledgment("failure_report");
+  const result = await invoke(
+    [
+      ...FAILURE.slice(0, 5),
+      "--rerun",
+      "bin/rubocop",
+      "--error-class",
+      "Rails/Delegate",
+    ],
+    {
+      cwd: projectDirectory(context, PRODUCTION),
+      fetchFunction: async (_input, init) => {
+        sent = JSON.parse(String(init?.body));
+        return acknowledgment("failure_report");
+      },
     },
-  });
+  );
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(sent, {
-    failure_report: {
-      kind: "boot_error",
-      rerun: "bin/rails runner 1",
-      error_class: "NameError",
-    },
-  });
+  assert.deepEqual(sent, { failure_report: { kind: "boot_error" } });
+  assert.match(
+    result.stdout,
+    /\nLeft out: rerun, which is not an RSpec run of the application's specs; error_class, which is not a Ruby constant\.\n/,
+  );
 });
 
-test("a rerun command's assignments and frames outside the application stay home", () => {
-  const { failure_report: report } = failureReportBody(
-    {
-      kind: "lint_failure",
-      rerun:
-        "npm_config_registry=https://registry.example.test PASS=a\\ b bin/rubocop --format=progress",
-      errorClass: "Rails/Delegate",
-      frames: ["/boot.rb:3", "C:\\x.rb:2", "app/x.rb:1", "../lib/y.rb:4"],
-    },
-    CWD,
-  );
-  assert.equal(
-    report.rerun,
-    "npm_config_registry=[value] PASS=[value] bin/rubocop --format=progress",
-  );
-  assert.deepEqual(report.frames, ["app/x.rb:1"]);
+test("rerun keeps only an RSpec run of the application's specs", () => {
+  for (const [
+    command,
+    expected,
+  ] of /** @type {[string, string | undefined][]} */ ([
+    [
+      "bundle exec rspec ./spec/models/post_spec.rb:42",
+      "bundle exec rspec ./spec/models/post_spec.rb:42",
+    ],
+    ["rspec spec/requests/posts_spec.rb", "rspec spec/requests/posts_spec.rb"],
+    [
+      "bin/rspec spec/a_spec.rb:1:2 spec/b_spec.rb",
+      "bin/rspec spec/a_spec.rb:1:2 spec/b_spec.rb",
+    ],
+    // Leading assignments are dropped, and the RSpec run after them survives.
+    [
+      "RAILS_ENV=test bin/rspec spec/models/movie_spec.rb:42",
+      "bin/rspec spec/models/movie_spec.rb:42",
+    ],
+    [
+      "env 'RAILS_ENV=test' bundle exec rspec spec/models/movie_spec.rb",
+      "bundle exec rspec spec/models/movie_spec.rb",
+    ],
+    [
+      "npm_config_registry=https://r.example.test PASS=a\\ b rspec spec/x_spec.rb",
+      "rspec spec/x_spec.rb",
+    ],
+    // The multiline quoted assignment from review: the whole value goes.
+    [
+      '\'APP_CONFIG={\n  "tenant": "Team West"\n}\' bin/rspec spec/models/movie_spec.rb',
+      "bin/rspec spec/models/movie_spec.rb",
+    ],
+    // The quoted assignment followed by a quoted argument, from review: an
+    // -e option is not a spec path, so the field is left out.
+    [
+      "env 'RAILS_ENV=test' bin/rspec spec/models/movie_spec.rb -e 'creates a movie'",
+      undefined,
+    ],
+    ["bin/rubocop", undefined],
+    ["bin/rails runner 1", undefined],
+    ["rspec", undefined],
+    ["rspec /Users/sam/app/spec/a_spec.rb", undefined],
+    ["rspec spec/../../etc/a_spec.rb", undefined],
+    ["rspec spec/a_spec.rb; curl https://example.test", undefined],
+    ["RAILS_ENV=test", undefined],
+    ["'unterminated bin/rspec spec/a_spec.rb", undefined],
+  ])) {
+    assert.equal(rspecRun(command), expected, command);
+  }
+});
 
-  const windows = failureReportBody(
+test("free text keeps the plain words of its first line", () => {
+  for (const [text, expected] of /** @type {[string, string][]} */ ([
+    [
+      "undefined method 'stars' for nil:NilClass",
+      "undefined method […] for nil:NilClass",
+    ],
+    // The quoted path with an apostrophe, from review.
+    [`load "/Users/O'Brien/First Draft/report.rb" now`, "load […] now"],
+    ["first line\nsecond line with a secret", "first line"],
+    [
+      "sam@example.com at https://x.test/a and C:\\Users\\sam",
+      "[…] at […] and […]",
+    ],
+    ["LABEL=North West", "[…] West"],
+    ["token fd_abcdefghijklmnopqrstuvwxyz", "token […]"],
+    ["Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc", "Bearer […]"],
+    ["can't find `x`", "[…] find […]"],
+    ["tabs\tand\u0007 bells", "tabs and bells"],
+  ])) {
+    assert.equal(plainWords(text, 300), expected, text);
+  }
+  assert.equal(plainWords("word ".repeat(100), 300).split(" ").length, 60);
+});
+
+test("frames, error classes, and versions keep only their shapes", () => {
+  const { body, omitted } = failureReportBody(
     {
       kind: "spec_failure",
-      rerun: 'label=North" West" ruby -I /gems -I/Shared\\ Gems x.rb',
-      errorClass: "NoMethodError",
-      frames: ["app\\models\\movie.rb:12:in 'Movie#rate'"],
+      errorClass: "ActiveRecord::RecordInvalid",
+      frames: [
+        "app/models/movie.rb:12:in 'Movie#rate'",
+        "./spec/models/movie_spec.rb:3",
+        `${CWD}/lib/tasks/import.rb:7`,
+        "app\\controllers\\movies_controller.rb:9",
+        "/usr/lib/ruby/3.4.0/forwardable.rb:238",
+        "../other/lib/x.rb:1",
+        "app/models/movie.rb",
+        "vendor/bundle/x.rb:1",
+        "app/models/my movie.rb:1",
+      ],
+      rubyVersion: "3.4.7",
+      railsVersion: "8.1",
     },
     CWD,
-  ).failure_report;
-  assert.equal(windows.rerun, "label=[value] ruby -I [path] -I[path] x.rb");
-  assert.deepEqual(windows.frames, ["app/models/movie.rb:12:in 'Movie#rate'"]);
+  );
+  assert.deepEqual(body.failure_report, {
+    kind: "spec_failure",
+    error_class: "ActiveRecord::RecordInvalid",
+    frames: [
+      "app/models/movie.rb:12",
+      "spec/models/movie_spec.rb:3",
+      "lib/tasks/import.rb:7",
+      "app/controllers/movies_controller.rb:9",
+    ],
+    versions: { ruby: "3.4.7", rails: "8.1" },
+  });
+  assert.deepEqual(omitted, [
+    "5 frames not in the application's files with a line number",
+  ]);
+
+  for (const errorClass of [
+    "Rails/Delegate",
+    "no_method_error",
+    "Foo::",
+    "A::b",
+  ]) {
+    const shaped = failureReportBody({ kind: "lint_failure", errorClass }, CWD);
+    assert.equal(shaped.body.failure_report.error_class, undefined, errorClass);
+  }
 });
 
 test("a malformed Project state is reported, not replaced by an archived one", async (context) => {
@@ -543,27 +602,6 @@ test("a malformed Project state is reported, not replaced by an archived one", a
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
   assert.equal(JSON.parse(result.stderr).error, "local_input_unreadable");
-});
-
-test("a current directory with spaces still makes its paths relative", () => {
-  for (const [
-    text,
-    cwd,
-    expected,
-  ] of /** @type {[string, string, string][]} */ ([
-    [
-      "Error in /Users/Jane Doe/movie_catalog/app/models/movie.rb:12 here",
-      "/Users/Jane Doe/movie_catalog",
-      "Error in app/models/movie.rb:12 here",
-    ],
-    [
-      "C:\\Users\\Jane Doe\\movie_catalog\\app\\x.rb:3",
-      "C:\\Users\\Jane Doe\\movie_catalog",
-      "app\\x.rb:3",
-    ],
-  ])) {
-    assert.equal(redact(text, cwd), expected);
-  }
 });
 
 test("reports run from an adopted application root find the archived Project", async (context) => {
@@ -610,90 +648,8 @@ test("reports run from an adopted application root find the archived Project", a
   );
   assert.deepEqual(
     JSON.parse(String(requests[0]?.body)).failure_report.frames,
-    ["app/models/movie.rb:12:in 'Movie#rate'"],
+    ["app/models/movie.rb:12"],
   );
-});
-
-test("redaction keeps relative paths and URLs and replaces what identifies a computer", () => {
-  for (const [text, expected] of /** @type {[string, string][]} */ ([
-    ["app/models/post.rb:12", "app/models/post.rb:12"],
-    ["./spec/models/post_spec.rb:3", "./spec/models/post_spec.rb:3"],
-    ["Rails/Delegate", "Rails/Delegate"],
-    [
-      "see https://firstdraft.com/update now",
-      "see https://firstdraft.com/update now",
-    ],
-    [`${CWD}/config/database.yml:3: bad`, "config/database.yml:3: bad"],
-    [`${CWD}-other/secret.rb`, "[path]"],
-    ["/Users/sam/code/app/x.rb", "[path]"],
-    ["~/code/app/x.rb", "[path]"],
-    ["C:\\Users\\sam\\app\\x.rb", "[path]"],
-    ["\\\\fileserver\\share\\Board\\x.md:3", "[path]"],
-    ["//fileserver/share/x.md", "[path]"],
-    ["~/notes.txt", "[path]"],
-    ["file:///Users/sam/x.rb", "[path]"],
-    ['open "/Users/sam/Work/Board Minutes.md" failed', 'open "[path]" failed'],
-    [`'${CWD}/app/My File.rb'`, "'app/My File.rb'"],
-    ["'rspec' and \"/ two\"", "'rspec' and \"/ two\""],
-    ["LABEL=internal-only bin/rspec", "LABEL=[value] bin/rspec"],
-    ["SECRET=a\\ b rest", "SECRET=[value] rest"],
-    ["ruby -I/gems bin/test", "ruby -I[path] bin/test"],
-    ["token fd_abcdefghijklmnopqrstuv here", "token [token] here"],
-    [
-      "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc",
-      "Authorization: Bearer [token]",
-    ],
-    ["found /.dockerenv here", "found [path] here"],
-    ['ruby "-I/Team Notes/lib" x.rb', 'ruby "-I[path]" x.rb'],
-    [
-      `env "BUILD_LABEL=O'Brien West" bin/rspec`,
-      `env "BUILD_LABEL=[value]" bin/rspec`,
-    ],
-    [`env 'LABEL=say "hi" now' x`, "env 'LABEL=[value]' x"],
-    ['ruby "-IC:\\My Work\\lib" -e 1', 'ruby "-I[path]" -e 1'],
-    ["ruby /Program\\ Files/setup.rb", "ruby [path]"],
-    [
-      "env 'BUILD_LABEL=North West' bin/rspec",
-      "env 'BUILD_LABEL=[value]' bin/rspec",
-    ],
-    [
-      "undefined method `/' for nil and/or",
-      "undefined method `/' for nil and/or",
-    ],
-    [
-      'RAILS_ENV=test SECRET="a b" bin/rails',
-      "RAILS_ENV=[value] SECRET=[value] bin/rails",
-    ],
-    [
-      "expected count=3 with --format=progress",
-      "expected count=3 with --format=progress",
-    ],
-    ["ruby -I/Users/example/local-gems/lib x.rb", "ruby -I[path] x.rb"],
-    ["rspec --require=/Users/x/spec_helper.rb", "rspec --require=[path]"],
-    [
-      'open "file:///Users/sam/My Secret/a.txt" and "/Users/sam/My Secret.txt"',
-      'open "[path]" and "[path]"',
-    ],
-    ["(file:///Users/sam/a.rb)", "([path])"],
-    ["a / b and 3/4", "a / b and 3/4"],
-    ["user.name+tag@mail.example.org", "[email]"],
-    ["id 0190f3a2-7c1d-7e00-8b1a-3f9e2d4c5b6a", "id [token]"],
-    [
-      "sha 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-      "sha [token]",
-    ],
-    [
-      "Compilation 01900000-0000-7000-8000-000000009101",
-      "Compilation 01900000-0000-7000-8000-000000009101",
-    ],
-    [
-      "movie_reviews_controller_index_action_name",
-      "movie_reviews_controller_index_action_name",
-    ],
-    ["line\r\nnext\tcolumn\u0007", "line\nnext\tcolumn"],
-  ])) {
-    assert.equal(redact(text, CWD), expected, text);
-  }
 });
 
 /** @param {string} wrapper the report's key in First Draft's acknowledgment */
