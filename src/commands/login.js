@@ -45,7 +45,7 @@ export class LoginExpiredError extends Error {}
 /** No device login started with --no-wait is waiting for the origin. */
 export class LoginNotStartedError extends Error {}
 
-/** The person has not approved the device login yet. */
+/** First Draft has not confirmed that the person approved the device login. */
 export class LoginPendingError extends Error {
   /** @param {import("../credentials.js").DeviceLogin} login */
   constructor(login) {

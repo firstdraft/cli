@@ -44,8 +44,8 @@ to replace or unset it. No handled error from `start` carries `response`, so non
 
 - `authorization_denied`: the approval was denied in the browser. Run `firstdraft login` again to retry. After
   `login --finish`, the person refused: ask them before starting another login with `login --no-wait`.
-- `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before
-  approval. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
+- `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before the
+  CLI received a token. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
   After `login --finish`, start again with `login --no-wait`, which prints a new link and code.
 - `authorization_pending`, from `login --finish`: First Draft has not confirmed an approval yet, and the CLI stopped after its
   short wait. The link and the code still work until the time it prints; when the person says they approved, run
@@ -258,8 +258,8 @@ stopped without following the replacement.
 | Network commands except `logout`             | `rate_limited`                                                                                     |    1 | First Draft refused a request at a limit; `retry_at` says when to try again.                                    |
 | `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                                     |
 | Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                                 |
-| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.                        |
-| `login --finish`                             | `authorization_pending`, `login_not_started`                                                       |    1 | The person has not approved yet, or no device login is waiting for the origin.                                  |
+| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or the callback wait or device code ended before the CLI received a token.             |
+| `login --finish`                             | `authorization_pending`, `login_not_started`                                                       |    1 | First Draft has not confirmed an approval yet, or no device login is waiting for the origin.                    |
 | `login`                                      | `login_failed`                                                                                     |    1 | Nothing was saved; `phase: "write"` means a token was issued ([recovery](#login-and-logout-errors)).            |
 | `logout`                                     | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).               |
 | Network commands                             | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                                |
