@@ -7,10 +7,26 @@ import {
   isValidApplicationName,
 } from "./application-identity.js";
 import {
+  REPORTS_ON_LINES,
+  commandLine,
+  deviceLoginExpiredLines,
+  deviceLoginFinishedLines,
+  deviceLoginNotStartedLines,
+  deviceLoginPendingLines,
+  deviceLoginRefusedLines,
+  deviceLoginStartedLines,
+  loginLines,
+  loginSteps,
+  readyLine,
+  rejectedLoginLines,
+  versionLine,
+} from "./agent-sentences.js";
+import {
   ApiAuthenticationRequiredError,
   STAGING_API_URL,
   authenticateApiCommand,
   environmentTokenFor,
+  environmentTokenVariable,
   isAuthenticationProblem,
 } from "./api-authentication.js";
 import {
@@ -51,8 +67,12 @@ import {
   LoginDeniedError,
   LoginExpiredError,
   LoginFailedError,
+  LoginNotStartedError,
+  LoginPendingError,
+  finishDeviceLogin,
   login,
   resolveLoginOrigin,
+  startDeviceLogin,
 } from "./commands/login.js";
 import { LogoutFailedError, logout } from "./commands/logout.js";
 import { initializePlan } from "./commands/plan-init.js";
@@ -97,6 +117,7 @@ import {
   progressReportBody,
   sendReport,
 } from "./commands/report.js";
+import { readLoginState, readReadiness } from "./commands/start.js";
 import { SERVICE_ROUTES } from "./api-response.js";
 import { storedTokenReader } from "./credentials.js";
 import { isFileSystemError } from "./file-system.js";
@@ -133,6 +154,7 @@ Commands:
   logout       Revoke and remove the saved token
   plan         Work with Foundation Plans
   report       Send a progress or failure report to First Draft
+  start        Check versions, login, and reports before other work
 
 Options:
       --staging  Use staging for API commands (production is the default)
@@ -157,6 +179,27 @@ Environment:
 The command reads the signed-in account once and prints whether it sends
 progress and failure reports. Only the person turns reports on or off: when
 approving firstdraft login, or later on their First Draft account page.
+`;
+
+const START_HELP = `First Draft CLI
+
+Usage:
+  firstdraft start
+
+Options:
+      --staging  Use staging
+  -h, --help     Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Use a custom API origin
+
+An agent runs this once before other First Draft work. It prints the versions,
+any update notice, whether this computer is logged in and how to log in if
+not, and, when the person agreed to reports, when to send them. With a token
+it reads the account once; without one it makes no request. It exits 0 only
+when First Draft accepted the login.
 `;
 
 const REPORT_HELP = `First Draft CLI
@@ -435,11 +478,15 @@ const LOGIN_HELP = `First Draft CLI
 
 Usage:
   firstdraft login [--interactive]
+  firstdraft login --no-wait
+  firstdraft login --finish
 
 Options:
       --staging      Log in to staging
   -i, --interactive  Approve with a code on another device (no local browser)
       --device       Same as --interactive
+      --no-wait      Start a device login, print its link and code, and exit
+      --finish       Finish the device login that --no-wait started
   -h, --help         Show help
 
 Environment:
@@ -451,6 +498,10 @@ waits up to five minutes for First Draft to redirect to a one-time listener on
 127.0.0.1. The token is saved for the selected origin in
 firstdraft/credentials.json under the configuration directory and is never
 printed. Token environment variables take precedence over a saved login.
+
+An agent logs in with two short commands. --no-wait saves the waiting login in
+firstdraft/device-login.json and exits; once the person approves, --finish
+waits at most 15 seconds, saves the token, and removes that file.
 `;
 
 const LOGOUT_HELP = `First Draft CLI
@@ -512,6 +563,8 @@ const LOGIN_EXPIRED_DETAIL =
   "The login was not approved before it expired. No credential was saved. Run 'firstdraft login' again to retry.";
 const LOGIN_FAILED_DETAIL =
   "The login could not be completed. No credential was saved. Run 'firstdraft login' again, or use 'firstdraft login --interactive' if this machine has no browser.";
+const START_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft start --help' for usage.";
 const LOGIN_CREDENTIALS_DETAIL =
   "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login' again.";
 const CREDENTIALS_LOCKED_RECOVERY =
@@ -805,9 +858,12 @@ export async function run({
     fileSystem: credentialsFileSystem,
     lockTimeoutMs: credentialsLockTimeoutMs,
   };
+  // `start` says everything for the agent on standard output, its update line
+  // included; every other command writes that line on standard error.
+  const notices = argv[0] === "start" ? stdout : stderr;
   const service = createServiceSession({
     env,
-    notify: (line) => stderr.write(line),
+    notify: (line) => notices.write(line),
     now: serviceNow,
   });
 
@@ -830,10 +886,11 @@ export async function run({
     });
   }
 
-  if (argv[0] === "account" || argv[0] === "report") {
+  if (argv[0] === "account" || argv[0] === "report" || argv[0] === "start") {
     const commands = {
       account: runAccount,
       report: runReport,
+      start: runStart,
     };
     return commands[argv[0]]({
       argv: argv.slice(1),
@@ -1684,6 +1741,8 @@ async function runLogin({
         staging: { type: "boolean" },
         interactive: { type: "boolean", short: "i" },
         device: { type: "boolean" },
+        "no-wait": { type: "boolean" },
+        finish: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
       allowPositionals: false,
@@ -1695,7 +1754,8 @@ async function runLogin({
   if (
     !parsed ||
     repeatedValueOption(parsed.tokens) ||
-    (parsed.values.interactive && parsed.values.device)
+    (parsed.values.interactive && parsed.values.device) ||
+    (parsed.values["no-wait"] && parsed.values.finish)
   ) {
     writeJson(stderr, {
       error: "invalid_arguments",
@@ -1715,6 +1775,24 @@ async function runLogin({
   });
   if (origin === null) return 2;
 
+  // Both steps of the agent's device login imply the device flow, so
+  // --interactive and --device may accompany them without changing anything.
+  if (parsed.values["no-wait"] || parsed.values.finish) {
+    return (parsed.values.finish ? runLoginFinish : runLoginNoWait)({
+      origin,
+      stdout,
+      stderr,
+      fetchFunction,
+      createRequestSignal,
+      credentials,
+      loginSleep,
+      loginNow,
+      apiToken,
+      stagingApiToken,
+      service,
+    });
+  }
+
   try {
     await service.settle(
       login({
@@ -1730,43 +1808,12 @@ async function runLogin({
       }),
     );
   } catch (error) {
-    const stopStatus = writeServiceStop(stderr, error);
-    if (stopStatus !== null) return stopStatus;
-
-    if (error instanceof LoginDeniedError) {
-      writeJson(stderr, {
-        error: "authorization_denied",
-        detail: LOGIN_DENIED_DETAIL,
-      });
-      return 1;
-    }
-
-    if (error instanceof LoginExpiredError) {
-      writeJson(stderr, {
-        error: "authorization_expired",
-        detail: LOGIN_EXPIRED_DETAIL,
-      });
-      return 1;
-    }
-
-    if (error instanceof LoginFailedError) {
-      writeJson(stderr, {
-        error: "login_failed",
-        detail:
-          error.credentialsPath === undefined
-            ? LOGIN_FAILED_DETAIL
-            : error.phase === "write"
-              ? `First Draft issued a token, but it could not be saved. Revoke the new token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry login.`
-              : LOGIN_CREDENTIALS_DETAIL,
-        ...(error.phase === undefined ? {} : { phase: error.phase }),
-        ...(error.reason === undefined ? {} : { reason: error.reason }),
-        ...(error.status === undefined ? {} : { status: error.status }),
-        ...(error.credentialsPath === undefined
-          ? {}
-          : { credentials_path: error.credentialsPath }),
-      });
-      return 1;
-    }
+    const status = writeLoginError(stderr, error, origin, {
+      denied: LOGIN_DENIED_DETAIL,
+      expired: LOGIN_EXPIRED_DETAIL,
+      failed: LOGIN_FAILED_DETAIL,
+    });
+    if (status !== null) return status;
 
     throw error;
   }
@@ -1774,6 +1821,195 @@ async function runLogin({
   stdout.write(`Logged in to ${origin}\n`);
   writeEnvironmentTokenNote(stderr, origin, { apiToken, stagingApiToken });
   return 0;
+}
+
+/**
+ * @typedef {Pick<LoginCommandOptions, "stdout" | "stderr" | "fetchFunction" | "createRequestSignal" | "credentials" | "loginSleep" | "loginNow" | "apiToken" | "stagingApiToken" | "service"> & {origin: string}} DeviceLoginCommandOptions
+ */
+
+/**
+ * The agent's first login step: prints the link and the code in fixed
+ * sentences on standard output and exits without waiting.
+ *
+ * @param {DeviceLoginCommandOptions} options
+ */
+async function runLoginNoWait({
+  origin,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  loginNow,
+  service,
+}) {
+  let login;
+  try {
+    login = await service.settle(
+      startDeviceLogin({
+        origin,
+        fetchFunction: service.fetch(fetchFunction),
+        createRequestSignal,
+        now: loginNow,
+        credentials,
+      }),
+    );
+  } catch (error) {
+    const status = writeLoginError(stderr, error, origin, {
+      denied: LOGIN_DENIED_DETAIL,
+      expired: LOGIN_EXPIRED_DETAIL,
+      failed: `The login could not be started. No credential was saved. Run ${commandLine(origin, "login --no-wait")} again.`,
+      retry: commandLine(origin, "login --no-wait"),
+    });
+    if (status !== null) return status;
+
+    throw error;
+  }
+
+  writeLines(stdout, deviceLoginStartedLines(login));
+  return 0;
+}
+
+/**
+ * The agent's second login step: says whether this computer is now logged
+ * in, still waiting, expired, or refused.
+ *
+ * @param {DeviceLoginCommandOptions} options
+ */
+async function runLoginFinish({
+  origin,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  loginSleep,
+  loginNow,
+  apiToken,
+  stagingApiToken,
+  service,
+}) {
+  const restart = commandLine(origin, "login --no-wait");
+  let finished;
+  try {
+    finished = await service.settle(
+      finishDeviceLogin({
+        origin,
+        fetchFunction: service.fetch(fetchFunction),
+        createRequestSignal,
+        sleep: loginSleep,
+        now: loginNow,
+        credentials,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof LoginPendingError) {
+      writeLines(stdout, deviceLoginPendingLines(error.login));
+      writeJson(stderr, {
+        error: "authorization_pending",
+        detail: `First Draft has not confirmed that the person approved the login, and the CLI stopped waiting. When the person says they approved, run ${commandLine(origin, "login --finish")} again.`,
+      });
+      return 1;
+    }
+
+    if (error instanceof LoginNotStartedError) {
+      writeLines(stdout, deviceLoginNotStartedLines(origin));
+      writeJson(stderr, {
+        error: "login_not_started",
+        detail: `No device login is waiting for ${origin}: none was started with ${restart}, or it already ended. Run ${commandLine(origin, "start")} to see whether this computer is logged in.`,
+      });
+      return 1;
+    }
+
+    if (error instanceof LoginDeniedError) {
+      writeLines(stdout, deviceLoginRefusedLines(origin));
+    } else if (error instanceof LoginExpiredError) {
+      writeLines(stdout, deviceLoginExpiredLines(origin));
+    }
+    const status = writeLoginError(stderr, error, origin, {
+      denied: `The login was denied in the browser. No credential was saved. Ask the person before you start another login with ${restart}.`,
+      expired: `The login expired before this computer finished it. No credential was saved. Run ${restart} to start again.`,
+      failed:
+        error instanceof LoginFailedError && error.reason === "invalid_grant"
+          ? `The login could not be finished, and no credential was saved. Start again with ${restart}.`
+          : `The login could not be finished, and no credential was saved. Run ${commandLine(origin, "login --finish")} again; if it fails again, start over with ${restart}.`,
+      retry: commandLine(origin, "login --finish"),
+    });
+    if (status !== null) return status;
+
+    throw error;
+  }
+
+  writeLines(stdout, deviceLoginFinishedLines(origin));
+  if (finished.leftover !== null) {
+    stderr.write(
+      `Note: ${finished.leftover} could not be removed. It holds only a spent device code; remove it.\n`,
+    );
+  }
+  writeEnvironmentTokenNote(stderr, origin, { apiToken, stagingApiToken });
+  return 0;
+}
+
+/**
+ * Writes the handled error of a login, in any of its forms.
+ *
+ * @param {Writer} stderr
+ * @param {unknown} error
+ * @param {string} origin
+ * @param {{denied: string, expired: string, failed: string, retry?: string}} details
+ *   `retry` names the command to run again after a credentials read failure
+ * @returns {number | null}
+ */
+function writeLoginError(stderr, error, origin, details) {
+  const stopStatus = writeServiceStop(stderr, error);
+  if (stopStatus !== null) return stopStatus;
+
+  if (error instanceof LoginDeniedError) {
+    writeJson(stderr, {
+      error: "authorization_denied",
+      detail: details.denied,
+    });
+    return 1;
+  }
+
+  if (error instanceof LoginExpiredError) {
+    writeJson(stderr, {
+      error: "authorization_expired",
+      detail: details.expired,
+    });
+    return 1;
+  }
+
+  if (error instanceof LoginFailedError) {
+    writeJson(stderr, {
+      error: "login_failed",
+      detail:
+        error.credentialsPath === undefined
+          ? details.failed
+          : error.reason === "device_login_invalid" ||
+              error.reason === "device_login_unavailable"
+            ? `The device login file at credentials_path could not be used. Remove it, then run ${commandLine(origin, "start")} to see whether this computer is logged in.`
+            : error.phase === "write"
+              ? `First Draft issued a token, but it could not be saved. Revoke the new token at ${origin}/api-tokens, then ${credentialsRecovery(error.reason)} and retry login.`
+              : details.retry === undefined
+                ? LOGIN_CREDENTIALS_DETAIL
+                : `The credentials file could not be read. No network request was made. Repair or remove it, then run ${details.retry} again.`,
+      ...(error.phase === undefined ? {} : { phase: error.phase }),
+      ...(error.reason === undefined ? {} : { reason: error.reason }),
+      ...(error.status === undefined ? {} : { status: error.status }),
+      ...(error.credentialsPath === undefined
+        ? {}
+        : { credentials_path: error.credentialsPath }),
+    });
+    return 1;
+  }
+
+  return null;
+}
+
+/** @param {Writer} writer @param {readonly string[]} lines */
+function writeLines(writer, lines) {
+  writer.write(lines.map((line) => `${line}\n`).join(""));
 }
 
 /** @param {LoginCommandOptions} options */
@@ -1912,12 +2148,8 @@ function selectLoginOrigin(stderr, options) {
 function writeEnvironmentTokenNote(stderr, origin, tokens) {
   if (environmentTokenFor(origin, tokens) === undefined) return;
 
-  const variable =
-    origin === STAGING_API_URL
-      ? "FIRSTDRAFT_STAGING_API_TOKEN"
-      : "FIRSTDRAFT_API_TOKEN";
   stderr.write(
-    `Note: ${variable} is set and takes precedence over the saved login for ${origin}.\n`,
+    `Note: ${environmentTokenVariable(origin)} is set and takes precedence over the saved login for ${origin}.\n`,
   );
 }
 
@@ -3147,12 +3379,151 @@ async function runAccount({
 }
 
 /**
+ * Prints, for the agent, the facts it needs before other work, in the fixed
+ * sentences of src/agent-sentences.js. Exits 0 only when First Draft
+ * accepted the login.
+ *
+ * @param {ServiceCommandOptions} options
+ */
+async function runStart({
+  argv,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+  service,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: START_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(START_HELP);
+    return 0;
+  }
+
+  const selectedStaging = staging || parsed.values.staging;
+  const origin = selectLoginOrigin(stderr, {
+    apiUrl,
+    staging: selectedStaging,
+  });
+  if (origin === null) return 2;
+
+  writeLines(stdout, [
+    versionLine({ cli: VERSION, plugin: service.pluginVersion }),
+  ]);
+  const readStoredTokens = storedTokenReader(credentials);
+  const login = readLoginState({
+    origin,
+    apiToken,
+    stagingApiToken,
+    readStoredTokens,
+  });
+  const loginSentences = loginLines(login);
+  const logIn = `Log in with ${commandLine(origin, "login --no-wait")} and, once the person approves, ${commandLine(origin, "login --finish")}.`;
+
+  const authentication = authenticateApiCommand({
+    fetchFunction: service.fetch(fetchFunction),
+    apiUrl: origin,
+    apiToken,
+    stagingApiToken,
+    staging: selectedStaging,
+    readStoredTokens,
+  });
+  if (authentication === null || !authentication.hasTokenFor(origin)) {
+    writeLines(stdout, [...loginSentences, ...loginSteps(origin)]);
+    writeJson(stderr, {
+      error: "authentication_required",
+      detail: `This computer has no token for ${origin}, so the CLI made no request. ${logIn}`,
+    });
+    return 1;
+  }
+
+  try {
+    const account = await service.settle(
+      readReadiness({
+        origin,
+        fetchFunction: authentication.fetchFunction,
+        createRequestSignal,
+        service,
+      }),
+    );
+    writeLines(stdout, [
+      ...loginSentences,
+      readyLine(login.environmentVariable),
+      ...(account.reports === "on" ? REPORTS_ON_LINES : []),
+    ]);
+    return 0;
+  } catch (error) {
+    if (
+      error instanceof AccountUnavailableError &&
+      isAuthenticationProblem(error.status, error.response)
+    ) {
+      writeLines(stdout, [
+        ...loginSentences,
+        ...rejectedLoginLines(origin, login.environmentVariable),
+      ]);
+      writeJson(stderr, {
+        error: "authentication_required",
+        detail:
+          login.environmentVariable === null
+            ? `First Draft did not accept the saved login for ${origin}. ${logIn}`
+            : `First Draft did not accept ${login.environmentVariable}. Ask the person to replace it or unset it.`,
+        status: error.status,
+      });
+      return 1;
+    }
+
+    writeLines(stdout, loginSentences);
+    // `start` passes on no text that First Draft wrote, so its errors leave
+    // out the problem's own words.
+    const status =
+      writeAccountCommandError(stderr, error, { serviceText: false }) ??
+      writeAccountReadError(stderr, error, {
+        unavailable: `Could not read the account, so the CLI could not check the login or the reports choice. This read-only request is safe to retry: run ${commandLine(origin, "start")} again.`,
+        invalid: ACCOUNT_INVALID_RESPONSE_DETAIL,
+        serviceText: false,
+      });
+    if (status !== null) return status;
+
+    throw error;
+  }
+}
+
+/**
  * @param {Writer} writer
  * @param {unknown} error
- * @param {{unavailable: string, invalid: string}} details
+ * @param {{unavailable: string, invalid: string, serviceText?: boolean}} details
+ *   `serviceText: false` leaves out the problem First Draft sent
  * @returns {number | null}
  */
-function writeAccountReadError(writer, error, { unavailable, invalid }) {
+function writeAccountReadError(
+  writer,
+  error,
+  { unavailable, invalid, serviceText = true },
+) {
   if (error instanceof AccountUnavailableError) {
     if (isAuthenticationProblem(error.status, error.response)) {
       writeAuthenticationRequired(writer, error.status, error.response);
@@ -3162,7 +3533,7 @@ function writeAccountReadError(writer, error, { unavailable, invalid }) {
       error: "account_unavailable",
       detail: unavailable,
       ...(typeof error.status === "number" ? { status: error.status } : {}),
-      ...(error.response ? { response: error.response } : {}),
+      ...(serviceText && error.response ? { response: error.response } : {}),
     });
     return 1;
   }
@@ -3604,9 +3975,10 @@ function authenticateAccountCommand(
  *
  * @param {Writer} writer
  * @param {unknown} error
+ * @param {{serviceText?: boolean}} [options] passed to writeServiceStop
  */
-function writeAccountCommandError(writer, error) {
-  const stopStatus = writeServiceStop(writer, error);
+function writeAccountCommandError(writer, error, options) {
+  const stopStatus = writeServiceStop(writer, error, options);
   if (stopStatus !== null) return stopStatus;
 
   if (error instanceof ApiAuthenticationRequiredError) {
@@ -3632,9 +4004,11 @@ function writeAccountCommandError(writer, error) {
  *
  * @param {Writer} writer
  * @param {unknown} error
+ * @param {{serviceText?: boolean}} [options] `serviceText: false` leaves out
+ *   the problem First Draft sent with a limit, and the advice to read it
  * @returns {number | null}
  */
-function writeServiceStop(writer, error) {
+function writeServiceStop(writer, error, { serviceText = true } = {}) {
   if (!(error instanceof ServiceStopError)) return null;
 
   const current =
@@ -3685,12 +4059,15 @@ function writeServiceStop(writer, error) {
   }
 
   const retryAt = error instanceof RateLimitedError ? error.retryAt : undefined;
-  const limit = error instanceof RateLimitedError ? error.response : null;
+  const limit =
+    serviceText && error instanceof RateLimitedError ? error.response : null;
   // A limit without Retry-After or a problem detail, such as the one shared
   // by device logins, lasts about a minute.
   const retry =
     retryAt !== undefined
-      ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+      ? serviceText
+        ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+        : `Try again after ${retryAt}.`
       : limit
         ? "Try again when response.detail says."
         : "Try again in a minute.";
@@ -3706,9 +4083,7 @@ function writeServiceStop(writer, error) {
     ...(error instanceof RateLimitedError && error.retryAt !== undefined
       ? { retry_at: error.retryAt }
       : {}),
-    ...(error instanceof RateLimitedError && error.response
-      ? { response: error.response }
-      : {}),
+    ...(limit ? { response: limit } : {}),
     ...(current === undefined ? {} : { current }),
   });
   return 1;

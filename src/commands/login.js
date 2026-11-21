@@ -8,26 +8,51 @@ import {
   CredentialsInvalidError,
   CredentialsLockedError,
   credentialsPath,
+  deleteDeviceLogin,
+  deviceLoginPath,
   readCredentials,
+  readDeviceLogin,
   writeCredential,
+  writeDeviceLogin,
 } from "../credentials.js";
 import { isFileSystemError } from "../file-system.js";
 import {
   LOOPBACK_TIMEOUT_MS,
   OAuthError,
+  SLOW_DOWN_INCREMENT_MS,
   authorizationUrl,
   createPkcePair,
   createState,
   exchangeAuthorizationCode,
   pollDeviceToken,
   requestDeviceAuthorization,
+  requestDeviceToken,
   startLoopbackServer,
 } from "../oauth.js";
 import { normalizeApiUrl } from "../plan-state.js";
 import { DEFAULT_API_URL } from "./plan-push.js";
 
+/** How long `login --finish` keeps asking before it says it is still waiting. */
+export const FINISH_WAIT_MS = 15_000;
+
+// The answers after which a device grant can never yield a token, so its
+// saved device login is removed.
+const ENDED_GRANT_CODES = ["access_denied", "expired_token", "invalid_grant"];
+
 export class LoginDeniedError extends Error {}
 export class LoginExpiredError extends Error {}
+
+/** No device login started with --no-wait is waiting for the origin. */
+export class LoginNotStartedError extends Error {}
+
+/** First Draft has not confirmed that the person approved the device login. */
+export class LoginPendingError extends Error {
+  /** @param {import("../credentials.js").DeviceLogin} login */
+  constructor(login) {
+    super("The device login is still waiting for approval.");
+    this.login = login;
+  }
+}
 
 export class LoginFailedError extends Error {
   /**
@@ -91,17 +116,7 @@ export async function login({
   const request = { origin, fetchFunction, createRequestSignal };
 
   /** @param {import("../oauth.js").AccessToken} token */
-  const save = (token) => {
-    try {
-      writeCredential(credentials, origin, {
-        access_token: token.access_token,
-        token_type: token.token_type,
-        created_at: new Date(now()).toISOString(),
-      });
-    } catch (error) {
-      throw credentialsError(error, credentials, "write");
-    }
-  };
+  const save = (token) => saveToken(credentials, origin, token, now);
 
   try {
     if (device) {
@@ -224,6 +239,224 @@ async function deviceLogin({ prompt, sleep, now, ...request }) {
     sleep,
     now,
   });
+}
+
+/**
+ * @typedef {object} DeviceLoginOptions
+ * @property {string} origin
+ * @property {typeof globalThis.fetch} [fetchFunction]
+ * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
+ * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [sleep]
+ * @property {() => number} [now]
+ * @property {import("../credentials.js").CredentialStore} [credentials]
+ */
+
+/**
+ * The first step of a device login that an agent can run: asks First Draft
+ * for a device grant, saves what `finishDeviceLogin` needs, and returns
+ * without waiting for approval. The saved login replaces any other.
+ *
+ * @param {DeviceLoginOptions} options
+ * @returns {Promise<import("../credentials.js").DeviceLogin & {expiresIn: number}>}
+ */
+export async function startDeviceLogin({
+  origin,
+  fetchFunction,
+  createRequestSignal,
+  now = Date.now,
+  credentials = {},
+}) {
+  // The token is saved there later, so an unusable file stops the login
+  // before the person is asked to approve it.
+  readStore(credentials);
+
+  let authorization;
+  try {
+    authorization = await requestDeviceAuthorization({
+      origin,
+      fetchFunction,
+      createRequestSignal,
+    });
+  } catch (error) {
+    throw loginError(error);
+  }
+
+  const startedAt = now();
+  const login = {
+    origin,
+    deviceCode: authorization.deviceCode,
+    userCode: authorization.userCode,
+    verificationUri: authorization.verificationUri,
+    verificationUriComplete: authorization.verificationUriComplete,
+    interval: authorization.interval,
+    expiresAt: startedAt + authorization.expiresIn * 1000,
+    // First Draft answers a grant's first poll whenever it comes.
+    nextPollAt: startedAt,
+  };
+  withDeviceLogin(credentials, () => writeDeviceLogin(credentials, login));
+  return { ...login, expiresIn: authorization.expiresIn };
+}
+
+/**
+ * The second step: polls the waiting device login at its interval, for at
+ * most FINISH_WAIT_MS from the start of the command with each request
+ * included, and saves the token once the person has approved. Removes the
+ * saved device login when the grant has ended, and otherwise keeps it with
+ * the next time First Draft accepts a poll.
+ *
+ * @param {DeviceLoginOptions} options
+ * @returns {Promise<{origin: string, leftover: string | null}>} `leftover`
+ *   names the spent device login file when it could not be removed
+ */
+export async function finishDeviceLogin({
+  origin,
+  fetchFunction,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs ?? 0),
+  sleep = defaultSleep,
+  now = Date.now,
+  credentials = {},
+}) {
+  const deadline = now() + FINISH_WAIT_MS;
+  const waiting = withDeviceLogin(credentials, () =>
+    readDeviceLogin(credentials),
+  );
+  if (waiting === null || waiting.origin !== origin) {
+    throw new LoginNotStartedError("No device login is waiting.");
+  }
+  readStore(credentials);
+
+  const expired = () => {
+    withDeviceLogin(credentials, () => deleteDeviceLogin(credentials));
+    return new LoginExpiredError("The device code expired.");
+  };
+  let { interval } = waiting;
+  // Never more than one interval away, even after the clock moved back.
+  let nextPollAt = Math.min(waiting.nextPollAt, now() + interval * 1000);
+  const keep = () => {
+    nextPollAt = now() + interval * 1000;
+    withDeviceLogin(credentials, () =>
+      writeDeviceLogin(credentials, { ...waiting, interval, nextPollAt }),
+    );
+  };
+
+  while (true) {
+    if (now() >= waiting.expiresAt) throw expired();
+    if (nextPollAt >= deadline || nextPollAt >= waiting.expiresAt) {
+      throw new LoginPendingError({ ...waiting, interval, nextPollAt });
+    }
+    const delayMs = nextPollAt - now();
+    if (delayMs > 0) await sleep(delayMs);
+    if (now() >= waiting.expiresAt) throw expired();
+    // A timer can wake late; no poll starts after the wait has ended.
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      throw new LoginPendingError({ ...waiting, interval, nextPollAt });
+    }
+
+    let result;
+    try {
+      result = await requestDeviceToken({
+        origin,
+        fetchFunction,
+        createRequestSignal: () => createRequestSignal(remainingMs),
+        deviceCode: waiting.deviceCode,
+      });
+    } catch (error) {
+      if (
+        error instanceof OAuthError &&
+        error.code !== undefined &&
+        ENDED_GRANT_CODES.includes(error.code)
+      ) {
+        withDeviceLogin(credentials, () => deleteDeviceLogin(credentials));
+      } else {
+        // The poll may have reached First Draft, so the next one waits.
+        keep();
+      }
+      throw loginError(error);
+    }
+
+    if (!("pending" in result)) {
+      // The grant is spent once it issues a token, so its file goes first,
+      // whether or not the token can then be saved.
+      const removed = removeSpentDeviceLogin(credentials);
+      saveToken(credentials, origin, result, now);
+      return {
+        origin,
+        leftover: removed ? null : deviceLoginPath(credentials),
+      };
+    }
+
+    if (result.pending === "slow_down") {
+      interval += SLOW_DOWN_INCREMENT_MS / 1000;
+    }
+    // A pending answer that arrived after the expiry is an expired grant.
+    if (now() >= waiting.expiresAt) throw expired();
+    keep();
+  }
+}
+
+/**
+ * Removes a device login whose grant has issued its token. A spent device
+ * code authenticates nothing, so a file that cannot be removed does not fail
+ * the login; the caller says where it is.
+ *
+ * @param {import("../credentials.js").CredentialStore} credentials
+ */
+function removeSpentDeviceLogin(credentials) {
+  try {
+    deleteDeviceLogin(credentials);
+    return true;
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+    return false;
+  }
+}
+
+/**
+ * Runs an operation on the saved device login file, reporting a file-system
+ * failure or a malformed file as a failed login.
+ *
+ * @template T
+ * @param {import("../credentials.js").CredentialStore} credentials
+ * @param {() => T} callback
+ * @returns {T}
+ */
+function withDeviceLogin(credentials, callback) {
+  try {
+    return callback();
+  } catch (error) {
+    if (
+      !(error instanceof CredentialsInvalidError) &&
+      !isFileSystemError(error)
+    )
+      throw error;
+    throw new LoginFailedError("The device login file could not be used.", {
+      reason:
+        error instanceof CredentialsInvalidError
+          ? "device_login_invalid"
+          : "device_login_unavailable",
+      credentialsPath: deviceLoginPath(credentials),
+      cause: error,
+    });
+  }
+}
+
+/**
+ * @param {import("../credentials.js").CredentialStore} credentials
+ * @param {string} origin
+ * @param {import("../oauth.js").AccessToken} token
+ * @param {() => number} now
+ */
+function saveToken(credentials, origin, token, now) {
+  try {
+    writeCredential(credentials, origin, {
+      access_token: token.access_token,
+      token_type: token.token_type,
+      created_at: new Date(now()).toISOString(),
+    });
+  } catch (error) {
+    throw credentialsError(error, credentials, "write");
+  }
 }
 
 /** @param {import("../credentials.js").CredentialStore} credentials */

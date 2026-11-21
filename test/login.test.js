@@ -28,11 +28,15 @@ const LOGIN_HELP = `First Draft CLI
 
 Usage:
   firstdraft login [--interactive]
+  firstdraft login --no-wait
+  firstdraft login --finish
 
 Options:
       --staging      Log in to staging
   -i, --interactive  Approve with a code on another device (no local browser)
       --device       Same as --interactive
+      --no-wait      Start a device login, print its link and code, and exit
+      --finish       Finish the device login that --no-wait started
   -h, --help         Show help
 
 Environment:
@@ -44,6 +48,10 @@ waits up to five minutes for First Draft to redirect to a one-time listener on
 127.0.0.1. The token is saved for the selected origin in
 firstdraft/credentials.json under the configuration directory and is never
 printed. Token environment variables take precedence over a saved login.
+
+An agent logs in with two short commands. --no-wait saves the waiting login in
+firstdraft/device-login.json and exits; once the person approves, --finish
+waits at most 15 seconds, saves the token, and removes that file.
 `;
 
 test("login help is printed on stdout", async (context) => {
@@ -68,6 +76,10 @@ test("login rejects invalid, repeated, and conflicting options", async (context)
     ["login", "-i", "--device"],
     ["login", "--interactive", "--device"],
     ["login", "--staging", "--staging"],
+    ["login", "--no-wait", "--finish"],
+    ["login", "--no-wait", "--no-wait"],
+    ["login", "--finish", "--finish"],
+    ["login", "--finish", "extra"],
     ["logout", "extra"],
     ["logout", "--interactive"],
   ]) {
@@ -664,6 +676,580 @@ test("device login rejects an invalid device authorization response", async (con
     assert.doesNotMatch(result.stderr, /javascript/);
   }
 });
+
+const STARTED_LINES = [
+  `To log in to ${PRODUCTION}, ask the person to open this link in a browser, check that the page shows the code BCDF-GHJK, and approve:`,
+  `${PRODUCTION}/device?user_code=BCDF-GHJK`,
+  "The link and the code expire in 15 minutes, at 2026-09-29T12:15:00Z.",
+  "When the person says they approved, run 'firstdraft login --finish'.",
+];
+
+test("login --no-wait prints the link and the code, saves the waiting login privately, and exits", async (context) => {
+  for (const argv of [
+    ["login", "--no-wait"],
+    ["login", "--no-wait", "-i"],
+    ["login", "--device", "--no-wait"],
+  ]) {
+    /** @type {string[]} */
+    const requests = [];
+    const result = await invoke(context, argv, {
+      loginSleep: async () => assert.fail("--no-wait must not wait"),
+      startLoopbackServer: async () => assert.fail("No server was expected"),
+      fetchFunction: async (input, init) => {
+        requests.push(String(input));
+        assert.equal(
+          new URLSearchParams(String(init?.body)).get("client_id"),
+          "firstdraft-cli",
+        );
+        return deviceAuthorizationResponse();
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(requests, [`${PRODUCTION}/oauth/device_authorization`]);
+    assert.equal(result.stdout, lines(...STARTED_LINES));
+    assert.equal(result.stderr, "");
+    assert.doesNotMatch(result.stdout + result.stderr, /canary-device-code/);
+
+    const directory = path.join(result.configHome, "firstdraft");
+    assert.deepEqual(readdirSync(directory), ["device-login.json"]);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(directory).mode & 0o777, 0o700);
+      assert.equal(
+        statSync(path.join(directory, "device-login.json")).mode & 0o777,
+        0o600,
+      );
+    }
+    assert.deepEqual(waitingLogin(result.configHome), {
+      format: "firstdraft.cli-device-login/1",
+      origin: PRODUCTION,
+      device_code: DEVICE_CODE,
+      user_code: "BCDF-GHJK",
+      verification_uri: `${PRODUCTION}/device`,
+      verification_uri_complete: `${PRODUCTION}/device?user_code=BCDF-GHJK`,
+      interval: 5,
+      expires_at: "2026-09-29T12:15:00.000Z",
+      next_poll_at: "2026-09-29T12:00:00.000Z",
+    });
+  }
+});
+
+test("login --no-wait asks for the code when First Draft sends no prefilled link", async (context) => {
+  /** @type {Record<string, unknown>} */
+  const body = {
+    ...deviceAuthorizationBody(),
+    verification_uri: `${STAGING}/device`,
+    expires_in: 60,
+  };
+  delete body.verification_uri_complete;
+  const result = await invoke(context, ["--staging", "login", "--no-wait"], {
+    fetchFunction: async (input) => {
+      assert.equal(new URL(String(input)).origin, STAGING);
+      return jsonResponse(200, body);
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout,
+    lines(
+      `To log in to ${STAGING}, ask the person to open this link in a browser, enter the code BCDF-GHJK, and approve:`,
+      `${STAGING}/device`,
+      "The link and the code expire in 1 minute, at 2026-09-29T12:01:00Z.",
+      "When the person says they approved, run 'firstdraft login --finish --staging'.",
+    ),
+  );
+  assert.equal(waitingLogin(result.configHome).origin, STAGING);
+});
+
+test("login --no-wait stops before the link when the login cannot be kept", async (context) => {
+  const configHome = temporaryConfigHome(context);
+  mkdirSync(path.join(configHome, "firstdraft"), { recursive: true });
+  const credentialsFile = path.join(
+    configHome,
+    "firstdraft",
+    "credentials.json",
+  );
+  writeFileSync(credentialsFile, "{canary");
+  const unreadable = await invoke(context, ["login", "--no-wait"], {
+    configHome,
+  });
+  assert.equal(unreadable.status, 1);
+  assert.equal(unreadable.stdout, "");
+  assert.deepEqual(errorEnvelope(unreadable.stderr), {
+    error: "login_failed",
+    detail:
+      "The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login --no-wait' again.",
+    reason: "credentials_invalid",
+    phase: "read",
+    credentials_path: credentialsFile,
+  });
+
+  const unsaved = await invoke(context, ["login", "--no-wait"], {
+    credentialsFileSystem: {
+      ...fs,
+      renameSync: () => {
+        throw Object.assign(new Error("canary"), { code: "EACCES" });
+      },
+    },
+    fetchFunction: async () => deviceAuthorizationResponse(),
+  });
+  assert.equal(unsaved.status, 1);
+  assert.equal(unsaved.stdout, "");
+  assert.deepEqual(errorEnvelope(unsaved.stderr), {
+    error: "login_failed",
+    detail:
+      "The device login file at credentials_path could not be used. Remove it, then run 'firstdraft start' to see whether this computer is logged in.",
+    reason: "device_login_unavailable",
+    credentials_path: path.join(
+      unsaved.configHome,
+      "firstdraft",
+      "device-login.json",
+    ),
+  });
+  assert.deepEqual(
+    readdirSync(path.join(unsaved.configHome, "firstdraft")),
+    [],
+  );
+
+  const limited = await invoke(context, ["login", "--no-wait"], {
+    fetchFunction: async () =>
+      jsonResponse(429, { error: "temporarily_unavailable" }),
+  });
+  assert.equal(limited.status, 1);
+  assert.equal(errorEnvelope(limited.stderr).error, "rate_limited");
+  assert.deepEqual(readdirSync(limited.configHome), []);
+});
+
+test("login --finish saves the token once the person approved and removes the waiting login", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  /** @type {string[]} */
+  const polls = [];
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    startLoopbackServer: async () => assert.fail("No server was expected"),
+    fetchFunction: async (input, init) => {
+      assert.equal(String(input), `${PRODUCTION}/oauth/token`);
+      const form = new URLSearchParams(String(init?.body));
+      assert.equal(
+        form.get("grant_type"),
+        "urn:ietf:params:oauth:grant-type:device_code",
+      );
+      polls.push(String(form.get("device_code")));
+      return tokenResponse();
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(polls, [DEVICE_CODE]);
+  assert.deepEqual(clock.delays, [], "the first poll is answered at once");
+  assert.equal(
+    result.stdout,
+    lines(
+      `Logged in: this computer is now logged in to ${PRODUCTION}.`,
+      "Run 'firstdraft start' again.",
+    ),
+  );
+  assert.equal(result.stderr, "");
+  assertNoSecrets(result);
+  assert.doesNotMatch(result.stdout, /canary-device-code/);
+  assert.equal(storedCredentials(configHome)[PRODUCTION]?.access_token, TOKEN);
+  assert.deepEqual(readdirSync(path.join(configHome, "firstdraft")), [
+    "credentials.json",
+  ]);
+});
+
+test("login --finish waits briefly, then says it is still waiting and when to poll next", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  let polls = 0;
+  /** @type {(number | undefined)[]} */
+  const timeouts = [];
+  const pending = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    createRequestSignal: (timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return new AbortController().signal;
+    },
+    fetchFunction: async () => {
+      polls += 1;
+      return jsonResponse(400, { error: "authorization_pending" });
+    },
+  });
+
+  assert.equal(pending.status, 1);
+  assert.equal(polls, 3);
+  assert.deepEqual(clock.delays, [5000, 5000]);
+  assert.deepEqual(
+    timeouts,
+    [15000, 10000, 5000],
+    "each request ends by the end of the wait",
+  );
+  assert.equal(
+    pending.stdout,
+    lines(
+      "Still waiting: First Draft has not confirmed that the person approved the login.",
+      STARTED_LINES[0] ?? "",
+      STARTED_LINES[1] ?? "",
+      "The link and the code expire at 2026-09-29T12:15:00Z. When the person says they approved, run 'firstdraft login --finish' again.",
+    ),
+  );
+  assert.deepEqual(errorEnvelope(pending.stderr), {
+    error: "authorization_pending",
+    detail:
+      "First Draft has not confirmed that the person approved the login, and the CLI stopped waiting. When the person says they approved, run 'firstdraft login --finish' again.",
+  });
+  assert.equal(
+    waitingLogin(configHome).next_poll_at,
+    "2026-09-29T12:00:15.000Z",
+  );
+
+  clock.delays.length = 0;
+  const again = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () =>
+      jsonResponse(400, { error: "authorization_pending" }),
+  });
+  assert.equal(errorEnvelope(again.stderr).error, "authorization_pending");
+  assert.deepEqual(
+    clock.delays,
+    [5000, 5000],
+    "a later --finish keeps to the interval and to its own 15 seconds",
+  );
+
+  clock.delays.length = 0;
+  const finished = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () => tokenResponse(),
+  });
+  assert.equal(finished.status, 0, finished.stderr);
+  assert.deepEqual(clock.delays, [5000]);
+});
+
+test("login --finish sends no poll after its wait has ended, even when a timer wakes late", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  let polls = 0;
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: (delayMs) => clock.sleep(delayMs + 10_200),
+    loginNow: clock.now,
+    fetchFunction: async () => {
+      polls += 1;
+      return jsonResponse(400, { error: "authorization_pending" });
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(errorEnvelope(result.stderr).error, "authorization_pending");
+  assert.equal(polls, 1, "the poll after the late wakeup is not sent");
+});
+
+test("a credentials file that cannot be read names the same login step, staging included", async (context) => {
+  const configHome = temporaryConfigHome(context);
+  const started = await invoke(context, ["--staging", "login", "--no-wait"], {
+    configHome,
+    fetchFunction: async () =>
+      jsonResponse(200, {
+        ...deviceAuthorizationBody(),
+        verification_uri: `${STAGING}/device`,
+        verification_uri_complete: `${STAGING}/device?user_code=BCDF-GHJK`,
+      }),
+  });
+  assert.equal(started.status, 0, started.stderr);
+  writeFileSync(
+    path.join(configHome, "firstdraft", "credentials.json"),
+    "{canary",
+  );
+  for (const step of ["--no-wait", "--finish"]) {
+    const result = await invoke(context, ["login", step, "--staging"], {
+      configHome,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(
+      errorEnvelope(result.stderr).detail,
+      `The credentials file could not be read. No network request was made. Repair or remove it, then run 'firstdraft login ${step} --staging' again.`,
+    );
+  }
+});
+
+test("login --finish treats a pending answer that arrives after the expiry as expired", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  await clock.sleep(899_000);
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () => {
+      await clock.sleep(1500);
+      return jsonResponse(400, { error: "authorization_pending" });
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(errorEnvelope(result.stderr).error, "authorization_expired");
+  assert.match(result.stdout, /^Expired: /);
+  assert.deepEqual(readdirSync(path.join(configHome, "firstdraft")), []);
+});
+
+test("login --finish succeeds when only the spent device login cannot be removed", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  const file = path.join(configHome, "firstdraft", "device-login.json");
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    credentialsFileSystem: {
+      ...fs,
+      rmSync: (target, options) => {
+        if (String(target) === file) {
+          throw Object.assign(new Error("canary"), { code: "EACCES" });
+        }
+        fs.rmSync(target, options);
+      },
+    },
+    fetchFunction: async () => tokenResponse(),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^Logged in: /);
+  assert.equal(
+    result.stderr,
+    `Note: ${file} could not be removed. It holds only a spent device code; remove it.\n`,
+  );
+  assert.equal(storedCredentials(configHome)[PRODUCTION]?.access_token, TOKEN);
+});
+
+test("login --finish slows down when First Draft asks and keeps the longer interval", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  const outcomes = ["slow_down", "authorization_pending"];
+  const pending = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    fetchFunction: async () =>
+      jsonResponse(400, { error: outcomes.shift() ?? "authorization_pending" }),
+  });
+  assert.equal(pending.status, 1);
+  assert.equal(errorEnvelope(pending.stderr).error, "authorization_pending");
+  assert.deepEqual(clock.delays, [10000]);
+  assert.equal(waitingLogin(configHome).interval, 10);
+  assert.equal(
+    waitingLogin(configHome).next_poll_at,
+    "2026-09-29T12:00:20.000Z",
+  );
+});
+
+test("login --finish says plainly when the login was refused or expired, and removes it", async (context) => {
+  /** @type {[string, string, string[] | null, string][]} */
+  const cases = [
+    [
+      "access_denied",
+      "authorization_denied",
+      [
+        `Refused: the person denied this login, so no new login was saved for ${PRODUCTION}.`,
+        "Ask the person before you start another login with 'firstdraft login --no-wait'.",
+      ],
+      "The login was denied in the browser. No credential was saved. Ask the person before you start another login with 'firstdraft login --no-wait'.",
+    ],
+    [
+      "expired_token",
+      "authorization_expired",
+      [
+        `Expired: the link and the code expired before this computer finished the login, so no new login was saved for ${PRODUCTION}.`,
+        "To try again, run 'firstdraft login --no-wait'.",
+      ],
+      "The login expired before this computer finished it. No credential was saved. Run 'firstdraft login --no-wait' to start again.",
+    ],
+    [
+      "invalid_grant",
+      "login_failed",
+      null,
+      "The login could not be finished, and no credential was saved. Start again with 'firstdraft login --no-wait'.",
+    ],
+  ];
+  for (const [code, error, stdout, detail] of cases) {
+    const clock = fakeClock();
+    const configHome = await startedLogin(context, clock);
+    const result = await invoke(context, ["login", "--finish"], {
+      configHome,
+      loginSleep: clock.sleep,
+      loginNow: clock.now,
+      fetchFunction: async () => jsonResponse(400, { error: code }),
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, stdout === null ? "" : lines(...stdout));
+    const envelope = errorEnvelope(result.stderr);
+    assert.equal(envelope.error, error);
+    assert.equal(envelope.detail, detail);
+    assert.deepEqual(readdirSync(path.join(configHome, "firstdraft")), []);
+  }
+
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  await clock.sleep(15 * 60 * 1000);
+  const expired = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+  });
+  assert.equal(expired.status, 1);
+  assert.equal(errorEnvelope(expired.stderr).error, "authorization_expired");
+  assert.match(expired.stdout, /^Expired: /);
+  assert.deepEqual(readdirSync(path.join(configHome, "firstdraft")), []);
+});
+
+test("login --finish keeps the waiting login after a failure it can retry", async (context) => {
+  for (const response of [
+    () => {
+      throw new TypeError("canary network failure");
+    },
+    () => new Response("<html>canary</html>", { status: 500 }),
+  ]) {
+    const clock = fakeClock();
+    const configHome = await startedLogin(context, clock);
+    const result = await invoke(context, ["login", "--finish"], {
+      configHome,
+      loginSleep: clock.sleep,
+      loginNow: clock.now,
+      fetchFunction: async () => response(),
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    const envelope = errorEnvelope(result.stderr);
+    assert.equal(envelope.error, "login_failed");
+    assert.equal(
+      envelope.detail,
+      "The login could not be finished, and no credential was saved. Run 'firstdraft login --finish' again; if it fails again, start over with 'firstdraft login --no-wait'.",
+    );
+    assert.doesNotMatch(result.stderr, /canary/);
+    assert.equal(
+      waitingLogin(configHome).next_poll_at,
+      "2026-09-29T12:00:05.000Z",
+    );
+  }
+});
+
+test("login --finish without a waiting login for the origin says so", async (context) => {
+  const none = await invoke(context, ["login", "--finish"]);
+  assert.equal(none.status, 1);
+  assert.equal(
+    none.stdout,
+    lines(
+      `No login is waiting: this computer has no device login for ${PRODUCTION} that has not ended.`,
+      "Run 'firstdraft start' to see whether this computer is logged in.",
+    ),
+  );
+  assert.deepEqual(errorEnvelope(none.stderr), {
+    error: "login_not_started",
+    detail: `No device login is waiting for ${PRODUCTION}: none was started with 'firstdraft login --no-wait', or it already ended. Run 'firstdraft start' to see whether this computer is logged in.`,
+  });
+
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  const before = waitingLogin(configHome);
+  const other = await invoke(context, ["login", "--finish", "--staging"], {
+    configHome,
+  });
+  assert.equal(other.status, 1);
+  assert.equal(errorEnvelope(other.stderr).error, "login_not_started");
+  assert.match(other.stdout, /'firstdraft start --staging'/);
+  assert.deepEqual(waitingLogin(configHome), before);
+});
+
+test("login --finish refuses a malformed waiting login before any request", async (context) => {
+  const configHome = temporaryConfigHome(context);
+  mkdirSync(path.join(configHome, "firstdraft"));
+  const file = path.join(configHome, "firstdraft", "device-login.json");
+  for (const source of [
+    "{canary",
+    JSON.stringify({ format: "firstdraft.cli-device-login/1" }),
+  ]) {
+    writeFileSync(file, source);
+    const result = await invoke(context, ["login", "--finish"], { configHome });
+    assert.equal(result.status, 1);
+    assert.deepEqual(errorEnvelope(result.stderr), {
+      error: "login_failed",
+      detail:
+        "The device login file at credentials_path could not be used. Remove it, then run 'firstdraft start' to see whether this computer is logged in.",
+      reason: "device_login_invalid",
+      credentials_path: file,
+    });
+    assert.equal(readFileSync(file, "utf8"), source);
+  }
+});
+
+test("login --finish reports an issued token it could not save", async (context) => {
+  const clock = fakeClock();
+  const configHome = await startedLogin(context, clock);
+  const result = await invoke(context, ["login", "--finish"], {
+    configHome,
+    loginSleep: clock.sleep,
+    loginNow: clock.now,
+    credentialsFileSystem: {
+      ...fs,
+      renameSync: (source, target) => {
+        if (String(target).endsWith("credentials.json")) {
+          throw Object.assign(new Error(TOKEN), { code: "EACCES" });
+        }
+        fs.renameSync(source, target);
+      },
+    },
+    fetchFunction: async () => tokenResponse(),
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  const envelope = errorEnvelope(result.stderr);
+  assert.equal(envelope.error, "login_failed");
+  assert.equal(envelope.phase, "write");
+  assert.equal(envelope.reason, "credentials_unavailable");
+  assert.match(envelope.detail, /issued a token, but it could not be saved/);
+  assert.equal(
+    existsSync(path.join(configHome, "firstdraft", "device-login.json")),
+    false,
+    "the spent grant is removed even when the token cannot be saved",
+  );
+  assertNoSecrets(result);
+});
+
+/**
+ * Runs `login --no-wait` and returns its configuration directory.
+ *
+ * @param {import("node:test").TestContext} context
+ * @param {ReturnType<typeof fakeClock>} clock
+ */
+async function startedLogin(context, clock) {
+  const started = await invoke(context, ["login", "--no-wait"], {
+    loginNow: clock.now,
+    fetchFunction: async () => deviceAuthorizationResponse(),
+  });
+  assert.equal(started.status, 0, started.stderr);
+  return started.configHome;
+}
+
+/** @param {string} configHome */
+function waitingLogin(configHome) {
+  return JSON.parse(
+    readFileSync(
+      path.join(configHome, "firstdraft", "device-login.json"),
+      "utf8",
+    ),
+  );
+}
+
+/** @param {...string} values */
+function lines(...values) {
+  return values.map((value) => `${value}\n`).join("");
+}
 
 /**
  * @param {import("node:test").TestContext} context

@@ -321,6 +321,54 @@ try {
   );
   assert.equal(emptyLogout.stderr, "");
 
+  const invalidStart = spawnPackedCli(
+    ["start", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidStart, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft start --help' for usage.",
+  });
+
+  const loggedOutStart = spawnPackedCli(["start"], installationDirectory, {
+    FIRSTDRAFT_API_TOKEN: "",
+    FIRSTDRAFT_PLUGIN_VERSION: "0.10.0",
+  });
+  assert.equal(loggedOutStart.status, 1);
+  assert.equal(
+    loggedOutStart.stdout,
+    [
+      `First Draft CLI ${packageMetadata.version} with plugin 0.10.0.`,
+      "This computer has no saved login for https://firstdraft.com.",
+      "To log in, run 'firstdraft login --no-wait'. It prints a link and a code: show both to the person and ask them to approve the login in their browser.",
+      "When the person says they approved, run 'firstdraft login --finish', then run 'firstdraft start' again.",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    JSON.parse(loggedOutStart.stderr).error,
+    "authentication_required",
+  );
+
+  const conflictingLogin = spawnPackedCli(
+    ["login", "--no-wait", "--finish"],
+    installationDirectory,
+  );
+  assertHandledFailure(conflictingLogin, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft login --help' for usage.",
+  });
+
+  const finishWithoutLogin = spawnPackedCli(
+    ["login", "--finish"],
+    installationDirectory,
+  );
+  assert.equal(finishWithoutLogin.status, 1);
+  assert.equal(
+    JSON.parse(finishWithoutLogin.stderr).error,
+    "login_not_started",
+  );
+
   exercisePackedEnvironmentSelection(temporaryDirectory);
   await exercisePackedCompilation(projectDirectory);
 } finally {

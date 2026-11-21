@@ -10,8 +10,9 @@ write one [update or stop line](commands.md#update-line-and-refusals), and `plan
 both begin with the exact `First Draft: ` prefix, so machine consumers can remove only those lines and parse the
 remaining JSON document. `login` may first write its human-readable authorization instructions; its JSON object
 starts on the line after them. `report` prints what it sends on standard output before sending it, so standard
-output may hold that preview when it fails. Branch on the stable `error` value rather than
-the human-readable `detail`.
+output may hold that preview when it fails. `start`, `login --no-wait`, and `login --finish` print their plain
+sentences for the agent on standard output, which holds them when the command fails. Branch on the stable `error`
+value rather than the human-readable `detail`.
 
 Handled output never includes command arguments, local Plan bytes, raw artifact bytes, raw filesystem or network
 errors, or unvalidated response bodies. `local_state_not_saved` is the sole exception to private-state redaction:
@@ -32,13 +33,25 @@ used. The CLI never substitutes one environment's credential for another's. Run 
 environment (with `--staging` or the same `FIRSTDRAFT_API_URL`), or refresh the environment token, then follow the
 command's recovery instructions below. If a saved login is rejected, run `firstdraft login` again.
 
+From `start`, `authentication_required` means it is not ready: no token exists for the origin, so it made no
+request, or First Draft rejected the token it sent. Its standard output says which and names the next step: the
+[agent's two login steps](commands.md#log-in-from-an-agent), or, for a rejected environment token, asking the person
+to replace or unset it. No handled error from `start` carries `response`, so none repeats text First Draft wrote.
+
 ## Login and logout errors
 
 `login` and `logout` never print a token. A local credential failure can occur after the server has issued or revoked a token.
 
-- `authorization_denied`: the approval was denied in the browser. Run `firstdraft login` again to retry.
-- `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before
-  approval. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
+- `authorization_denied`: the approval was denied in the browser. Run `firstdraft login` again to retry. After
+  `login --finish`, the person refused: ask them before starting another login with `login --no-wait`.
+- `authorization_expired`: no loopback callback arrived within five minutes, or the device code expired before the
+  CLI received a token. Run `firstdraft login` again. Use `--interactive` if no browser on this machine can reach the printed URL.
+  After `login --finish`, start again with `login --no-wait`, which prints a new link and code.
+- `authorization_pending`, from `login --finish`: First Draft has not confirmed an approval yet, and the CLI stopped after its
+  short wait. The link and the code still work until the time it prints; when the person says they approved, run
+  `login --finish` again.
+- `login_not_started`, from `login --finish`: no waiting login started with `login --no-wait` exists for the
+  selected origin, or it already ended. Run `firstdraft start` to see whether this computer is logged in.
 - `login_failed`: the login could not be completed. `reason`, when present, is the server's OAuth error code (for
   example `invalid_grant` for a used, expired, or mismatched code), `loopback_unavailable` when the local listener
   could not start, `credentials_invalid` / `credentials_unavailable` when the credentials file could not be read or
@@ -47,6 +60,11 @@ command's recovery instructions below. If a saved login is rejected, run `firstd
   request was made; repair or remove the file and retry. With `phase: "write"`, First Draft issued a token but the
   CLI could not save it. Revoke that new token on the selected origin's `/api-tokens` page, then repair the
   credentials file and retry login. Any previously saved token remains unchanged when the replacement fails.
+  `device_login_invalid` or `device_login_unavailable` means the waiting device login, `device-login.json` at
+  `credentials_path`, was malformed or could not be read, written, or removed; it carries no `phase`. Remove that
+  file, then run `firstdraft start` to see whether this computer is logged in. From `login --finish`, `reason`
+  `invalid_grant` means the grant is spent and its file was removed: start again with `login --no-wait`. Any other
+  poll failure, such as a network failure or a server error, keeps the file, so `login --finish` can run again.
 - `logout_failed`: the credentials file could not be read or updated. It carries `reason`, `credentials_path`,
   and `phase`. With `phase: "read"`, no token was revoked or removed; repair or remove the file and retry. With
   `phase: "write"`, local removal failed after the revocation attempt. `revoked: true` means First Draft confirmed
@@ -68,6 +86,7 @@ These errors replace a command's result when a First Draft response told the CLI
 finished. The CLI finishes handling that response, so a push it accepted still saves its ETag, and then sends
 nothing more. When the stopping response was the command's last, the command reports its own result instead, after
 one `First Draft: ` line that names the required update ([update line and refusals](commands.md#update-line-and-refusals)).
+`start` always reports the error, because a setup that must update is not ready.
 
 - `update_required`: First Draft's `FirstDraft-Minimum-Plugin` is newer than this setup's plugin, or, when no plugin
   version is set, its `FirstDraft-Minimum-CLI` is newer than this CLI. `plugin_version` and `minimum_plugin_version`,
@@ -239,7 +258,8 @@ stopped without following the replacement.
 | Network commands except `logout`             | `rate_limited`                                                                                     |    1 | First Draft refused a request at a limit; `retry_at` says when to try again.                                    |
 | `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                                     |
 | Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                                 |
-| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.                        |
+| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or the callback wait or device code ended before the CLI received a token.             |
+| `login --finish`                             | `authorization_pending`, `login_not_started`                                                       |    1 | First Draft has not confirmed an approval yet, or no device login is waiting for the origin.                    |
 | `login`                                      | `login_failed`                                                                                     |    1 | Nothing was saved; `phase: "write"` means a token was issued ([recovery](#login-and-logout-errors)).            |
 | `logout`                                     | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).               |
 | Network commands                             | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                                |
@@ -267,7 +287,7 @@ stopped without following the replacement.
 | Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`.          |
 | Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.           |
 | Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable.          |
-| `account`                                    | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
+| `account`, `start`                           | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
 | `report progress`, `report failure`          | `report_rejected`, `report_unavailable`, `account_unavailable`, `invalid_server_response`          |    1 | The report was refused or its outcome is unconfirmed, or the account read failed; continue without it.          |
 
 Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_not_writable`,

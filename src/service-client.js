@@ -75,6 +75,8 @@ export class RateLimitedError extends ServiceStopError {
 /**
  * @typedef {object} ServiceSession
  * @property {string} clientHeader the FirstDraft-Client value sent on every request
+ * @property {string | null} pluginVersion the plugin's version from
+ *   FIRSTDRAFT_PLUGIN_VERSION, or null when that is unset or not a version
  * @property {(request?: typeof globalThis.fetch) => typeof globalThis.fetch} fetch
  *   Wraps a fetch function so every request carries FirstDraft-Client and
  *   every response is checked.
@@ -268,6 +270,7 @@ export function createServiceSession({
 
   return {
     clientHeader,
+    pluginVersion: plugin === null ? null : plugin.text,
     fetch(request = globalThis.fetch) {
       /** @type {typeof globalThis.fetch} */
       const serviceFetch = async (input, init) => {

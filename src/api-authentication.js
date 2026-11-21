@@ -35,6 +35,13 @@ export function environmentTokenFor(origin, { apiToken, stagingApiToken }) {
   return hasToken(token) ? token : undefined;
 }
 
+/** The variable that holds the environment token for an origin. @param {string} origin */
+export function environmentTokenVariable(origin) {
+  return origin === STAGING_API_URL
+    ? "FIRSTDRAFT_STAGING_API_TOKEN"
+    : "FIRSTDRAFT_API_TOKEN";
+}
+
 /**
  * @param {object} options
  * @param {typeof globalThis.fetch} [options.fetchFunction]
@@ -69,7 +76,7 @@ export function authenticateApiCommand({
   /** @param {string} origin */
   const tokenFor = (origin) =>
     environmentTokenFor(origin, { apiToken, stagingApiToken }) ??
-    storedToken(readStoredTokens(), origin);
+    storedTokenFor(readStoredTokens(), origin);
   /** @type {typeof globalThis.fetch} */
   const authorizedFetch = (input, init) => {
     const endpoint = new URL(input instanceof Request ? input.url : input);
@@ -97,8 +104,13 @@ export function authenticateApiCommand({
   };
 }
 
-/** @param {Readonly<Record<string, string>>} tokens @param {string} origin */
-function storedToken(tokens, origin) {
+/**
+ * The token a saved login holds for exactly this origin, if any.
+ *
+ * @param {Readonly<Record<string, string>>} tokens
+ * @param {string} origin
+ */
+export function storedTokenFor(tokens, origin) {
   const token = Object.hasOwn(tokens, origin) ? tokens[origin] : undefined;
   return hasToken(token) ? token : undefined;
 }
