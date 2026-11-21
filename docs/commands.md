@@ -3,12 +3,12 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.9.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
-application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
-Compile-and-materialize and private publish orchestration, retained-Compilation inspection and cancellation, the
-account's report setting, and progress and failure reports. This development version requires
-the service's `0.9.x` API contract; the release that carries it names its own version in the changelog. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes
-each version. [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
+The current `0.10.x` source line contains the auditable command shell, browser and device login, local Foundation Plan
+initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
+status polling, direct Compile-and-materialize and private publish orchestration, retained-Compilation inspection and
+cancellation, the account's report setting, and progress and failure reports. It requires the service's `0.9.x` API
+contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
+[What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
 
