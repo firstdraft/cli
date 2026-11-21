@@ -3,7 +3,8 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.10.x` source line contains the auditable command shell, browser and device login, local Foundation Plan
+The current `0.10.x` source line contains the auditable command shell, the agent's `start` check, browser and device
+login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize and private publish orchestration, retained-Compilation inspection and
 cancellation, the account's report setting, and progress and failure reports. It requires the service's `0.9.x` API
@@ -14,10 +15,13 @@ contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.
 
 | Command                               | Network | Purpose                                                     |
 | ------------------------------------- | ------- | ----------------------------------------------------------- |
+| `firstdraft start`                    | Yes     | Check versions, login, and reports before other work        |
 | `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity  |
 | `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                |
 | `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities     |
 | `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin |
+| `firstdraft login --no-wait`          | Yes     | Start a device login for an agent and exit                  |
+| `firstdraft login --finish`           | Yes     | Finish that device login once the person approved           |
 | `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin             |
 | `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                   |
 | `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis           |
@@ -67,7 +71,8 @@ firstdraft login --interactive   # also -i or --device
 
 The CLI prints a verification URL, a short user code, and a URL that already includes the code. Open either URL on
 any device, confirm the code, and approve. The CLI polls at the server's interval, adds five seconds when asked to
-slow down, and stops when the code expires.
+slow down, and stops when the code expires. An agent cannot hold that wait open, so it runs the same flow in
+[two steps](#log-in-from-an-agent).
 
 Neither flow sends this computer's hostname. Their requests carry `FirstDraft-Client` like every other request
 ([What the CLI sends](#what-the-cli-sends)). A denied approval exits with `authorization_denied`. A login that is not approved in time exits with
@@ -76,6 +81,60 @@ contract replaces its result with `update_required` or `api_contract_unsupported
 login still had to send, as [update line and refusals](#update-line-and-refusals) describes. Other failures exit with
 `login_failed`. No credential is saved unless the login succeeds. See
 [Errors and recovery](errors.md#login-and-logout-errors).
+
+### Log in from an agent
+
+The agent may start the login. It runs the device flow as two short commands, which
+[`firstdraft start`](#check-readiness-before-work) names, and shows the person the link and the code:
+
+```sh
+firstdraft login --no-wait
+firstdraft login --finish
+```
+
+`--no-wait` asks First Draft for a device grant, saves it, prints these lines on standard output, and exits 0:
+
+```text
+To log in to <origin>, ask the person to open this link in a browser, check that the page shows the code <code>, and approve:
+<link that includes the code>
+The link and the code expire in <n> minutes, at <UTC time>.
+When the person says they approved, run 'firstdraft login --finish'.
+```
+
+When First Draft sends no link that includes the code, the first line asks the person to enter the code instead, and
+the second is the plain verification link. On staging, each command the CLI prints for the agent ends in `--staging`.
+The person approves on that page, where First Draft also asks the reports question until it has an answer.
+
+The device code is a credential, so the CLI never prints it; only the link and the user code appear. `--no-wait` saves
+the waiting login, device code included, as `device-login.json` beside `credentials.json`, with mode `0600` in the
+`0700` directory. The file holds one waiting login, and another `--no-wait` replaces it. As with `login`, an unusable
+credentials file stops it before any request.
+
+`--finish` reads that file for the selected origin and polls First Draft at the grant's interval for at most 15
+seconds. It waits first when the previous poll was less than an interval ago, and a `slow_down` answer lengthens the
+interval by five seconds; the file keeps both for the next `--finish`. It then says on standard output which of these
+happened, and every outcome but the first also ends with its handled error on standard error:
+
+- **Logged in** (exit 0): it saves the token as `login` does, removes the file, and prints
+  `Logged in: this computer is now logged in to <origin>.` and `Run 'firstdraft start' again.`
+- **Still waiting** (`authorization_pending`): `Still waiting: the person has not approved the login yet.`, the link
+  lines again, and
+  `The link and the code expire at <UTC time>. When the person says they approved, run 'firstdraft login --finish' again.`
+  The file stays.
+- **Expired** (`authorization_expired`):
+  `Expired: the link and the code expired before the person approved, so this computer is not logged in to <origin>.`
+  and `To try again, run 'firstdraft login --no-wait'.`
+- **Refused** (`authorization_denied`):
+  `Refused: the person denied the login, so this computer is not logged in to <origin>.` and
+  `Ask the person before you start another login with 'firstdraft login --no-wait'.`
+- **No waiting login** (`login_not_started`), when none was started for this origin or it already ended:
+  `No login is waiting: this computer has no device login for <origin> that has not ended.` and
+  `Run 'firstdraft start' to see whether this computer is logged in.`
+
+An expired, refused, or spent grant (`invalid_grant`) removes the file. A network failure or server error keeps it, so
+`--finish` can run again. `--no-wait` and `--finish` select the origin as `login` does, may be given with
+`--interactive` or `--device`, and cannot be given together. `firstdraft login --interactive` still waits in one
+process for a person in their own terminal.
 
 ### Saved credentials
 
@@ -104,7 +163,7 @@ Tokens from the environment still work and take precedence over a saved login. C
 [First Draft](https://firstdraft.com/api-tokens) and provide it through `FIRSTDRAFT_API_TOKEN`. For staging, create a
 separate token at [First Draft staging](https://staging.firstdraft.com/api-tokens) and provide it through
 `FIRSTDRAFT_STAGING_API_TOKEN`. Keep token values out of shell history and command arguments. `login` and `logout`
-note on standard error when an environment token will override the saved login.
+note on standard error when an environment token will override the saved login, and `start` says so among its lines.
 
 ### Origins and projects
 
@@ -160,6 +219,7 @@ Beyond the header, a command sends only what it needs:
 | Commands                                  | Request content                                                  |
 | ----------------------------------------- | ---------------------------------------------------------------- |
 | `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it    |
+| `start`                                   | An account read, and nothing without a token                     |
 | `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag               |
 | `plan status`, `compilation *`, `account` | Only the IDs in the request path                                 |
 | `report progress`, `report failure`       | An account read; with reports on, the report printed just before |
@@ -180,12 +240,14 @@ notice therefore comes from First Draft's answer to the command being run, not f
 - **Older than the latest:** the CLI writes one line on standard error, once per command and just before the
   command's own result, whether or not a terminal is attached, so an agent sees it and can pass it on:
   `First Draft: an update is available (plugin <latest>; this setup has plugin <installed>). Tell the person the update steps are at https://firstdraft.com/update`.
-  Without a plugin version the line names `CLI <latest>` and `CLI <installed>`.
+  Without a plugin version the line names `CLI <latest>` and `CLI <installed>`. `start` writes the same line on
+  standard output, after its version line.
 - **Older than the minimum, or a contract other than API `0.9.x`:** the CLI finishes handling that response, so
   local state stays in step with First Draft, and sends nothing more. When the command still had a request to send,
   it exits with `update_required` or `api_contract_unsupported` instead of its own result. When that response was the
   command's last, the command reports its own result, after one `First Draft: ` line on standard error that names
-  the stop and says the command finished. For an older contract, or a prerelease of a release inside the accepted range, it says to use the CLI that origin supports instead of updating; a prerelease of a newer release counts as newer. Either replaces the update line above.
+  the stop and says the command finished; `start` is the exception and always exits with the error, because such a
+  setup is not ready. For an older contract, or a prerelease of a release inside the accepted range, it says to use the CLI that origin supports instead of updating; a prerelease of a newer release counts as newer. Either replaces the update line above.
 - **A `429` answer**, which First Draft sends when a limit is reached, such as an account's Compilations for the day
   or its reports for the hour, usually with `Retry-After`: the request did nothing, and whatever else the response
   says, the command exits with `rate_limited` and the time to try again.
@@ -193,6 +255,73 @@ notice therefore comes from First Draft's answer to the command being run, not f
 A header value that is not a version is ignored, and a prerelease contract counts as outside the range. `logout`
 always finishes removing the local token, so neither the stop line nor a refusal replaces its result.
 [Errors and recovery](errors.md#update-and-limit-errors) explains each error.
+
+## Check readiness before work
+
+An agent runs `firstdraft start` once, before other First Draft work; the Skill runs it first. It selects the origin as
+`login` does, with `--staging` or `FIRSTDRAFT_API_URL`:
+
+```sh
+firstdraft start
+```
+
+It prints plain text for the agent on standard output, one fact per line. The sentences are fixed and ship in
+`src/agent-sentences.js`, where `login --no-wait` and `login --finish` take theirs. First Draft's answer only chooses
+among them: the only values they carry are the origin, versions, and the name of a token variable. It prints no token
+and no account fact other than whether reports are on.
+
+With a token for the origin, from the environment or a saved login, `start` makes one request, `GET /v1/account`, and
+reads the version headers on that answer as every command does. Without one, it makes no request. It exits 0 only when
+First Draft accepted the token, and every other outcome ends with its handled error on standard error.
+
+The first line names the versions: `First Draft CLI <version>.`, or `First Draft CLI <version> with plugin <version>.`
+when `FIRSTDRAFT_PLUGIN_VERSION` holds a version. When First Draft names a newer version, the
+[update line](#update-line-and-refusals) comes second. Then, by outcome:
+
+- **Ready, reports off** (exit 0). Nothing is said about reports:
+
+  ```text
+  This computer has a saved login for <origin>.
+  Ready: First Draft accepted this computer's login.
+  ```
+
+- **Ready, reports on** (exit 0). The same two lines, then the sentences that say when to send reports and with which
+  command:
+
+  ```text
+  Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates.
+  Progress: run 'firstdraft report progress <compilation-id> --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.
+  Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure <compilation-id> --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.
+  Use compilation.id from 'firstdraft plan compile', and run each report command from the generated application's root, or from the Project's directory after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.
+  ```
+
+- **An environment token** (exit 0 when accepted). The login lines say which token is used:
+
+  ```text
+  This computer has no saved login for <origin>.
+  FIRSTDRAFT_API_TOKEN is set, so the CLI uses that token in place of any saved login for <origin>, and no login is needed.
+  Ready: First Draft accepted FIRSTDRAFT_API_TOKEN.
+  ```
+
+  The first line says `a saved login` when one exists, and staging names `FIRSTDRAFT_STAGING_API_TOKEN`.
+
+- **Not logged in** (`authentication_required`, exit 1, no request). The next step is the
+  [agent's login](#log-in-from-an-agent):
+
+  ```text
+  This computer has no saved login for <origin>.
+  To log in, run 'firstdraft login --no-wait'. It prints a link and a code: show both to the person and ask them to approve the login in their browser.
+  When the person says they approved, run 'firstdraft login --finish', then run 'firstdraft start' again.
+  ```
+
+- **Login not accepted** (`authentication_required`, exit 1). After the login lines, a saved login First Draft
+  rejected gets `Not logged in: First Draft did not accept the saved login for <origin>.` and the two login steps
+  above. A rejected environment token gets
+  `Not logged in: First Draft did not accept FIRSTDRAFT_API_TOKEN. Ask the person to replace it or unset it; while it is set, the CLI uses no saved login.`
+- **Below the minimum, or another API contract** (`update_required` or `api_contract_unsupported`, exit 1). The
+  login lines, then the [refusal](errors.md#update-and-limit-errors) instead of `Ready`.
+- **Account not read** (`account_unavailable`, `invalid_server_response`, or `rate_limited`, exit 1). The login lines,
+  then the error. `account_unavailable` is safe to retry.
 
 ## Start a Foundation Plan
 
@@ -631,7 +760,7 @@ retries.
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`account` reads `/v1/account` at the origin selected as for `login`; the report commands read it, and every other
+`account` and `start` read `/v1/account` at the origin selected as for `login`; the report commands read it, and every other
 `/v1` request goes, to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
@@ -658,10 +787,11 @@ timeout. Each request takes its method and path from one
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
-`compilation cancel` cancels it. `account` reads `/v1/account`. `report progress` and `report failure` read it and,
-with reports on, post their report.
+`compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
+`report progress` and `report failure` read it and, with reports on, post their report.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
-`/oauth/device_authorization` and then polls `/oauth/token`. `logout` calls `/oauth/revoke`. The browser, not the
+`/oauth/device_authorization` and then polls `/oauth/token`. `login --no-wait` makes only the first request, and
+`login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 
 The first push sends `If-None-Match: *`. Later pushes, the Compilation start `POST`, and the Publication `PUT` send

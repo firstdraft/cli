@@ -22,6 +22,7 @@ Commands:
   logout       Revoke and remove the saved token
   plan         Work with Foundation Plans
   report       Send a progress or failure report to First Draft
+  start        Check versions, login, and reports before other work
 
 Options:
       --staging  Use staging for API commands (production is the default)

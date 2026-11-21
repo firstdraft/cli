@@ -365,21 +365,36 @@ export async function pollDeviceToken({
       });
     }
 
-    const response = await postForm(request, SERVICE_ROUTES.requestOAuthToken, {
-      grant_type: DEVICE_CODE_GRANT_TYPE,
-      device_code: deviceCode,
-      client_id: CLIENT_ID,
-    });
-    if (response.status === 200) return accessTokenFrom(response);
-
-    const failure = oauthFailure(response.status, response.body);
-    if (failure.code === "authorization_pending") continue;
-    if (failure.code === "slow_down") {
-      intervalMs += SLOW_DOWN_INCREMENT_MS;
-      continue;
-    }
-    throw failure;
+    const result = await requestDeviceToken({ ...request, deviceCode });
+    if (!("pending" in result)) return result;
+    if (result.pending === "slow_down") intervalMs += SLOW_DOWN_INCREMENT_MS;
   }
+}
+
+/**
+ * One poll of the token endpoint for a device grant. Resolves the token, or
+ * which of the two answers that mean "ask again later" First Draft gave;
+ * rejects with an OAuthError for every other answer.
+ *
+ * @param {RequestOptions & {deviceCode: string}} options
+ * @returns {Promise<AccessToken | {pending: "authorization_pending" | "slow_down"}>}
+ */
+export async function requestDeviceToken({ deviceCode, ...request }) {
+  const response = await postForm(request, SERVICE_ROUTES.requestOAuthToken, {
+    grant_type: DEVICE_CODE_GRANT_TYPE,
+    device_code: deviceCode,
+    client_id: CLIENT_ID,
+  });
+  if (response.status === 200) return accessTokenFrom(response);
+
+  const failure = oauthFailure(response.status, response.body);
+  if (
+    failure.code === "authorization_pending" ||
+    failure.code === "slow_down"
+  ) {
+    return { pending: failure.code };
+  }
+  throw failure;
 }
 
 /**

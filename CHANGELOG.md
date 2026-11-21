@@ -11,9 +11,10 @@ repository's [tags](https://github.com/firstdraft/cli/tags) identify the source 
 
 ## 0.10.0
 
-Lets First Draft tell a setup that it is out of date, and adds the account and report commands, so a person working
-alone hears when to update and their agent can send the progress and failure reports the person agreed to. Moves the
-Rails target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x`.
+Lets First Draft tell a setup that it is out of date, and adds the account, report, and `start` commands and a device
+login in two steps, so a person working alone hears when to update, their agent can log them in, and it can send the
+progress and failure reports the person agreed to. Moves the Rails target to profile `rails-sketch/2026-11` and the
+accepted API contract to `0.9.x`.
 
 - `plan init` writes Plans that target `rails-sketch/2026-11`. `plan compile` and `compilation download` accept only
   artifacts for that profile; an artifact for `rails-sketch/2026-10` reports `invalid_artifact`. The CLI sends a
@@ -58,21 +59,37 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
   with a line number, and says when frames after the first 20 were dropped; the printed JSON is exactly what is
   sent. Both commands find the Project from the generated application's root after root adoption, or from the
   Project's directory.
+- `firstdraft start`, which an agent runs once before other work, prints fixed sentences on standard output, one fact
+  per line: the CLI version and, when `FIRSTDRAFT_PLUGIN_VERSION` holds one, the plugin's; the update line, when
+  First Draft names a newer version; whether this computer has a saved login for the origin and whether a token in
+  the environment takes its place; and, when reports are on, when to send progress and failure reports and with
+  which command. With reports off, it says nothing about reports. With a token, it makes one request, an account
+  read; without one, it makes none and names the two login steps below. It exits 0 only when First Draft accepted
+  the token. A setup below the minimum or on another API contract fails with `update_required` or
+  `api_contract_unsupported`, even though the account read was its only request.
+- `firstdraft login --no-wait` asks for a device grant, prints the link, the user code, and when they expire, saves
+  the waiting login as `device-login.json` beside `credentials.json` with mode `0600`, and exits. After the person
+  approves, `firstdraft login --finish` polls at the grant's interval for at most 15 seconds, saves the token, and
+  removes that file; it also removes it once the grant is refused, expired, or spent. It prints `Logged in:`,
+  `Still waiting:`, `Expired:`, or `Refused:` with the next step. The device code is never printed. The browser login
+  and the one-process `login --interactive` are unchanged.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
   unconfirmed Publication under `plan compile --github` is unchanged.
 - New `error` values, each with exit status 1: `update_required`, `api_contract_unsupported`, `rate_limited`,
-  `account_unavailable`, `report_rejected`, and `report_unavailable`. `account` and the report commands also report
-  `authentication_required` and `invalid_server_response` (exit status 1) and `invalid_arguments` and
-  `invalid_configuration` (exit status 2). The report commands also report `local_input_unreadable` and
-  `project_not_pushed` (exit status 1).
+  `account_unavailable`, `report_rejected`, `report_unavailable`, and, from `login --finish`, `authorization_pending`
+  and `login_not_started`. `account`, `start`, and the report commands also report `authentication_required` and
+  `invalid_server_response` (exit status 1) and `invalid_arguments` and `invalid_configuration` (exit status 2). The
+  report commands also report `local_input_unreadable` and `project_not_pushed` (exit status 1). `login_failed` gains
+  the reasons `device_login_invalid` and `device_login_unavailable` for the waiting device login's file.
 
 Use CLI 0.10.0 with a Service that serves API `0.9.x`. Once a response from an origin names API `0.8.x`, the CLI sends
 nothing more and says to use the CLI version that origin supports. A plugin's launcher should set
 `FIRSTDRAFT_PLUGIN_VERSION` and `FIRSTDRAFT_AGENT`; without the first, the CLI compares its own version with the CLI
 versions. Callers that parse standard error should drop the `First Draft: ` lines, which any network command may now
-write before its result.
+write before its result; `start` writes its update line on standard output instead. A Skill that checked
+`firstdraft --help` runs `firstdraft start` in its place and may run the two login steps itself.
 
 ## 0.9.0
 
