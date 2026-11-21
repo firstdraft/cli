@@ -67,13 +67,17 @@
         "mail sam@example.com",
         "token abcdefghijklmnopqrstuvwxyz",
         "two\nlines",
+        "two\rlines",
+        "two lines",
+        "two lines",
+        "two\u0085lines",
         "one\ttab"
       ],
       "limit": 300
     },
     "fix_summary": {
       "accepted": ["Returned early when the post has no title.", "Guarded […] before saving."],
-      "refused": ["Set TOKEN=abc in […]", "Moved the file to app/models"],
+      "refused": ["Set TOKEN=abc in […]", "Moved the file to app/models", "Returned early Then saved"],
       "limit": 200
     },
     "version": {
