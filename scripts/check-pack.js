@@ -42,7 +42,6 @@ if (result.status !== 0) {
     "src/cli.js",
     "src/commands/account.js",
     "src/commands/compilation.js",
-    "src/commands/conversation.js",
     "src/commands/login.js",
     "src/commands/logout.js",
     "src/commands/plan-compile.js",

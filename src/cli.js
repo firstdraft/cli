@@ -89,13 +89,6 @@ import {
   readAccount,
 } from "./commands/account.js";
 import {
-  ConversationFileError,
-  ConversationRejectedError,
-  ConversationUnavailableError,
-  readConversationFile,
-  sendConversation,
-} from "./commands/conversation.js";
-import {
   FAILURE_KINDS,
   PROGRESS_STEPS,
   ReportRejectedError,
@@ -133,14 +126,13 @@ Usage:
   firstdraft [options]
 
 Commands:
-  account       Show whether this account sends reports
-  compilation   Inspect, download, and cancel Compilations
-  conversation  Send a planning conversation to First Draft
-  generate      Generate local values
-  login         Log in to First Draft and save a token
-  logout        Revoke and remove the saved token
-  plan          Work with Foundation Plans
-  report        Send a progress or failure report to First Draft
+  account      Show whether this account sends reports
+  compilation  Inspect, download, and cancel Compilations
+  generate     Generate local values
+  login        Log in to First Draft and save a token
+  logout       Revoke and remove the saved token
+  plan         Work with Foundation Plans
+  report       Send a progress or failure report to First Draft
 
 Options:
       --staging  Use staging for API commands (production is the default)
@@ -235,37 +227,6 @@ at the origin pinned by a successful plan push. With reports on, it prints the
 exact report and what it left out, then sends it once there. With reports off,
 it sends no report and still exits 0. Run it from the generated application's
 root.
-`;
-
-const CONVERSATION_HELP = `First Draft CLI
-
-Usage:
-  firstdraft conversation <command> [options]
-
-Commands:
-  send  Send one planning conversation file to First Draft
-
-Options:
-  -h, --help  Show help
-`;
-
-const CONVERSATION_SEND_HELP = `First Draft CLI
-
-Usage:
-  firstdraft conversation send <file> --person-agreed
-
-Options:
-      --staging        Use staging; reject a different saved origin
-      --person-agreed  The person said yes to sending this file, this time
-  -h, --help           Show help
-
-Environment:
-  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
-  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
-
-Ask the person each time, and show them the file first. The command prints the
-file's path, size, and SHA-256 and the Project, then sends the file's bytes
-unchanged, once, to the origin pinned by a successful plan push.
 `;
 
 const PLAN_HELP = `First Draft CLI
@@ -688,20 +649,10 @@ const REPORT_ACCOUNT_UNAVAILABLE_DETAIL =
   "Could not read whether this account sends reports, so no report was sent. Continue without it.";
 const REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL =
   "First Draft returned an invalid account response, so no report was sent. Continue without it.";
-const CONVERSATION_SEND_INVALID_ARGUMENTS_DETAIL =
-  "Invalid arguments. Run 'firstdraft conversation send --help' for usage.";
-const CONVERSATION_CONSENT_REQUIRED_DETAIL =
-  "Nothing was sent. Ask the person whether to send this conversation, show them the file, and pass --person-agreed only after they say yes this time.";
 const PINNED_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state, so nothing was sent. Run the command from the generated application's root after root adoption, or from the Project's directory.";
 const PINNED_NOT_PUSHED_DETAIL =
   "The local Project has no pinned API origin, so nothing was sent. Run 'firstdraft plan push' first.";
-const CONVERSATION_UNREADABLE_DETAIL =
-  "The conversation file cannot be sent, so nothing was sent. reason says why: unreadable, empty, or too_large.";
-const CONVERSATION_REJECTED_DETAIL =
-  "First Draft rejected the conversation, so it was not kept; response.code says why.";
-const CONVERSATION_UNAVAILABLE_DETAIL =
-  "Could not confirm that First Draft received the conversation, and First Draft may hold it already. Do not send it again without asking the person.";
 
 /**
  * @typedef {object} Writer
@@ -879,15 +830,10 @@ export async function run({
     });
   }
 
-  if (
-    argv[0] === "account" ||
-    argv[0] === "report" ||
-    argv[0] === "conversation"
-  ) {
+  if (argv[0] === "account" || argv[0] === "report") {
     const commands = {
       account: runAccount,
       report: runReport,
-      conversation: runConversation,
     };
     return commands[argv[0]]({
       argv: argv.slice(1),
@@ -3510,130 +3456,6 @@ async function sendReportCommand(
   }
 }
 
-/** @param {ServiceCommandOptions} options */
-async function runConversation(options) {
-  const [command, ...rest] = options.argv;
-  if (command === "send") {
-    return runConversationSend({ ...options, argv: rest });
-  }
-
-  return runCommandGroup(options, "conversation", CONVERSATION_HELP);
-}
-
-/** @param {ServiceCommandOptions} options */
-async function runConversationSend(options) {
-  const { argv, stdout, stderr, staging, createRequestSignal, service } =
-    options;
-  const parsed = parseArguments(() =>
-    parseArgs({
-      args: [...argv],
-      options: {
-        staging: { type: "boolean" },
-        "person-agreed": { type: "boolean" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-      strict: true,
-      tokens: true,
-    }),
-  );
-
-  const [file] = parsed?.positionals ?? [];
-  if (
-    !parsed ||
-    repeatedValueOption(parsed.tokens) ||
-    (!parsed.values.help && (parsed.positionals.length !== 1 || !file))
-  ) {
-    writeJson(stderr, {
-      error: "invalid_arguments",
-      detail: CONVERSATION_SEND_INVALID_ARGUMENTS_DETAIL,
-    });
-    return 2;
-  }
-
-  if (parsed.values.help) {
-    stdout.write(CONVERSATION_SEND_HELP);
-    return 0;
-  }
-
-  if (!parsed.values["person-agreed"]) {
-    writeJson(stderr, {
-      error: "consent_required",
-      detail: CONVERSATION_CONSENT_REQUIRED_DETAIL,
-    });
-    return 2;
-  }
-
-  try {
-    const pinned = authenticatePinnedProject({
-      ...options,
-      staging: staging || parsed.values.staging,
-    });
-    if (pinned === null) {
-      writeAuthenticationRequired(stderr);
-      return 1;
-    }
-
-    const conversation = readConversationFile({
-      cwd: pinned.cwd,
-      file: /** @type {string} */ (file),
-    });
-    stdout.write(
-      `Sending ${conversation.path} (${conversation.bytes.byteLength} bytes, SHA-256 ${conversation.sha256}) ` +
-        `for Project ${pinned.projectId} to ${pinned.apiUrl}.\n`,
-    );
-    await service.settle(
-      sendConversation({
-        apiUrl: pinned.apiUrl,
-        projectId: pinned.projectId,
-        conversation,
-        fetchFunction: pinned.fetchFunction,
-        createRequestSignal,
-      }),
-    );
-    stdout.write("Sent.\n");
-    return 0;
-  } catch (error) {
-    const status = writePinnedProjectError(stderr, error);
-    if (status !== null) return status;
-
-    if (error instanceof ConversationFileError) {
-      writeJson(stderr, {
-        error: "conversation_unreadable",
-        detail: CONVERSATION_UNREADABLE_DETAIL,
-        reason: error.reason,
-      });
-      return 1;
-    }
-
-    if (error instanceof ConversationRejectedError) {
-      if (isAuthenticationProblem(error.status, error.response)) {
-        writeAuthenticationRequired(stderr, error.status, error.response);
-        return 1;
-      }
-      writeJson(stderr, {
-        error: "conversation_rejected",
-        detail: CONVERSATION_REJECTED_DETAIL,
-        status: error.status,
-        response: error.response,
-      });
-      return 1;
-    }
-
-    if (error instanceof ConversationUnavailableError) {
-      writeJson(stderr, {
-        error: "conversation_unavailable",
-        detail: CONVERSATION_UNAVAILABLE_DETAIL,
-        ...(typeof error.status === "number" ? { status: error.status } : {}),
-        ...(error.response ? { response: error.response } : {}),
-      });
-      return 1;
-    }
-
-    throw error;
-  }
-}
-
 /**
  * Reads the Project that a successful push pinned and authenticates its
  * origin, before a command prints what it will send there. Returns null when
@@ -3777,7 +3599,7 @@ function authenticateAccountCommand(
 }
 
 /**
- * The errors that every account, report, and conversation command handles
+ * The errors that every account and report command handles
  * the same way.
  *
  * @param {Writer} writer

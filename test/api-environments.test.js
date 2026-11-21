@@ -24,7 +24,6 @@ const REMOTE_COMMANDS = [
   ["compilation", "status", COMPILATION_ID],
   ["compilation", "download", COMPILATION_ID, "--output", "application"],
   ["compilation", "cancel", COMPILATION_ID],
-  ["conversation", "send", "conversation.jsonl", "--person-agreed"],
   ["report", "progress", COMPILATION_ID, "--step", "setup"],
   [
     "report",
@@ -359,7 +358,6 @@ function projectDirectory(context, origin) {
   context.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(path.join(cwd, ".firstdraft"));
   writeFileSync(path.join(cwd, ".firstdraft", "foundation-plan.json"), "{}\n");
-  writeFileSync(path.join(cwd, "conversation.jsonl"), "{}\n");
   writeFileSync(
     path.join(cwd, ".firstdraft", "state.json"),
     `${JSON.stringify({

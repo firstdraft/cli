@@ -71,10 +71,6 @@ export const SERVICE_ROUTES = {
     method: "POST",
     path: "/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports",
   },
-  sendConversation: {
-    method: "POST",
-    path: "/v1/projects/{project_id}/conversations",
-  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",

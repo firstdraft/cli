@@ -6,7 +6,7 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 The current `0.9.x` source line contains the auditable command shell, browser and device login, local Foundation Plan initialization, local
 application-key and UUID generation, conditional whole-document push, whole-graph analysis status polling, direct
 Compile-and-materialize and private publish orchestration, retained-Compilation inspection and cancellation, the
-account's report setting, progress and failure reports, and conversation upload. This development version requires
+account's report setting, and progress and failure reports. This development version requires
 the service's `0.9.x` API contract; the release that carries it names its own version in the changelog. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes
 each version. [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
@@ -29,7 +29,6 @@ each version. [What the CLI sends](#what-the-cli-sends) lists every request and 
 | `firstdraft account`                  | Yes     | Show whether the account sends reports                      |
 | `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come  |
 | `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code   |
-| `firstdraft conversation send`        | Yes     | Print, then send, one conversation the person agreed to     |
 
 ## Select an environment and authenticate
 
@@ -158,13 +157,12 @@ CLI without the plugin's launcher, such as a direct npm installation, may set th
 
 Beyond the header, a command sends only what it needs:
 
-| Commands                                  | Request content                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it      |
-| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                 |
-| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                   |
-| `report progress`, `report failure`       | An account read; with reports on, the report printed just before   |
-| `conversation send`                       | The file the person agreed to send, unchanged, under its base name |
+| Commands                                  | Request content                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it    |
+| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag               |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                 |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before |
 
 ### Update line and refusals
 
@@ -511,7 +509,7 @@ An earlier format or profile is rejected before materialization, even when the r
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
 `.firstdraft/design/.firstdraft`; run later Plan and Compilation commands from `.firstdraft/design`. Run ordinary
-Rails setup, preview, and tests, and `report` and `conversation send`, from the generated application root, where
+Rails setup, preview, and tests, and `report`, from the generated application root, where
 the CLI finds the archived Project and failure frames are relative to the application. Retain the archive when further First Draft
 authoring is useful. The CLI does not run or qualify the generated application's setup, preview, or test commands.
 Compiling a later Plan revision does not overwrite an already adopted root: choose a new absent output and
@@ -630,24 +628,6 @@ with `201`; any other success is `report_unavailable`. If the person turns repor
 Draft answers `403 reports_off` and keeps nothing, and the command writes the same line and exits 0. Neither command
 retries.
 
-## Send a planning conversation
-
-Only when the person says yes, and each time:
-
-```sh
-firstdraft conversation send <file> --person-agreed
-```
-
-Show the person the file first. Without `--person-agreed`, the command stops with `consent_required` before it reads
-anything. With it, the command reads the Project pinned by a successful push, then the file, which must be a regular
-file of 1 byte to 32 MiB. It writes `Sending <absolute path> (<n> bytes, SHA-256 <hex>) for Project <id> to <origin>.`
-on standard output, then sends the file's bytes unchanged, once, as the `conversation[file]` part of a
-`multipart/form-data` `POST`, named by its base name only. The CLI does not redact the file. Run the command from the
-generated application's root after root adoption, or from the Project's directory.
-
-First Draft does not accept conversations yet. Until its service does, the command ends with status `404`: as
-`conversation_unavailable` when the answer is not a problem document, or as `conversation_rejected` when it is.
-
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
@@ -671,7 +651,6 @@ timeout. Each request takes its method and path from one
 | `GET`  | `/v1/account`                                                              | Read whether the account reports     |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports` | Send a progress report               |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`  | Send a failure report                |
-| `POST` | `/v1/projects/{project_id}/conversations`                                  | Send a planning conversation         |
 | `POST` | `/oauth/token`                                                             | Exchange a login grant for a token   |
 | `POST` | `/oauth/device_authorization`                                              | Start a device-flow login            |
 | `POST` | `/oauth/revoke`                                                            | Revoke a saved token                 |
@@ -679,8 +658,8 @@ timeout. Each request takes its method and path from one
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
-`compilation cancel` cancels it. `account` reads `/v1/account`. `report progress` and `report failure` post their
-report, and `conversation send` posts its file.
+`compilation cancel` cancels it. `account` reads `/v1/account`. `report progress` and `report failure` read it and,
+with reports on, post their report.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.

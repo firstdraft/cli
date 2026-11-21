@@ -302,16 +302,6 @@ try {
       "Invalid arguments. Run 'firstdraft report failure --help' for usage.",
   });
 
-  const conversationWithoutConsent = spawnPackedCli(
-    ["conversation", "send", "canary-secret.jsonl"],
-    installationDirectory,
-  );
-  assertHandledFailure(conversationWithoutConsent, 2, {
-    error: "consent_required",
-    detail:
-      "Nothing was sent. Ask the person whether to send this conversation, show them the file, and pass --person-agreed only after they say yes this time.",
-  });
-
   const invalidLogin = spawnPackedCli(
     ["login", "--canary-secret-option"],
     installationDirectory,
