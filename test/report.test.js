@@ -421,7 +421,7 @@ test("report failure prints exactly the shaped report and what it left out", asy
       kind: "spec_failure",
       rerun: "bundle exec rspec ./spec/models/movie_spec.rb:42",
       error_class: "NoMethodError",
-      message: "undefined method […] for nil in […]",
+      message: "undefined method […]",
       frames: ["app/models/movie.rb:12"],
       fix_summary: "Guarded nil ratings in Movie#rate.",
       versions: { ruby: "3.4.7" },
@@ -513,14 +513,23 @@ test("rerun keeps only an RSpec run of the application's specs", () => {
   }
 });
 
-test("free text keeps the plain words of its first line", () => {
+test("free text keeps the plain words before its first quote character", () => {
   for (const [text, expected] of /** @type {[string, string][]} */ ([
+    // Codex's two inputs: quotes are never paired, so nothing past the
+    // first one survives, even across a line break.
+    [`couldn't read "/Users/O'Brien/Client North Team/data.rb" today`, "[…]"],
     [
-      "undefined method 'stars' for nil:NilClass",
-      "undefined method […] for nil:NilClass",
+      "Setting 'BUILD_LABEL=North West Research\nlater' it closes",
+      "Setting […]",
     ],
-    // The quoted path with an apostrophe, from review.
-    [`load "/Users/O'Brien/First Draft/report.rb" now`, "load […] now"],
+    [`load "/Users/O'Brien/First Draft/report.rb" now`, "load […]"],
+    ["undefined method 'stars' for nil:NilClass", "undefined method […]"],
+    ["can't find `x`", "[…]"],
+    ["`x` first", "[…]"],
+    [
+      "Validation failed: Email has already been taken",
+      "Validation failed: Email has already been taken",
+    ],
     ["first line\nsecond line with a secret", "first line"],
     [
       "sam@example.com at https://x.test/a and C:\\Users\\sam",
@@ -529,12 +538,14 @@ test("free text keeps the plain words of its first line", () => {
     ["LABEL=North West", "[…] West"],
     ["token fd_abcdefghijklmnopqrstuvwxyz", "token […]"],
     ["Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc", "Bearer […]"],
-    ["can't find `x`", "[…] find […]"],
     ["tabs\tand\u0007 bells", "tabs and bells"],
   ])) {
     assert.equal(plainWords(text, 300), expected, text);
   }
-  assert.equal(plainWords("word ".repeat(100), 300).split(" ").length, 60);
+  const long = plainWords("word ".repeat(100), 300);
+  assert.equal(long.split(" ").length, 60);
+  assert.ok(Array.from(long).length <= 300);
+  assert.equal(plainWords("Guarded the nil 'x' case", 12), "Guarded the");
 });
 
 test("frames, error classes, and versions keep only their shapes", () => {

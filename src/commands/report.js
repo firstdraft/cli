@@ -50,10 +50,12 @@ const VERSION_NUMBER = /^\d+(?:\.\d+){0,3}$/;
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
-const QUOTED_SPAN = /'[^']*'|"[^"]*"|`[^`]*`/g;
-// A word that can carry a value: an assignment, a path or URL, an address, a
-// quote, or anything long enough to be a token.
-const VALUE_WORD = /[=/\\@'"`]/;
+// Quotes are not paired: from the word holding the first one, the rest of the
+// line is one placeholder, so no quoted value survives.
+const QUOTE = /['"`]/;
+// A word that can carry a value: an assignment, a path or URL, an address,
+// or anything long enough to be a token.
+const VALUE_WORD = /[=/\\@]/;
 const MAX_PLAIN_WORD = 24;
 const PLACEHOLDER = "[…]";
 
@@ -300,33 +302,40 @@ function appFrame(frame, cwd) {
 }
 
 /**
- * The first line of free text, cut to `limit`, with every span that can
- * carry a value replaced by a placeholder, so plain words remain.
+ * The plain words of free text's first line. From the word that holds the
+ * first quote character to the end of the line is one placeholder; before
+ * it, a word that can carry a value is one too; then words that fit within
+ * `limit` are kept.
  *
  * @param {string} text
  * @param {number} limit
  */
 export function plainWords(text, limit) {
   const [firstLine = ""] = text.split(/\r\n|\r|\n/, 1);
-  return clip(firstLine.replace(/\t/g, " ").replace(CONTROL, ""), limit)
-    .replace(QUOTED_SPAN, PLACEHOLDER)
+  const line = firstLine.replace(/\t/g, " ").replace(CONTROL, "");
+  const quote = line.search(QUOTE);
+  const words = (quote === -1 ? line : line.slice(0, quote))
     .split(/\s+/)
-    .filter((word) => word !== "")
-    .map((word) =>
-      word === PLACEHOLDER ||
-      (!VALUE_WORD.test(word) && Array.from(word).length <= MAX_PLAIN_WORD)
-        ? word
-        : PLACEHOLDER,
-    )
-    .join(" ");
-}
+    .filter((word) => word !== "");
+  // The word that holds the quote goes with the rest of the line.
+  if (quote !== -1 && !/\s/.test(line[quote - 1] ?? " ")) words.pop();
+  const shaped = words.map((word) =>
+    !VALUE_WORD.test(word) && Array.from(word).length <= MAX_PLAIN_WORD
+      ? word
+      : PLACEHOLDER,
+  );
+  if (quote !== -1) shaped.push(PLACEHOLDER);
 
-/** @param {string} text @param {number} limit */
-function clip(text, limit) {
-  const characters = Array.from(text);
-  return characters.length <= limit
-    ? text
-    : characters.slice(0, limit).join("");
+  /** @type {string[]} */
+  const kept = [];
+  let length = 0;
+  for (const word of shaped) {
+    const next = length + (kept.length === 0 ? 0 : 1) + Array.from(word).length;
+    if (next > limit) break;
+    kept.push(word);
+    length = next;
+  }
+  return kept.join(" ");
 }
 
 /**

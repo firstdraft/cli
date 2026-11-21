@@ -605,11 +605,12 @@ field is sent only in its shape, and left out otherwise:
 | `--fix-summary`                     | `fix_summary` | Plain words: the first line, at most 200 characters.                                                                                                                                                                                                                                       |
 | `--ruby-version`, `--rails-version` | `versions`    | Version numbers, such as `3.4.7`.                                                                                                                                                                                                                                                          |
 
-Free text keeps plain words only. After taking the first line and cutting it, the CLI replaces with `[…]` every span
-in single quotes, double quotes, or backticks, and every word that contains `=`, `/`, `\`, `@`, or a quote, or is
-longer than 24 characters. A `lint_failure` therefore sends no rule name, and a rerun command that is not an RSpec run
-is left out. A failure report carries no diff, environment variable, path outside the application, or file
-contents.
+Free text keeps plain words only: the CLI takes the first line, replaces everything from the word that holds the first
+quote character (`'`, `"`, or a backtick, including an apostrophe inside a word) to the end of the line with one `[…]`,
+replaces each earlier word that contains `=`, `/`, `\`, or `@` or is longer than 24 characters with `[…]`, and keeps the
+words that fit the length limit. A `lint_failure` therefore sends no rule name, and a rerun command that is not an
+RSpec run is left out. A failure report carries no diff, environment variable, path outside the application, or
+file contents.
 
 Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the exact JSON
 body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
