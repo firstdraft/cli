@@ -19,18 +19,20 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
   artifacts for that profile; an artifact for `rails-sketch/2026-10` reports `invalid_artifact`. The CLI sends a
   Plan's bytes unchanged and does not check the Plan's target profile.
 - The accepted API-contract range is `>= 0.9.0` and `< 0.10.0`. The CLI now reads `FirstDraft-API-Contract` on each
-  response, and a contract outside that range, including a prerelease, stops it as described below.
+  response. A response other than a `429` that names a contract outside that range, including a prerelease, stops it
+  as described below; a response without the header does not.
 - Every request, to `/v1` and to `/oauth`, carries
   `FirstDraft-Client: cli/<version>; plugin/<version>; agent/<name>; os/<platform>`. `plugin` and `agent` come from
-  `FIRSTDRAFT_PLUGIN_VERSION` and `FIRSTDRAFT_AGENT`, and `os` from Node.js's `process.platform`; a part that is unset
-  or is not a plain version or name is left out. `login` no longer sends the computer's hostname.
+  `FIRSTDRAFT_PLUGIN_VERSION`, sent without build metadata, and `FIRSTDRAFT_AGENT`, lowercased, and `os` from Node.js's
+  `process.platform`. A part that is unset, longer than 40 characters, or not a plain version or name is left out.
+  `login` no longer sends the computer's hostname.
 - The CLI compares First Draft's version headers with this setup: `FirstDraft-Latest-Plugin` and
   `FirstDraft-Minimum-Plugin` with `FIRSTDRAFT_PLUGIN_VERSION` when that is set, otherwise `FirstDraft-Latest-CLI` and
   `FirstDraft-Minimum-CLI` with the CLI's own version. A pair counts only when both of its versions are readable. A
   setup older than the latest gets one `First Draft: an update is available (...)` line on standard error, just before
   the command's result, pointing to `https://firstdraft.com/update`. When `FIRSTDRAFT_PLUGIN_VERSION` is set but is not
   a version, neither pair is compared; when First Draft names the plugin versions, the line says the CLI could not
-  tell whether the setup is current.
+  tell whether the setup is current. A version or contract stop takes the place of either line.
 - When the setup is older than the minimum, or the contract is outside the range, the CLI finishes handling that
   response and sends no further request. If that cut the command short, the command fails with `update_required` or
   `api_contract_unsupported`, and `current`, when present, names a Compilation that had already started. Otherwise
@@ -38,29 +40,33 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
   stop never replaces the result of `logout`.
 - A `429` on any command except `logout`, `login` included, fails with `rate_limited`. It carries `status` 429,
   `retry_at` from `Retry-After` when that is readable, and First Draft's problem in `response` when it sent a valid
-  one. Its detail says to try again after `retry_at`, when `response.detail` says, or in a minute.
+  one of at most 64 KiB. Its detail says to try again after `retry_at`, when `response.detail` says, or in a minute.
 - `firstdraft account` prints `{"reports": "on"}` or `{"reports": "off"}` for the signed-in account, at the origin
   that `login` would select.
 - `firstdraft report progress` and `firstdraft report failure` first read the account at the Project's pinned origin,
   and send no report unless it has reports on. With reports off, they print a line that says so and exit 0. With
-  reports on, they print the exact JSON report, send it once, and print `Sent.` only on First Draft's `201`
+  reports on, unless the account response stopped the CLI, they print the exact JSON report, send it once, and print
+  `Sent.` only on First Draft's `201`
   acknowledgment; a `403 reports_off` answer to the report prints the reports-off line and exits 0. `--step` is
   `setup`, `specs_first_run`, `behavior_written`, `specs_passing`, or `preview_started`, with optional counts of at
   most 1000000. `--kind` is `spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`. A failure report keeps
   each field only in its shape: an RSpec run of the application's specs, a Ruby constant, up to 20 application frames
   sent as `path:LINE`, version numbers, and the plain words of the first line of the message (at most 300 characters)
-  and fix summary (at most 200). A `Left out:` line names what it dropped. Both commands find the Project from the
+  and fix summary (at most 200). A `Left out:` line names each field and frame left out; the printed JSON is exactly
+  what is sent. Both commands find the Project from the
   generated application's root after root adoption, or from the Project's directory.
-- After an ambiguous push or Compile, `request_outcome_unknown` now says to run the same command once more with the
-  same options, and what a `412` or `compilation_active` answer then means, instead of telling the caller to stop.
+- After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
+  `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
+  what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
+  unconfirmed Publication under `plan compile --github` is unchanged.
 - New `error` values, each with exit status 1: `update_required`, `api_contract_unsupported`, `rate_limited`,
   `account_unavailable`, `report_rejected`, and `report_unavailable`. `account` and the report commands also report
   `authentication_required` and `invalid_server_response` (exit status 1) and `invalid_arguments` and
   `invalid_configuration` (exit status 2). The report commands also report `local_input_unreadable` and
   `project_not_pushed` (exit status 1).
 
-Use CLI 0.10.0 with a Service that serves API `0.9.x`. With an origin that serves API `0.8.x`, it sends nothing after
-the first response and says to use the CLI version that origin supports. A plugin's launcher should set
+Use CLI 0.10.0 with a Service that serves API `0.9.x`. Once a response from an origin names API `0.8.x`, the CLI sends
+nothing more and says to use the CLI version that origin supports. A plugin's launcher should set
 `FIRSTDRAFT_PLUGIN_VERSION` and `FIRSTDRAFT_AGENT`; without the first, the CLI compares its own version with the CLI
 versions. Callers that parse standard error should drop the `First Draft: ` lines, which any network command may now
 write before its result.
