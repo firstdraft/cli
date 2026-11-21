@@ -40,17 +40,19 @@ const MAX_VERSION = 32;
 const SAFE_PATH = String.raw`[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*`;
 // bundle exec rspec ./spec/models/post_spec.rb:42, bin/rspec spec/x_spec.rb
 const RERUN = new RegExp(
-  String.raw`^(?:bundle exec |bin/)?rspec(?: (?:\./)?spec/${SAFE_PATH}(?::\d+)*)+$`,
+  String.raw`^(?:bundle exec |bin/)?rspec(?: (?:\./)?spec/${SAFE_PATH}(?::\d{1,7})*)+$`,
 );
-const ERROR_CLASS = /^[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*$/;
+const ERROR_CLASS = /^(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*$/;
 const FRAME = new RegExp(
-  String.raw`^(?:\./)?((?:app|lib|config|db|spec)/${SAFE_PATH}):(\d+)(?::in .*)?$`,
+  String.raw`^(?:\./)?((?:app|lib|config|db|spec)/${SAFE_PATH}):(\d{1,7})(?::in .*)?$`,
 );
 const PARENT_SEGMENT = /(?:^|\/)\.\.(?:\/|:|$)/;
-const VERSION_NUMBER = /^\d+(?:\.\d+){0,3}$/;
+// 4.0.6, 8.1.4.1, 8.2.0.beta1, 3.4.0-preview2
+const VERSION_NUMBER =
+  /^\d{1,4}(?:\.\d{1,4}){0,3}(?:[.-](?:alpha|beta|rc|pre|preview)\d{0,3})?$/;
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 // Quotes are not paired: from the word holding the first one, the rest of the
 // line is one placeholder, so no quoted value survives.
 const QUOTE = /['"`]/;

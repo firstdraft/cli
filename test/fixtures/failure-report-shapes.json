@@ -1,0 +1,106 @@
+{
+  "about": "Examples of what the service accepts and refuses in each failure-report field. The service tests Compilation::ReportShape against this file, and the CLI tests its own shaping against a copy. docs/architecture/reference/README.md#current-account-and-report-http states the rules.",
+  "fields": {
+    "rerun": {
+      "accepted": [
+        "rspec spec/models/post_spec.rb",
+        "bin/rspec ./spec/models/post_spec.rb:42",
+        "bundle exec rspec spec/models",
+        "bundle exec rspec spec/a_spec.rb:3:9 spec/system/b-c_spec.rb"
+      ],
+      "refused": [
+        "bin/rspec",
+        "bin/rspec spec/models/",
+        "RAILS_ENV=test bin/rspec spec/models/post_spec.rb",
+        "bin/rspec spec/models/post_spec.rb --seed 4242",
+        "bin/rspec 'spec/models/post_spec.rb'",
+        "bin/rspec spec/models/post_spec.rb[1:2]",
+        "bin/rspec /Users/sam/app/spec/models/post_spec.rb",
+        "bin/rspec spec/../secrets.rb",
+        "bin/rails test test/models/post_test.rb",
+        "rspec lib/post_spec.rb"
+      ]
+    },
+    "error_class": {
+      "accepted": ["NoMethodError", "ActiveRecord::RecordNotFound", "::Foo::Bar2"],
+      "refused": ["noMethodError", "Layout/LineLength", "Foo::", "Foo Bar", "Foo::bar", "/Users/sam/app"]
+    },
+    "frame": {
+      "accepted": [
+        "app/models/post.rb:12",
+        "lib/tasks/seed.rake:1",
+        "config/routes.rb:3",
+        "db/seeds.rb:9",
+        "spec/models/post_spec.rb:42",
+        "app/plugins/feature-x/post.rb:3"
+      ],
+      "refused": [
+        "app/models/post.rb",
+        "app/models/:12",
+        "app/models/post.rb:12:in 'Post#title'",
+        "/app/models/post.rb:12",
+        "./app/models/post.rb:12",
+        "vendor/bundle/gems/x.rb:1",
+        "app/../secrets.rb:1",
+        "app\\models\\post.rb:1",
+        "app/models/my post.rb:1"
+      ]
+    },
+    "message": {
+      "accepted": [
+        "undefined method […]",
+        "Read […] failed",
+        "Validation failed: Email has already been taken",
+        "Setting […]",
+        "[…] […] expected 3, got 4",
+        "array[0] was nil"
+      ],
+      "refused": [
+        "undefined method 'title' for nil",
+        "Setting \"secret value\"",
+        "run `make`",
+        "it's broken",
+        "DATABASE_URL=postgres://db failed",
+        "Read /tmp/sample.log failed",
+        "see https://example.com",
+        "path C:\\Users",
+        "mail sam@example.com",
+        "token abcdefghijklmnopqrstuvwxyz",
+        "two\nlines",
+        "one\ttab"
+      ],
+      "limit": 300
+    },
+    "fix_summary": {
+      "accepted": ["Returned early when the post has no title.", "Guarded […] before saving."],
+      "refused": ["Set TOKEN=abc in […]", "Moved the file to app/models"],
+      "limit": 200
+    },
+    "version": {
+      "accepted": ["4.0.6", "8.1.4.1", "8.2.0.beta1", "3.4.0-preview2", "4"],
+      "refused": ["v4.0.6", "4.0.6p1 secret", "..", "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f", "4.0.6+build"]
+    }
+  },
+  "reports": {
+    "accepted": [
+      {"kind": "boot_error"},
+      {
+        "kind": "spec_failure",
+        "rerun": "bin/rspec ./spec/models/post_spec.rb:42",
+        "error_class": "NoMethodError",
+        "message": "undefined method […] for nil",
+        "frames": ["app/models/post.rb:12", "spec/models/post_spec.rb:42"],
+        "fix_summary": "Returned early when the post has no title.",
+        "versions": {"ruby": "4.0.6", "rails": "8.1.4"}
+      }
+    ],
+    "refused": [
+      {},
+      {"kind": "crash"},
+      {"kind": "spec_failure", "rerun": "bin/rspec spec/models/"},
+      {"kind": "spec_failure", "message": "Setting 'value'"},
+      {"kind": "spec_failure", "rerun": "TOKEN=abc bin/rspec spec/models/post_spec.rb"},
+      {"kind": "spec_failure", "environment": {"HOME": "/Users/sam"}}
+    ]
+  }
+}

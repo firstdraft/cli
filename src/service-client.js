@@ -25,11 +25,12 @@ export const AGENT_VARIABLE = "FIRSTDRAFT_AGENT";
 // metadata after `+` is kept in the text but has no precedence.
 const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const AGENT_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const AGENT_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 const PLATFORM = /^[a-z0-9]{1,32}$/;
 const MAX_LIMIT_PROBLEM_BYTES = 64 * 1024;
-// The Service ignores the whole header when one value is longer.
-const MAX_FACT_LENGTH = 64;
+// The Service ignores the whole header, or keeps no client facts with a
+// report, when one value is longer.
+const MAX_FACT_LENGTH = 40;
 
 /**
  * A response told the CLI to stop. The CLI finishes handling that response
