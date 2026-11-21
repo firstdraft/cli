@@ -85,6 +85,9 @@ export class RateLimitedError extends ServiceStopError {
  *   own terms: settle writes one line that names the stop and resolves or
  *   rejects as the work did, so its result or recovery data is kept. Either
  *   way it then writes the command's one version line, if any.
+ * @property {() => void} throwIfStopped
+ *   Throws the recorded stop as the next request would, so a command that
+ *   prints what it is about to send can stop before printing it.
  * @property {() => void} flush
  *   Writes the version line for a command that does not settle its work.
  */
@@ -256,15 +259,19 @@ export function createServiceSession({
     if (updateLine !== null) notify(updateLine);
   }
 
+  function throwIfStopped() {
+    if (stop !== null) {
+      blocked = true;
+      throw stop;
+    }
+  }
+
   return {
     clientHeader,
     fetch(request = globalThis.fetch) {
       /** @type {typeof globalThis.fetch} */
       const serviceFetch = async (input, init) => {
-        if (stop !== null) {
-          blocked = true;
-          throw stop;
-        }
+        throwIfStopped();
 
         const response = await request(input, {
           ...init,
@@ -296,6 +303,7 @@ export function createServiceSession({
       flush({ versionStopReported: false });
       return value;
     },
+    throwIfStopped,
     flush() {
       flush({ versionStopReported: false });
     },

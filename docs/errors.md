@@ -202,8 +202,8 @@ Cancel never changes a succeeded or failed Compilation, and repeating it is safe
 
 ## Report and conversation errors
 
-`report progress` and `report failure` never stop an agent's work. When the account has reports off, First Draft
-keeps nothing and the command exits 0 with a line that says so; that is not an error.
+`report progress` and `report failure` never stop an agent's work. Each reads the account first and sends no report
+unless it has reports on. With reports off, the command exits 0 with a line that says so; that is not an error.
 
 - `report_rejected`: First Draft refused the report and kept nothing. `response.code` says why, for example
   `compilation_not_found` when the Compilation is not in this Project, or `invalid_report` when a field breaks the
@@ -212,7 +212,8 @@ keeps nothing and the command exits 0 with a line that says so; that is not an e
   acknowledgment left the outcome unconfirmed, and First Draft may hold the report. Continue without it rather than
   sending it again.
 - `account_unavailable`: `account` could not read the account. This read-only request is safe to retry.
-  `invalid_server_response` from `account` means the response broke its contract.
+  `invalid_server_response` from `account` means the response broke its contract. From a report command, either
+  error means the account read failed, so no report was sent; continue without it.
 
 `conversation send` sends nothing unless the person said yes:
 
@@ -278,7 +279,7 @@ stopped without following the replacement.
 | Download commands                                      | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.           |
 | Download commands                                      | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable.          |
 | `account`                                              | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
-| `report progress`, `report failure`                    | `report_rejected`, `report_unavailable`                                                            |    1 | The report was refused, or its outcome is unconfirmed; continue without it.                                     |
+| `report progress`, `report failure`                    | `report_rejected`, `report_unavailable`, `account_unavailable`, `invalid_server_response`          |    1 | The report was refused or its outcome is unconfirmed, or the account read failed; continue without it.          |
 | `conversation send`                                    | `consent_required`                                                                                 |    2 | `--person-agreed` was missing; nothing was read or sent.                                                        |
 | `conversation send`                                    | `conversation_unreadable`                                                                          |    1 | The file is unreadable, empty, or too large; nothing was sent.                                                  |
 | `conversation send`                                    | `conversation_rejected`, `conversation_unavailable`                                                |    1 | The upload was refused, or its outcome is unconfirmed.                                                          |

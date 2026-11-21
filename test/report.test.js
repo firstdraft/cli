@@ -113,7 +113,7 @@ test("report progress validates its arguments before any request", async () => {
   }
 });
 
-test("report progress prints the exact report, then sends those bytes once", async (context) => {
+test("report progress reads the account, prints the exact report, then sends those bytes once", async (context) => {
   const cwd = projectDirectory(context, PRODUCTION);
   /** @type {{url: string, init: RequestInit | undefined}[]} */
   const requests = [];
@@ -137,6 +137,7 @@ test("report progress prints the exact report, then sends those bytes once", asy
       cwd,
       fetchFunction: async (input, init) => {
         requests.push({ url: String(input), init });
+        if (requests.length === 1) return account("on");
         return new Response(
           `{"progress_report":{"id":"${STORED_ID}","compilation_id":"${COMPILATION_ID}"}}`,
           {
@@ -168,9 +169,16 @@ test("report progress prints the exact report, then sends those bytes once", asy
     stdout: `Sending this progress report for Compilation ${COMPILATION_ID} to ${PRODUCTION}:\n${body}Sent.\n`,
     stderr: "",
   });
-  assert.equal(requests.length, 1);
-  const [request] = requests;
-  assert(request);
+  assert.equal(requests.length, 2);
+  const [read, request] = requests;
+  assert(read && request);
+  assert.equal(read.url, `${PRODUCTION}/v1/account`);
+  assert.equal(read.init?.method ?? "GET", "GET");
+  assert.equal(read.init?.body, undefined);
+  assert.equal(
+    new Headers(read.init?.headers).get("authorization"),
+    `Bearer ${TOKEN}`,
+  );
   assert.equal(
     request.url,
     `${PRODUCTION}/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}/progress-reports`,
@@ -194,6 +202,9 @@ test("a progress report without counts sends only its step, to the pinned origin
         new Headers(init?.headers).get("authorization"),
         `Bearer ${STAGING_TOKEN}`,
       );
+      if (new URL(String(input)).pathname === "/v1/account") {
+        return account("on");
+      }
       sent = JSON.parse(String(init?.body));
       return acknowledgment("progress_report");
     },
@@ -231,17 +242,132 @@ test("reports stop on local problems before printing anything", async (context) 
   assert.equal(JSON.parse(noToken.stderr).error, "authentication_required");
 });
 
-test("reports_off is a handled message with exit status 0", async (context) => {
+test("with reports off, a report command sends nothing but the account read", async (context) => {
+  const cwd = projectDirectory(context, PRODUCTION);
+  for (const argv of [PROGRESS, FAILURE]) {
+    /** @type {{url: string, init: RequestInit | undefined}[]} */
+    const requests = [];
+    const result = await invoke(argv, {
+      cwd,
+      fetchFunction: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return account("off");
+      },
+    });
+    assert.deepEqual(result, { status: 0, stdout: REPORTS_OFF, stderr: "" });
+    assert.equal(requests.length, 1, argv.join(" "));
+    assert.equal(requests[0]?.url, `${PRODUCTION}/v1/account`);
+    assert.equal(requests[0]?.init?.method ?? "GET", "GET");
+    assert.equal(requests[0]?.init?.body, undefined);
+  }
+});
+
+test("reports turned off after the account read are a handled message with exit status 0", async (context) => {
   const cwd = projectDirectory(context, PRODUCTION);
   for (const argv of [PROGRESS, FAILURE]) {
     const result = await invoke(argv, {
       cwd,
-      fetchFunction: async () =>
+      fetchFunction: reportsOn(async () =>
         problem(403, "reports_off", "This account has not agreed to reports."),
+      ),
     });
     assert.equal(result.status, 0);
     assert.equal(result.stderr, "");
+    assert.match(result.stdout, /^Sending this /);
     assert.ok(result.stdout.endsWith(REPORTS_OFF), result.stdout);
+  }
+});
+
+test("a stop on the account read prints and sends no report", async (context) => {
+  const cwd = projectDirectory(context, PRODUCTION);
+  for (const [response, error] of [
+    [
+      () =>
+        new Response('{"reports":"on"}', {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "FirstDraft-Latest-CLI": "99.0.0",
+            "FirstDraft-Minimum-CLI": "99.0.0",
+          },
+        }),
+      "update_required",
+    ],
+    [
+      () =>
+        new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+      "rate_limited",
+    ],
+  ]) {
+    /** @type {string[]} */
+    const requests = [];
+    const result = await invoke(PROGRESS, {
+      cwd,
+      fetchFunction: async (input) => {
+        requests.push(String(input));
+        return /** @type {() => Response} */ (response)();
+      },
+    });
+    assert.deepEqual(requests, [`${PRODUCTION}/v1/account`]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(JSON.parse(result.stderr).error, error);
+  }
+});
+
+test("a report is not sent when the account cannot be read", async (context) => {
+  const cwd = projectDirectory(context, PRODUCTION);
+  const unavailable =
+    "Could not read whether this account sends reports, so no report was sent. Continue without it.";
+  const invalid =
+    "First Draft returned an invalid account response, so no report was sent. Continue without it.";
+  for (const [response, expected] of [
+    [
+      () => {
+        throw new TypeError("canary socket hang up");
+      },
+      { error: "account_unavailable", detail: unavailable },
+    ],
+    [
+      () => new Response("<html>canary</html>", { status: 503 }),
+      { error: "account_unavailable", detail: unavailable, status: 503 },
+    ],
+    [
+      () =>
+        new Response('{"reports":"canary"}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      { error: "invalid_server_response", detail: invalid, status: 200 },
+    ],
+    [
+      () =>
+        problem(401, "authentication_required", "A valid token is required."),
+      { error: "authentication_required", status: 401 },
+    ],
+  ]) {
+    for (const argv of [PROGRESS, FAILURE]) {
+      /** @type {string[]} */
+      const requests = [];
+      const result = await invoke(argv, {
+        cwd,
+        fetchFunction: async (input, init) => {
+          requests.push(String(input));
+          assert.equal(init?.body, undefined);
+          return /** @type {() => Response} */ (response)();
+        },
+      });
+      assert.deepEqual(requests, [`${PRODUCTION}/v1/account`]);
+      assert.equal(result.status, 1);
+      assert.equal(result.stdout, "");
+      const error = JSON.parse(result.stderr);
+      for (const [key, value] of Object.entries(
+        /** @type {Record<string, unknown>} */ (expected),
+      )) {
+        assert.deepEqual(error[key], value, key);
+      }
+      assert.doesNotMatch(result.stderr, /canary/);
+    }
   }
 });
 
@@ -273,7 +399,7 @@ test("a success without First Draft's acknowledgment is not reported as sent", a
   ]) {
     const result = await invoke(PROGRESS, {
       cwd,
-      fetchFunction: async () => response(),
+      fetchFunction: reportsOn(async () => response()),
     });
     assert.equal(result.status, 1);
     assert.doesNotMatch(result.stdout, /Sent\./);
@@ -332,10 +458,10 @@ test("report failures are handled without retrying", async (context) => {
     let requests = 0;
     const result = await invoke(PROGRESS, {
       cwd,
-      fetchFunction: async () => {
+      fetchFunction: reportsOn(async () => {
         requests += 1;
         return /** @type {() => Response} */ (response)();
-      },
+      }),
     });
     assert.equal(requests, 1);
     assert.equal(result.status, 1);
@@ -345,8 +471,9 @@ test("report failures are handled without retrying", async (context) => {
 
   const unauthenticated = await invoke(PROGRESS, {
     cwd,
-    fetchFunction: async () =>
+    fetchFunction: reportsOn(async () =>
       problem(401, "authentication_required", "A valid token is required."),
+    ),
   });
   assert.equal(unauthenticated.status, 1);
   assert.equal(
@@ -404,14 +531,14 @@ test("report failure prints exactly the shaped report and what it left out", asy
     ],
     {
       cwd,
-      fetchFunction: async (input, init) => {
+      fetchFunction: reportsOn(async (input, init) => {
         assert.equal(
           String(input),
           `${PRODUCTION}/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}/failure-reports`,
         );
         sent = String(init?.body);
         return acknowledgment("failure_report");
-      },
+      }),
     },
   );
 
@@ -449,10 +576,10 @@ test("a failure report carries only the fields that fit their shapes", async (co
     ],
     {
       cwd: projectDirectory(context, PRODUCTION),
-      fetchFunction: async (_input, init) => {
+      fetchFunction: reportsOn(async (_input, init) => {
         sent = JSON.parse(String(init?.body));
         return acknowledgment("failure_report");
-      },
+      }),
     },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -583,10 +710,10 @@ test("a progress count of the service's maximum is sent", async (context) => {
   let sent;
   const result = await invoke([...PROGRESS, "--examples", "1000000"], {
     cwd: projectDirectory(context, PRODUCTION),
-    fetchFunction: async (_input, init) => {
+    fetchFunction: reportsOn(async (_input, init) => {
       sent = JSON.parse(String(init?.body));
       return acknowledgment("progress_report");
-    },
+    }),
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(sent, {
@@ -690,10 +817,10 @@ test("reports run from an adopted application root find the archived Project", a
     ],
     {
       cwd: root,
-      fetchFunction: async (input, init) => {
+      fetchFunction: reportsOn(async (input, init) => {
         requests.push({ url: String(input), body: String(init?.body) });
         return acknowledgment("failure_report");
-      },
+      }),
     },
   );
 
@@ -708,6 +835,31 @@ test("reports run from an adopted application root find the archived Project", a
     ["app/models/movie.rb:12"],
   );
 });
+
+/**
+ * Answers the account read at the pinned production origin with reports on,
+ * and hands every other request to `report`.
+ *
+ * @param {(input: string | URL | Request, init?: RequestInit) => Promise<Response>} report
+ * @returns {typeof globalThis.fetch}
+ */
+function reportsOn(report) {
+  return async (input, init) => {
+    if (new URL(String(input)).pathname !== "/v1/account") {
+      return report(input, init);
+    }
+    assert.equal(String(input), `${PRODUCTION}/v1/account`);
+    return account("on");
+  };
+}
+
+/** @param {"on" | "off"} reports */
+function account(reports) {
+  return new Response(JSON.stringify({ reports }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 /** @param {string} wrapper the report's key in First Draft's acknowledgment */
 function acknowledgment(wrapper) {

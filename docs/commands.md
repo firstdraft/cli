@@ -163,7 +163,7 @@ Beyond the header, a command sends only what it needs:
 | `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it      |
 | `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                 |
 | `plan status`, `compilation *`, `account` | Only the IDs in the request path                                   |
-| `report progress`, `report failure`       | The report that the command prints just before sending it          |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before   |
 | `conversation send`                       | The file the person agreed to send, unchanged, under its base name |
 
 ### Update line and refusals
@@ -616,11 +616,17 @@ words that fit the length limit. A `lint_failure` therefore sends no rule name, 
 RSpec run is left out. The CLI reads no file for a failure report and attaches no diff or environment variable, but
 the plain words of a message or fix summary it is given can still quote code, so pass only text that may be sent.
 
-Each command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the exact JSON
-body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output, sends that body once in a `POST` to the origin pinned by a successful push, and writes
-`Sent.` once First Draft acknowledges the stored report with `201`; any other success is `report_unavailable`. When the
-account has reports off, First Draft answers `403 reports_off` and keeps nothing; the command writes
-a line that says so and exits 0, so the agent's work continues. Neither command retries.
+Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push. Unless
+First Draft answers `{"reports": "on"}`, no report is sent. With reports off, the command writes a line that says so
+and exits 0, so the agent's work continues. When the account cannot be read, the command fails with
+`account_unavailable`, or with `invalid_server_response` when the answer breaks the account's contract.
+
+With reports on, the command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the
+exact JSON body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output. It then
+sends that body once in a `POST` to the same origin, and writes `Sent.` once First Draft acknowledges the stored report
+with `201`; any other success is `report_unavailable`. If the person turns reports off between the two requests, First
+Draft answers `403 reports_off` and keeps nothing, and the command writes the same line and exits 0. Neither command
+retries.
 
 ## Send a planning conversation
 
@@ -643,7 +649,8 @@ First Draft does not accept conversations yet. Until its service does, the comma
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`/v1/account` goes to the origin selected as for `login`, and the others go to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
+`account` reads `/v1/account` at the origin selected as for `login`; the report commands read it, and every other
+`/v1` request goes, to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and

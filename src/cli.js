@@ -200,9 +200,9 @@ Environment:
   FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
-The command prints the exact report, then sends it once to the origin pinned
-by a successful plan push. When the account has reports off, First Draft keeps
-nothing and the command still exits 0.
+The command first reads the account at the origin pinned by a successful plan
+push. With reports on, it prints the exact report, then sends it once there.
+With reports off, it sends no report and still exits 0.
 `;
 
 const REPORT_FAILURE_HELP = `First Draft CLI
@@ -230,9 +230,11 @@ Environment:
 
 The command keeps each field only in its shape: an RSpec run of the
 application's specs, a Ruby constant, frames in the application's files,
-version numbers, and the plain words of free text. It prints the exact report
-and what it left out, then sends it once to the origin pinned by a successful
-plan push. Run it from the generated application's root.
+version numbers, and the plain words of free text. It first reads the account
+at the origin pinned by a successful plan push. With reports on, it prints the
+exact report and what it left out, then sends it once there. With reports off,
+it sends no report and still exits 0. Run it from the generated application's
+root.
 `;
 
 const CONVERSATION_HELP = `First Draft CLI
@@ -682,6 +684,10 @@ const REPORT_REJECTED_DETAIL =
   "First Draft rejected the report, so it was not kept; response.code says why. Continue without it.";
 const REPORT_UNAVAILABLE_DETAIL =
   "Could not confirm that First Draft received the report, and First Draft may hold it already. Continue without it rather than sending it again.";
+const REPORT_ACCOUNT_UNAVAILABLE_DETAIL =
+  "Could not read whether this account sends reports, so no report was sent. Continue without it.";
+const REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid account response, so no report was sent. Continue without it.";
 const CONVERSATION_SEND_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft conversation send --help' for usage.";
 const CONVERSATION_CONSENT_REQUIRED_DETAIL =
@@ -3182,34 +3188,49 @@ async function runAccount({
     writeJson(stdout, account);
     return 0;
   } catch (error) {
-    const status = writeAccountCommandError(stderr, error);
+    const status =
+      writeAccountCommandError(stderr, error) ??
+      writeAccountReadError(stderr, error, {
+        unavailable: ACCOUNT_UNAVAILABLE_DETAIL,
+        invalid: ACCOUNT_INVALID_RESPONSE_DETAIL,
+      });
     if (status !== null) return status;
-
-    if (error instanceof AccountUnavailableError) {
-      if (isAuthenticationProblem(error.status, error.response)) {
-        writeAuthenticationRequired(stderr, error.status, error.response);
-        return 1;
-      }
-      writeJson(stderr, {
-        error: "account_unavailable",
-        detail: ACCOUNT_UNAVAILABLE_DETAIL,
-        ...(typeof error.status === "number" ? { status: error.status } : {}),
-        ...(error.response ? { response: error.response } : {}),
-      });
-      return 1;
-    }
-
-    if (error instanceof AccountResponseInvalidError) {
-      writeJson(stderr, {
-        error: "invalid_server_response",
-        detail: ACCOUNT_INVALID_RESPONSE_DETAIL,
-        status: error.status,
-      });
-      return 1;
-    }
 
     throw error;
   }
+}
+
+/**
+ * @param {Writer} writer
+ * @param {unknown} error
+ * @param {{unavailable: string, invalid: string}} details
+ * @returns {number | null}
+ */
+function writeAccountReadError(writer, error, { unavailable, invalid }) {
+  if (error instanceof AccountUnavailableError) {
+    if (isAuthenticationProblem(error.status, error.response)) {
+      writeAuthenticationRequired(writer, error.status, error.response);
+      return 1;
+    }
+    writeJson(writer, {
+      error: "account_unavailable",
+      detail: unavailable,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+      ...(error.response ? { response: error.response } : {}),
+    });
+    return 1;
+  }
+
+  if (error instanceof AccountResponseInvalidError) {
+    writeJson(writer, {
+      error: "invalid_server_response",
+      detail: invalid,
+      status: error.status,
+    });
+    return 1;
+  }
+
+  return null;
 }
 
 /** @param {ServiceCommandOptions} options */
@@ -3397,8 +3418,8 @@ function parseReportCount(value) {
 const MAX_REPORT_COUNT = 1_000_000;
 
 /**
- * Prints the exact report, then sends those bytes once to the Project's
- * pinned origin.
+ * Reads the account at the Project's pinned origin and, only when it has
+ * reports on, prints the exact report and sends those bytes once there.
  *
  * @param {ServiceCommandOptions} options
  * @param {{noun: string, wrapper: string, route: {method: string, path: string}, compilationId: string, body: (cwd: string) => {body: unknown, omitted: string[]}}} report
@@ -3417,28 +3438,48 @@ async function sendReportCommand(
 
     const shaped = body(pinned.cwd);
     const text = `${JSON.stringify(shaped.body, null, 2)}\n`;
-    stdout.write(
-      `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}` +
-        (shaped.omitted.length === 0
-          ? ""
-          : `Left out: ${shaped.omitted.join("; ")}.\n`),
-    );
-    const { outcome } = await service.settle(
-      sendReport({
-        origin: pinned.apiUrl,
-        route,
-        projectId: pinned.projectId,
-        compilationId,
-        body: text,
-        wrapper,
-        fetchFunction: pinned.fetchFunction,
-        createRequestSignal,
-      }),
+    const outcome = await service.settle(
+      (async () => {
+        // Reports are off until the person says yes, so with them off no
+        // report body leaves this machine.
+        const account = await readAccount({
+          origin: pinned.apiUrl,
+          fetchFunction: pinned.fetchFunction,
+          createRequestSignal,
+        });
+        if (account.reports !== "on") return "reports_off";
+
+        service.throwIfStopped();
+        stdout.write(
+          `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}` +
+            (shaped.omitted.length === 0
+              ? ""
+              : `Left out: ${shaped.omitted.join("; ")}.\n`),
+        );
+        // The person can turn reports off between the two requests, which
+        // First Draft answers with 403 reports_off.
+        const sent = await sendReport({
+          origin: pinned.apiUrl,
+          route,
+          projectId: pinned.projectId,
+          compilationId,
+          body: text,
+          wrapper,
+          fetchFunction: pinned.fetchFunction,
+          createRequestSignal,
+        });
+        return sent.outcome;
+      })(),
     );
     stdout.write(outcome === "sent" ? "Sent.\n" : REPORTS_OFF_MESSAGE);
     return 0;
   } catch (error) {
-    const status = writePinnedProjectError(stderr, error);
+    const status =
+      writePinnedProjectError(stderr, error) ??
+      writeAccountReadError(stderr, error, {
+        unavailable: REPORT_ACCOUNT_UNAVAILABLE_DETAIL,
+        invalid: REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL,
+      });
     if (status !== null) return status;
 
     if (error instanceof ReportRejectedError) {
