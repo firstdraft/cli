@@ -27,7 +27,11 @@ export const ARTIFACT_MEDIA_TYPE =
   "application/vnd.firstdraft.compilation-artifact+json";
 export const ARTIFACT_FORMAT = "firstdraft.compilation-artifact/1";
 export const FOUNDATION_PLAN_FORMAT = "firstdraft.foundation-plan.sketch/0.23";
-export const RAILS_TARGET_PROFILE = "rails-sketch/2026-10";
+// The one place the CLI names the Rails target profile: plan init writes it,
+// artifact validation accepts only it, and the documentation test requires
+// the docs to name only it. The value is a working ID until the release names
+// the profile.
+export const RAILS_TARGET_PROFILE = "rails-sketch/2026-11";
 export const MAX_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 const ARTIFACT_KEYS = ["format", "provenance", "manifest_sha256", "files"];

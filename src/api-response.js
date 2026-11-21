@@ -59,6 +59,18 @@ export const SERVICE_ROUTES = {
     method: "GET",
     path: "/v1/projects/{project_id}/github-publication",
   },
+  readAccount: {
+    method: "GET",
+    path: "/v1/account",
+  },
+  sendProgressReport: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports",
+  },
+  sendFailureReport: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports",
+  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",
@@ -162,6 +174,23 @@ export function isProblemBody(response, body) {
     typeof body.code === "string" &&
     typeof body.detail === "string"
   );
+}
+
+/**
+ * The fields of a problem that isProblemBody accepted, and nothing else.
+ *
+ * @param {unknown} body
+ */
+export function problemProjection(body) {
+  const problem = /** @type {Record<string, unknown>} */ (body);
+
+  return {
+    ...(problem.type === "about:blank" ? { type: problem.type } : {}),
+    title: problem.title,
+    status: problem.status,
+    code: problem.code,
+    detail: problem.detail,
+  };
 }
 
 /**

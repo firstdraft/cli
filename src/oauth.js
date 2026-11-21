@@ -88,12 +88,9 @@ export function createState(random = randomBytes) {
 
 /**
  * @param {string} origin
- * @param {{redirectUri: string, state: string, challenge: string, deviceName?: string}} options
+ * @param {{redirectUri: string, state: string, challenge: string}} options
  */
-export function authorizationUrl(
-  origin,
-  { redirectUri, state, challenge, deviceName },
-) {
+export function authorizationUrl(origin, { redirectUri, state, challenge }) {
   const url = new URL("/oauth/authorize", origin);
   url.search = new URLSearchParams({
     response_type: "code",
@@ -102,7 +99,6 @@ export function authorizationUrl(
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
-    ...(deviceName ? { device_name: deviceName } : {}),
   }).toString();
   return url.href;
 }
@@ -290,17 +286,14 @@ export async function exchangeAuthorizationCode({
  */
 
 /**
- * @param {RequestOptions & {deviceName?: string}} options
+ * @param {RequestOptions} request
  * @returns {Promise<DeviceAuthorization>}
  */
-export async function requestDeviceAuthorization({ deviceName, ...request }) {
+export async function requestDeviceAuthorization(request) {
   const { status, body } = await postForm(
     request,
     SERVICE_ROUTES.requestDeviceAuthorization,
-    {
-      client_id: CLIENT_ID,
-      ...(deviceName ? { device_name: deviceName } : {}),
-    },
+    { client_id: CLIENT_ID },
   );
   if (status !== 200) throw oauthFailure(status, body);
 

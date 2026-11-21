@@ -40,6 +40,7 @@ if (result.status !== 0) {
     "src/api-response.js",
     "src/application-identity.js",
     "src/cli.js",
+    "src/commands/account.js",
     "src/commands/compilation.js",
     "src/commands/login.js",
     "src/commands/logout.js",
@@ -48,6 +49,7 @@ if (result.status !== 0) {
     "src/commands/plan-publish.js",
     "src/commands/plan-push.js",
     "src/commands/plan-status.js",
+    "src/commands/report.js",
     "src/compilation-artifact.js",
     "src/credentials.js",
     "src/file-system.js",
@@ -55,6 +57,7 @@ if (result.status !== 0) {
     "src/plan-compile-progress.js",
     "src/plan-state.js",
     "src/root-output.js",
+    "src/service-client.js",
     "src/uuid-v7.js",
     "src/version.js",
   ]);

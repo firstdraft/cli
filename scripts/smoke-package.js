@@ -273,6 +273,35 @@ try {
       "Invalid arguments. Run 'firstdraft compilation cancel --help' for usage.",
   });
 
+  const invalidAccount = spawnPackedCli(
+    ["account", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidAccount, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft account --help' for usage.",
+  });
+
+  const invalidReport = spawnPackedCli(
+    ["report", "progress", "not-a-uuid", "--step", "setup"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidReport, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft report progress --help' for usage.",
+  });
+
+  const invalidFailureReport = spawnPackedCli(
+    ["report", "failure", "not-a-uuid", "--kind", "lint"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidFailureReport, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft report failure --help' for usage.",
+  });
+
   const invalidLogin = spawnPackedCli(
     ["login", "--canary-secret-option"],
     installationDirectory,

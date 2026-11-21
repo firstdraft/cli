@@ -24,6 +24,18 @@ const REMOTE_COMMANDS = [
   ["compilation", "status", COMPILATION_ID],
   ["compilation", "download", COMPILATION_ID, "--output", "application"],
   ["compilation", "cancel", COMPILATION_ID],
+  ["report", "progress", COMPILATION_ID, "--step", "setup"],
+  [
+    "report",
+    "failure",
+    COMPILATION_ID,
+    "--kind",
+    "lint_failure",
+    "--rerun",
+    "bin/rubocop",
+    "--error-class",
+    "Rails/Delegate",
+  ],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {

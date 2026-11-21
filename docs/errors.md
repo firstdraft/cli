@@ -5,10 +5,13 @@ This page owns handled-error interpretation, retry safety, and recovery guidance
 
 ## Handled output contract
 
-Every handled subcommand failure ends with exactly one JSON object on standard error. `plan compile` may first write
-progress lines; machine consumers can remove only lines beginning with the exact `First Draft: ` prefix and parse the
+Every handled subcommand failure ends with exactly one JSON object on standard error. Any network command may first
+write one [update or stop line](commands.md#update-line-and-refusals), and `plan compile` may first write progress lines;
+both begin with the exact `First Draft: ` prefix, so machine consumers can remove only those lines and parse the
 remaining JSON document. `login` may first write its human-readable authorization instructions; its JSON object
-starts on the line after them. Branch on the stable `error` value rather than the human-readable `detail`.
+starts on the line after them. `report` prints what it sends on standard output before sending it, so standard
+output may hold that preview when it fails. Branch on the stable `error` value rather than
+the human-readable `detail`.
 
 Handled output never includes command arguments, local Plan bytes, raw artifact bytes, raw filesystem or network
 errors, or unvalidated response bodies. `local_state_not_saved` is the sole exception to private-state redaction:
@@ -59,23 +62,59 @@ command's recovery instructions below. If a saved login is rejected, run `firstd
 invalid. A logout whose server revocation is not confirmed still succeeds after removing the local entry. It
 writes a note on standard error; revoke the token on `/api-tokens` if it may still be active.
 
+## Update and limit errors
+
+These errors replace a command's result when a First Draft response told the CLI to stop before the command
+finished. The CLI finishes handling that response, so a push it accepted still saves its ETag, and then sends
+nothing more. When the stopping response was the command's last, the command reports its own result instead, after
+one `First Draft: ` line that names the required update ([update line and refusals](commands.md#update-line-and-refusals)).
+
+- `update_required`: First Draft's `FirstDraft-Minimum-Plugin` is newer than this setup's plugin, or, when no plugin
+  version is set, its `FirstDraft-Minimum-CLI` is newer than this CLI. `plugin_version` and `minimum_plugin_version`,
+  or `minimum_cli_version`, name the versions, beside `cli_version`. Tell the person to update with the steps at `update_url` (`https://firstdraft.com/update`), then run the
+  same command again with the same options; the CLI saved the ETag of any push that First Draft accepted. When
+  `current` is present, a Compilation had already started: follow `current.compilation.id` with
+  `compilation status` instead of compiling again.
+- `api_contract_unsupported`: First Draft serves an API contract outside `accepted_api_contract`. When `api_contract`
+  is newer, update and continue as above. When it is older, the CLI is newer than that origin's Service; use the CLI
+  that the origin supports.
+- `rate_limited`: First Draft answered `429` because a limit was reached. The refused request did nothing.
+  `response.code`, when present, names the limit: `compilation_limit_reached` or `project_limit_reached` for the Compilations or
+  new Projects an account may start in a day, and `reports_rate_limited` for its reports in an hour.
+  `response.detail` says when the next one can start, and `retry_at`, when present, is that UTC time from
+  `Retry-After`. Wait until then and run the command again; without either, the detail says to wait a minute. `login --interactive` meets
+  a limit shared by every CLI that starts a device login at once. When `current` is present, follow that Compilation
+  as above instead.
+
+A local failure while handling the stopping response, such as `local_state_not_saved` or `materialization_failed`,
+is reported as itself, with its recovery data, after the stop line.
+
 ## Ambiguous mutations
 
 `plan compile` supplies `phase: "push" | "compilation" | "publication"` when `request_outcome_unknown` requires
 phase-specific recovery:
 
-- `phase: "push"` means the Plan mutation may have been accepted. Stop and reconcile local Head state. Until First
-  Draft has a Foundation Plan Head reconciliation endpoint, an accepted request whose response cannot be verified
-  may require manual recovery. Do not construct an ETag from the Plan digest or trust an unverified response.
-- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started, but its retained identity is unknown.
-  The CLI never repeats that `POST`. Do not start another Compilation until the Project is reconciled through First
-  Draft or an operator can identify the retained work.
+- `phase: "push"`, and `request_outcome_unknown` from `plan push`, mean the Plan may have been accepted, but the
+  response could not be verified, so local state was not changed. Run the same command once more, with the same
+  options and environment; a first push without a pinned origin otherwise goes to production. If First Draft accepts
+  it, carry on. If it answers `server_rejected` with status `412` (`precondition_failed`), its Plan is no longer the
+  one this folder last pushed: the first push may have landed, or another copy of the Project pushed. If another
+  copy holds newer work, continue from that copy. Otherwise start a new Project, which forks this one: run
+  `firstdraft plan init --name <name>` in a new folder, copy `.firstdraft/foundation-plan.json` from the old folder
+  over the new one, and push or compile from there with the same options and the old folder's origin: the `api_url`
+  in its `.firstdraft/state.json`, or, when a first push never saved one, the origin that push used. Select it with
+  `--staging` for staging, or the same `FIRSTDRAFT_API_URL` for a custom origin. A new folder has no pinned origin,
+  so without one the push goes to production. Never construct an ETag from the Plan
+  digest or edit `.firstdraft/state.json`.
+- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started,
+  but its identity is unknown. The CLI never repeats that `POST` itself. Run the same `plan compile` command, with
+  the same options and environment, once more. If a Compilation is still active, First Draft refuses with
+  `compilation_active` and names it; follow [stuck Compilation recovery](#stuck-compilation-recovery). Otherwise the
+  rerun starts a new Compilation; one that the first attempt may have started costs only service time and one of the
+  day's Compilations.
 - `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
   commands. After the prior invocation exits, wait and rerun `plan compile --github` with unchanged Plan bytes to safely
   reconcile or resume the retained singleton.
-
-`plan push` also reports `request_outcome_unknown` if a failure happens after sending its request. Local state remains
-unchanged. Stop and reconcile rather than assuming the request failed and repeating the mutation.
 
 If a verified Plan response cannot replace local state, preserve the printed `recovery_state`; an adjacent `.tmp`
 file may contain the same private recovery copy. Do not push again until the accepted ETag state is repaired.
@@ -95,12 +134,12 @@ starts a new Compilation after analysis.
 
 ## Direct Compilation recovery
 
-Do not blindly rerun `plan compile` after its Compilation start was accepted or may have been accepted.
-That command creates new work; it is not a retained-Compilation reconciliation command.
+Do not rerun `plan compile` after its Compilation start was accepted: that command creates new work; it is not a
+retained-Compilation reconciliation command.
 
 If `request_outcome_unknown` reports `phase: "compilation"`, the start request did not yield a validated retained
-ID. The CLI sent exactly one `POST` and did not retry it. Stop until First Draft or an operator can reconcile the
-Project and identify whether work was retained.
+ID. The CLI sent exactly one `POST` and did not retry it. Rerun `plan compile` once, as
+[ambiguous mutations](#ambiguous-mutations) describes.
 
 Once the start response has yielded a validated retained Compilation, later status, artifact, authentication, and
 materialization failure envelopes include that last validated projection as `current`. Preserve
@@ -161,6 +200,21 @@ Cancel never changes a succeeded or failed Compilation, and repeating it is safe
 - `invalid_compilation_status` means the response violated the Compilation contract, so the cancellation may or may
   not have happened. Check with `compilation status` rather than repeating the unchanged request.
 
+## Report errors
+
+`report progress` and `report failure` never stop an agent's work. Each reads the account first and sends no report
+unless it has reports on. With reports off, the command exits 0 with a line that says so; that is not an error.
+
+- `report_rejected`: First Draft refused the report and kept nothing. `response.code` says why, for example
+  `compilation_not_found` when the Compilation is not in this Project, or `invalid_report` when a field breaks the
+  report's shape. Continue without the report.
+- `report_unavailable`: a network failure, timeout, server error, or a success without First Draft's `201`
+  acknowledgment left the outcome unconfirmed, and First Draft may hold the report. Continue without it rather than
+  sending it again.
+- `account_unavailable`: `account` could not read the account. This read-only request is safe to retry.
+  `invalid_server_response` from `account` means the response broke its contract. From a report command, either
+  error means the account read failed, so no report was sent; continue without it.
+
 ## Publication recovery
 
 The Publication is a Project singleton. If its initial conditional `PUT` is ambiguous, the CLI attempts one
@@ -178,39 +232,43 @@ stopped without following the replacement.
 
 ## Error index
 
-| Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                                |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | ------------------------------------------------------------------------------------------------------ |
-| Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                               |
-| `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                            |
-| Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                        |
-| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.               |
-| `login`                                      | `login_failed`                                                                                     |    1 | Nothing was saved; `phase: "write"` means a token was issued ([recovery](#login-and-logout-errors)).   |
-| `logout`                                     | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).      |
-| Network commands                             | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                       |
-| Plan commands, `compilation *`               | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                                |
-| Status, Compile, Compilation commands        | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                         |
-| `plan push`, `plan compile`                  | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.        |
-| `plan push`, `plan compile`                  | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`.     |
-| `plan push`, `plan compile`                  | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.      |
-| `plan status`                                | `server_rejected`                                                                                  |    1 | First Draft rejected the analysis status request with a validated non-authentication problem.          |
-| `plan status`                                | `status_unavailable`, `invalid_server_response`                                                    |    1 | The analysis read failed or violated its protocol.                                                     |
-| `plan compile`                               | `analysis_status_unavailable`, `invalid_analysis_status`, `analysis_status_rejected`               |    1 | The bounded analysis read failed, was invalid, or was rejected.                                        |
-| Analysis waits                               | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                    |
-| `plan compile`                               | `plan_not_valid`                                                                                   |    1 | Analysis completed without `valid`; `current` contains diagnostics and status.                         |
-| `plan compile`                               | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                     |
-| `plan compile`                               | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.              |
-| `plan compile`                               | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                            |
-| `plan compile --github`                      | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                   |
-| `plan compile --github`                      | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                    |
-| `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                  |
-| `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                |
-| `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                              |
-| `compilation cancel`                         | `compilation_cancel_rejected`                                                                      |    1 | Nothing was cancelled; `response.code` says why ([recovery](#stuck-compilation-recovery)).             |
-| `compilation cancel`                         | `compilation_cancel_unavailable`                                                                   |    1 | The cancellation could not be confirmed; repeating it is safe.                                         |
-| `compilation cancel`                         | `invalid_compilation_status`                                                                       |    1 | The response violated the Compilation contract; check status before repeating.                         |
-| Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`. |
-| Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.  |
-| Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable. |
+| Commands                                     | `error`                                                                                            | Exit | Meaning                                                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | --------------------------------------------------------------------------------------------------------------- |
+| Any leaf command                             | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                                        |
+| Network commands except `logout`             | `update_required`, `api_contract_unsupported`                                                      |    1 | First Draft needs a newer plugin or CLI, or serves another API contract ([recovery](#update-and-limit-errors)). |
+| Network commands except `logout`             | `rate_limited`                                                                                     |    1 | First Draft refused a request at a limit; `retry_at` says when to try again.                                    |
+| `plan init`                                  | `local_initialization_failed`                                                                      |    1 | Initialization failed without overwriting an existing path.                                                     |
+| Network commands                             | `invalid_configuration`                                                                            |    2 | API origin or saved Head state is incompatible.                                                                 |
+| `login`                                      | `authorization_denied`, `authorization_expired`                                                    |    1 | The approval was denied, or not granted before the callback wait or device code expired.                        |
+| `login`                                      | `login_failed`                                                                                     |    1 | Nothing was saved; `phase: "write"` means a token was issued ([recovery](#login-and-logout-errors)).            |
+| `logout`                                     | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).               |
+| Network commands                             | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                                |
+| Plan, `compilation *`, `report`              | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state could not be read.                                                         |
+| Status, Compile, Compilation, `report`       | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                                  |
+| `plan push`, `plan compile`                  | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.                 |
+| `plan push`, `plan compile`                  | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`.              |
+| `plan push`, `plan compile`                  | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.               |
+| `plan status`                                | `server_rejected`                                                                                  |    1 | First Draft rejected the analysis status request with a validated non-authentication problem.                   |
+| `plan status`                                | `status_unavailable`, `invalid_server_response`                                                    |    1 | The analysis read failed or violated its protocol.                                                              |
+| `plan compile`                               | `analysis_status_unavailable`, `invalid_analysis_status`, `analysis_status_rejected`               |    1 | The bounded analysis read failed, was invalid, or was rejected.                                                 |
+| Analysis waits                               | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                             |
+| `plan compile`                               | `plan_not_valid`                                                                                   |    1 | Analysis completed without `valid`; `current` contains diagnostics and status.                                  |
+| `plan compile`                               | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                              |
+| `plan compile`                               | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.                       |
+| `plan compile`                               | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                                     |
+| `plan compile --github`                      | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                            |
+| `plan compile --github`                      | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                             |
+| `compilation status`, `compilation download` | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                           |
+| `compilation status --wait`                  | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                         |
+| `compilation download`                       | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                                       |
+| `compilation cancel`                         | `compilation_cancel_rejected`                                                                      |    1 | Nothing was cancelled; `response.code` says why ([recovery](#stuck-compilation-recovery)).                      |
+| `compilation cancel`                         | `compilation_cancel_unavailable`                                                                   |    1 | The cancellation could not be confirmed; repeating it is safe.                                                  |
+| `compilation cancel`                         | `invalid_compilation_status`                                                                       |    1 | The response violated the Compilation contract; check status before repeating.                                  |
+| Download commands                            | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`.          |
+| Download commands                            | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.           |
+| Download commands                            | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable.          |
+| `account`                                    | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
+| `report progress`, `report failure`          | `report_rejected`, `report_unavailable`, `account_unavailable`, `invalid_server_response`          |    1 | The report was refused or its outcome is unconfirmed, or the account read failed; continue without it.          |
 
 Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_not_writable`,
 `root_platform_unsupported`, `root_reserved_path`, `root_entry_unsupported`, `root_enclosing_worktree`,

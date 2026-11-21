@@ -66,6 +66,10 @@ export function authenticateApiCommand({
 
   let selectedOrigin = staging ? STAGING_API_URL : undefined;
   const request = fetchFunction ?? globalThis.fetch;
+  /** @param {string} origin */
+  const tokenFor = (origin) =>
+    environmentTokenFor(origin, { apiToken, stagingApiToken }) ??
+    storedToken(readStoredTokens(), origin);
   /** @type {typeof globalThis.fetch} */
   const authorizedFetch = (input, init) => {
     const endpoint = new URL(input instanceof Request ? input.url : input);
@@ -74,9 +78,7 @@ export function authenticateApiCommand({
         "The requested API environment does not match the Project origin. No request was made.",
       );
     }
-    const token =
-      environmentTokenFor(endpoint.origin, { apiToken, stagingApiToken }) ??
-      storedToken(readStoredTokens(), endpoint.origin);
+    const token = tokenFor(endpoint.origin);
     if (token === undefined) throw new ApiAuthenticationRequiredError();
     selectedOrigin = endpoint.origin;
     return request(input, {
@@ -87,7 +89,12 @@ export function authenticateApiCommand({
       },
     });
   };
-  return { apiUrl: configured, fetchFunction: authorizedFetch };
+  return {
+    apiUrl: configured,
+    fetchFunction: authorizedFetch,
+    /** Whether a request to `origin` would carry a token. @param {string} origin */
+    hasTokenFor: (origin) => tokenFor(origin) !== undefined,
+  };
 }
 
 /** @param {Readonly<Record<string, string>>} tokens @param {string} origin */

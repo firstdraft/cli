@@ -83,10 +83,39 @@ import {
   PlanStatusTimeoutError,
   readPlanStatus,
 } from "./commands/plan-status.js";
+import {
+  AccountResponseInvalidError,
+  AccountUnavailableError,
+  readAccount,
+} from "./commands/account.js";
+import {
+  FAILURE_KINDS,
+  PROGRESS_STEPS,
+  ReportRejectedError,
+  ReportUnavailableError,
+  failureReportBody,
+  progressReportBody,
+  sendReport,
+} from "./commands/report.js";
+import { SERVICE_ROUTES } from "./api-response.js";
 import { storedTokenReader } from "./credentials.js";
 import { isFileSystemError } from "./file-system.js";
 import { createPlanCompileProgressReporter } from "./plan-compile-progress.js";
-import { isUuidV7 } from "./plan-state.js";
+import {
+  PlanStateNotPushedError,
+  isUuidV7,
+  readPinnedProject,
+} from "./plan-state.js";
+import {
+  API_CONTRACT_RANGE,
+  ApiContractUnsupportedError,
+  RateLimitedError,
+  ServiceStopError,
+  UPDATE_URL,
+  UpdateRequiredError,
+  createServiceSession,
+  stopSentence,
+} from "./service-client.js";
 import { generateUuidV7 } from "./uuid-v7.js";
 import { VERSION } from "./version.js";
 
@@ -97,16 +126,107 @@ Usage:
   firstdraft [options]
 
 Commands:
+  account      Show whether this account sends reports
   compilation  Inspect, download, and cancel Compilations
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
   plan         Work with Foundation Plans
+  report       Send a progress or failure report to First Draft
 
 Options:
       --staging  Use staging for API commands (production is the default)
   -h, --help     Show help
   -V, --version  Show version
+`;
+
+const ACCOUNT_HELP = `First Draft CLI
+
+Usage:
+  firstdraft account
+
+Options:
+      --staging  Use staging
+  -h, --help     Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Use a custom API origin
+
+The command reads the signed-in account once and prints whether it sends
+progress and failure reports. Only the person turns reports on or off: when
+approving firstdraft login, or later on their First Draft account page.
+`;
+
+const REPORT_HELP = `First Draft CLI
+
+Usage:
+  firstdraft report <command> [options]
+
+Commands:
+  progress  Report how far the generated application has come
+  failure   Report an unexpected failure in generated code
+
+Options:
+  -h, --help  Show help
+`;
+
+const REPORT_PROGRESS_HELP = `First Draft CLI
+
+Usage:
+  firstdraft report progress <compilation-id> --step <step> [counts]
+
+Options:
+      --staging                         Use staging; reject a different saved origin
+      --step <step>                     setup, specs_first_run, behavior_written,
+                                        specs_passing, or preview_started
+      --examples <n>                    Examples in the spec run
+      --failures <n>                    Failing examples
+      --behavior-to-write-failures <n>  Failing examples that Behavior to write names
+      --items-remaining <n>             Behavior to write items still to write
+                                        (each count at most 1000000)
+  -h, --help                            Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command first reads the account at the origin pinned by a successful plan
+push. With reports on, it prints the exact report, then sends it once there.
+With reports off, it sends no report and still exits 0.
+`;
+
+const REPORT_FAILURE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft report failure <compilation-id> --kind <kind> [options]
+
+Options:
+      --staging               Use staging; reject a different saved origin
+      --kind <kind>           spec_failure, setup_failure, boot_error, or
+                              lint_failure
+      --rerun <command>       The RSpec run that reproduces the failure
+      --error-class <name>    The exception's Ruby constant
+      --message <text>        Error message (first line, plain words)
+      --frame <path:line>     Backtrace frame in the application, repeatable
+                              (first 20)
+      --fix-summary <text>    One line on the fix (plain words)
+      --ruby-version <v>      Ruby version
+      --rails-version <v>     Rails version
+  -h, --help                  Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command keeps each field only in its shape: an RSpec run of the
+application's specs, a Ruby constant, frames in the application's files,
+version numbers, and the plain words of free text. It first reads the account
+at the origin pinned by a successful plan push. With reports on, it prints the
+exact report and what it left out, then sends it once there. With reports off,
+it sends no report and still exits 0. Run it from the generated application's
+root.
 `;
 
 const PLAN_HELP = `First Draft CLI
@@ -366,6 +486,8 @@ const PLAN_USAGE_ERROR =
   "Invalid arguments.\nRun 'firstdraft plan --help' for usage.\n";
 const PLAN_UNKNOWN_COMMAND =
   "Unknown command.\nRun 'firstdraft plan --help' for usage.\n";
+const REPORTS_OFF_MESSAGE =
+  "Not kept: this account has reports off, so First Draft kept nothing. Continue without sending reports.\n";
 const PLAN_INIT_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft plan init --help' for usage.";
 const PLAN_INIT_FAILED_DETAIL =
@@ -376,7 +498,7 @@ const PLAN_PUSH_INVALID_ARGUMENTS_DETAIL =
 const PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read the local First Draft Plan or state. No network request was made. Preserve the local files for manual recovery.";
 const PLAN_PUSH_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The Plan may have been accepted, but the response could not be verified. Stop and reconcile before pushing again; local state was not changed.";
+  "The Plan may have been accepted, but the response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects it with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and push from there to this folder's origin: the api_url in its .firstdraft/state.json, or, when a first push never saved one, the origin that push used. Use --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.";
 const PLAN_PUSH_SERVER_REJECTED_DETAIL = "First Draft rejected the Plan.";
 const AUTHENTICATION_REQUIRED_DETAIL =
   "First Draft authentication is required. Run 'firstdraft login' for the same environment, or set FIRSTDRAFT_API_TOKEN for production or custom origins, or FIRSTDRAFT_STAGING_API_TOKEN for staging.";
@@ -419,7 +541,7 @@ const PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL =
 const PLAN_COMPILE_NOT_PUSHED_DETAIL =
   "The current Foundation Plan could not be associated with a pushed Project.";
 const PLAN_COMPILE_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "The current Plan may have been accepted, but its response could not be verified. Stop and reconcile before compiling again.";
+  "The current Plan may have been accepted, but its response could not be verified, so local state was not changed. Run the same command once more, with the same options and environment. If First Draft rejects the push with status 412, its Plan is no longer the one this folder last pushed: the first push may have landed, or another copy of this Project pushed. If nothing else pushes this Project, start a new one: run 'firstdraft plan init --name <name>' in a new folder, copy this .firstdraft/foundation-plan.json over the new one, and compile from there with the same options and this folder's origin: the api_url in its .firstdraft/state.json, or, when a first push never saved one, the origin that push used. Use --staging for staging or the same FIRSTDRAFT_API_URL for a custom origin.";
 const PLAN_COMPILE_PLAN_REJECTED_DETAIL =
   "First Draft rejected the current Foundation Plan.";
 const PLAN_COMPILE_ANALYSIS_REJECTED_DETAIL =
@@ -429,7 +551,7 @@ const PLAN_COMPILE_ANALYSIS_NOT_VALID_DETAIL =
 const PLAN_COMPILE_LOCAL_PLAN_CHANGED_DETAIL =
   "The local Foundation Plan changed after validation. Run 'firstdraft plan compile' again to submit the current bytes.";
 const PLAN_COMPILE_DIRECT_REQUEST_OUTCOME_UNKNOWN_DETAIL =
-  "A Compilation may have started, but its response could not be verified. Do not rerun 'firstdraft plan compile' or start another Compilation until the current Project is reconciled.";
+  "A Compilation may have started, but its response could not be verified. Run the same command once more, with the same options and environment. If First Draft answers compilation_active, check the Compilation it names with 'firstdraft compilation status', and cancel it with 'firstdraft compilation cancel' only if it is stuck.";
 const PLAN_COMPILE_DIRECT_START_REJECTED_DETAIL =
   "First Draft rejected the direct Compilation request.";
 const PLAN_COMPILE_DIRECT_STATUS_UNAVAILABLE_DETAIL =
@@ -509,6 +631,28 @@ const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.";
 const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft generate application-key --help' for usage.";
+const ACCOUNT_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft account --help' for usage.";
+const ACCOUNT_UNAVAILABLE_DETAIL =
+  "Could not read the account. This read-only request is safe to retry.";
+const ACCOUNT_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid account response. Retrying the unchanged request will not repair this protocol mismatch.";
+const REPORT_PROGRESS_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft report progress --help' for usage.";
+const REPORT_FAILURE_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft report failure --help' for usage.";
+const REPORT_REJECTED_DETAIL =
+  "First Draft rejected the report, so it was not kept; response.code says why. Continue without it.";
+const REPORT_UNAVAILABLE_DETAIL =
+  "Could not confirm that First Draft received the report, and First Draft may hold it already. Continue without it rather than sending it again.";
+const REPORT_ACCOUNT_UNAVAILABLE_DETAIL =
+  "Could not read whether this account sends reports, so no report was sent. Continue without it.";
+const REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid account response, so no report was sent. Continue without it.";
+const PINNED_LOCAL_INPUT_UNREADABLE_DETAIL =
+  "Could not read valid local First Draft state, so nothing was sent. Run the command from the generated application's root after root adoption, or from the Project's directory.";
+const PINNED_NOT_PUSHED_DETAIL =
+  "The local Project has no pinned API origin, so nothing was sent. Run 'firstdraft plan push' first.";
 
 /**
  * @typedef {object} Writer
@@ -548,10 +692,10 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {() => string} [homedir]
  * @property {import("./credentials.js").CredentialsFileSystem} [credentialsFileSystem]
  * @property {number} [credentialsLockTimeoutMs]
- * @property {() => string} [hostname]
  * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [loginSleep]
  * @property {() => number} [loginNow]
  * @property {import("./oauth.js").StartLoopbackServer} [startLoopbackServer]
+ * @property {() => number} [serviceNow] the clock for a limit's retry time
  */
 
 /**
@@ -584,10 +728,10 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  * @property {string} [stagingApiToken]
  * @property {boolean} [staging]
  * @property {import("./credentials.js").CredentialStore} [credentials]
- * @property {() => string} [hostname]
  * @property {(delayMs: number, signal?: AbortSignal) => Promise<void>} [loginSleep]
  * @property {() => number} [loginNow]
  * @property {import("./oauth.js").StartLoopbackServer} [startLoopbackServer]
+ * @property {import("./service-client.js").ServiceSession} service
  */
 
 /**
@@ -603,7 +747,15 @@ const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
  */
 
 /**
- * @typedef {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "fetchFunction" | "createRequestSignal" | "credentials" | "hostname" | "loginSleep" | "loginNow" | "startLoopbackServer" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging">} LoginCommandOptions
+ * @typedef {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "fetchFunction" | "createRequestSignal" | "credentials" | "loginSleep" | "loginNow" | "startLoopbackServer" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "service">} LoginCommandOptions
+ */
+
+/**
+ * @typedef {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "fetchFunction" | "createRequestSignal" | "credentials" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "service">} AccountCommandOptions
+ */
+
+/**
+ * @typedef {AccountCommandOptions & {cwd?: string, getCwd: () => string, planPushFileSystem?: import("./commands/plan-push.js").PlanPushFileSystem}} ServiceCommandOptions
  */
 
 /** @param {RunOptions} options */
@@ -639,10 +791,10 @@ export async function run({
   homedir,
   credentialsFileSystem,
   credentialsLockTimeoutMs,
-  hostname,
   loginSleep,
   loginNow,
   startLoopbackServer,
+  serviceNow,
 }) {
   const staging = argv[0] === "--staging";
   if (staging) argv = argv.slice(1);
@@ -653,6 +805,11 @@ export async function run({
     fileSystem: credentialsFileSystem,
     lockTimeoutMs: credentialsLockTimeoutMs,
   };
+  const service = createServiceSession({
+    env,
+    notify: (line) => stderr.write(line),
+    now: serviceNow,
+  });
 
   if (argv[0] === "login" || argv[0] === "logout") {
     return (argv[0] === "login" ? runLogin : runLogout)({
@@ -662,7 +819,6 @@ export async function run({
       fetchFunction,
       createRequestSignal,
       credentials,
-      hostname,
       loginSleep,
       loginNow,
       startLoopbackServer,
@@ -670,6 +826,30 @@ export async function run({
       apiToken,
       stagingApiToken,
       staging,
+      service,
+    });
+  }
+
+  if (argv[0] === "account" || argv[0] === "report") {
+    const commands = {
+      account: runAccount,
+      report: runReport,
+    };
+    return commands[argv[0]]({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd,
+      getCwd,
+      fetchFunction,
+      planPushFileSystem,
+      createRequestSignal,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging,
+      credentials,
+      service,
     });
   }
 
@@ -712,6 +892,7 @@ export async function run({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -732,6 +913,7 @@ export async function run({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -811,6 +993,7 @@ async function runPlan({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   if (argv[0] === "init") {
     return runPlanInit({
@@ -838,6 +1021,7 @@ async function runPlan({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -857,6 +1041,7 @@ async function runPlan({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -885,6 +1070,7 @@ async function runPlan({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -933,6 +1119,7 @@ async function runCompilation({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   if (argv[0] === "status") {
     return runCompilationStatus({
@@ -950,6 +1137,7 @@ async function runCompilation({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -967,6 +1155,7 @@ async function runCompilation({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -984,6 +1173,7 @@ async function runCompilation({
       stagingApiToken,
       staging,
       credentials,
+      service,
     });
   }
 
@@ -1016,7 +1206,7 @@ async function runCompilation({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "compilationSleep" | "compilationNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runCompilationStatus({
   argv,
@@ -1033,6 +1223,7 @@ async function runCompilationStatus({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1072,7 +1263,7 @@ async function runCompilationStatus({
 
   try {
     const authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -1083,16 +1274,18 @@ async function runCompilationStatus({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    const result = await readCompilation({
-      cwd,
-      compilationId,
-      wait: parsed.values.wait,
-      fetchFunction: authentication.fetchFunction,
-      fileSystem: planPushFileSystem,
-      createRequestSignal,
-      sleep: compilationSleep,
-      now: compilationNow,
-    });
+    const result = await service.settle(
+      readCompilation({
+        cwd,
+        compilationId,
+        wait: parsed.values.wait,
+        fetchFunction: authentication.fetchFunction,
+        fileSystem: planPushFileSystem,
+        createRequestSignal,
+        sleep: compilationSleep,
+        now: compilationNow,
+      }),
+    );
     writeJson(stdout, result);
     return 0;
   } catch (error) {
@@ -1103,7 +1296,7 @@ async function runCompilationStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runCompilationDownload({
   argv,
@@ -1118,6 +1311,7 @@ async function runCompilationDownload({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1163,7 +1357,7 @@ async function runCompilationDownload({
 
   try {
     const authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -1174,14 +1368,16 @@ async function runCompilationDownload({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    const result = await downloadCompilation({
-      cwd,
-      compilationId,
-      output,
-      fetchFunction: authentication.fetchFunction,
-      fileSystem: planPushFileSystem,
-      createRequestSignal,
-    });
+    const result = await service.settle(
+      downloadCompilation({
+        cwd,
+        compilationId,
+        output,
+        fetchFunction: authentication.fetchFunction,
+        fileSystem: planPushFileSystem,
+        createRequestSignal,
+      }),
+    );
     writeJson(stdout, result);
     return 0;
   } catch (error) {
@@ -1253,7 +1449,7 @@ async function runCompilationDownload({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runCompilationCancel({
   argv,
@@ -1268,6 +1464,7 @@ async function runCompilationCancel({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1306,7 +1503,7 @@ async function runCompilationCancel({
 
   try {
     const authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -1317,16 +1514,21 @@ async function runCompilationCancel({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    const result = await cancelCompilation({
-      cwd,
-      compilationId,
-      fetchFunction: authentication.fetchFunction,
-      fileSystem: planPushFileSystem,
-      createRequestSignal,
-    });
+    const result = await service.settle(
+      cancelCompilation({
+        cwd,
+        compilationId,
+        fetchFunction: authentication.fetchFunction,
+        fileSystem: planPushFileSystem,
+        createRequestSignal,
+      }),
+    );
     writeJson(stdout, result);
     return 0;
   } catch (error) {
+    const stopStatus = writeServiceStop(stderr, error);
+    if (stopStatus !== null) return stopStatus;
+
     if (error instanceof CompilationCancelRejectedError) {
       if (isAuthenticationProblem(error.status, error.response)) {
         writeAuthenticationRequired(stderr, error.status, error.response);
@@ -1377,6 +1579,9 @@ function writeCompilationInvalidArguments(writer, detail) {
  * @param {boolean} [throwUnknown]
  */
 function writeCompilationReadError(writer, error, throwUnknown = true) {
+  const stopStatus = writeServiceStop(writer, error);
+  if (stopStatus !== null) return stopStatus;
+
   if (error instanceof ApiAuthenticationRequiredError) {
     writeAuthenticationRequired(writer);
     return 1;
@@ -1463,7 +1668,6 @@ async function runLogin({
   fetchFunction,
   createRequestSignal,
   credentials,
-  hostname,
   loginSleep,
   loginNow,
   startLoopbackServer,
@@ -1471,6 +1675,7 @@ async function runLogin({
   apiToken,
   stagingApiToken,
   staging,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1511,19 +1716,23 @@ async function runLogin({
   if (origin === null) return 2;
 
   try {
-    await login({
-      origin,
-      device: parsed.values.interactive || parsed.values.device,
-      prompt: (text) => stderr.write(text),
-      fetchFunction,
-      createRequestSignal,
-      sleep: loginSleep,
-      now: loginNow,
-      hostname,
-      startLoopback: startLoopbackServer,
-      credentials,
-    });
+    await service.settle(
+      login({
+        origin,
+        device: parsed.values.interactive || parsed.values.device,
+        prompt: (text) => stderr.write(text),
+        fetchFunction: service.fetch(fetchFunction),
+        createRequestSignal,
+        sleep: loginSleep,
+        now: loginNow,
+        startLoopback: startLoopbackServer,
+        credentials,
+      }),
+    );
   } catch (error) {
+    const stopStatus = writeServiceStop(stderr, error);
+    if (stopStatus !== null) return stopStatus;
+
     if (error instanceof LoginDeniedError) {
       writeJson(stderr, {
         error: "authorization_denied",
@@ -1579,6 +1788,7 @@ async function runLogout({
   apiToken,
   stagingApiToken,
   staging,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1614,14 +1824,19 @@ async function runLogout({
 
   let result;
   try {
+    // Logout removes the local token whatever First Draft answers, so a stop
+    // never replaces its result; a refused revocation is reported as one
+    // that First Draft did not confirm.
     result = await logout({
       origin,
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       createRequestSignal,
       credentials,
     });
+    service.flush();
   } catch (error) {
     if (!(error instanceof LogoutFailedError)) throw error;
+    service.flush();
 
     writeJson(stderr, {
       error: "logout_failed",
@@ -1841,7 +2056,7 @@ function runGenerateApplicationKey({ argv, stdout, stderr }) {
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runPlanPush({
   argv,
@@ -1857,6 +2072,7 @@ async function runPlanPush({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -1887,7 +2103,7 @@ async function runPlanPush({
   let result;
   try {
     const authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -1898,15 +2114,20 @@ async function runPlanPush({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    result = await pushPlan({
-      cwd,
-      apiUrl: authentication.apiUrl,
-      fetchFunction: authentication.fetchFunction,
-      fileSystem: planPushFileSystem,
-      createTemporaryId,
-      createRequestSignal,
-    });
+    result = await service.settle(
+      pushPlan({
+        cwd,
+        apiUrl: authentication.apiUrl,
+        fetchFunction: authentication.fetchFunction,
+        fileSystem: planPushFileSystem,
+        createTemporaryId,
+        createRequestSignal,
+      }),
+    );
   } catch (error) {
+    const stopStatus = writeServiceStop(stderr, error);
+    if (stopStatus !== null) return stopStatus;
+
     if (error instanceof ApiAuthenticationRequiredError) {
       writeAuthenticationRequired(stderr);
       return 1;
@@ -1988,7 +2209,7 @@ async function runPlanPush({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createRequestSignal" | "planStatusSleep" | "planStatusNow" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runPlanStatus({
   argv,
@@ -2005,6 +2226,7 @@ async function runPlanStatus({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -2036,7 +2258,7 @@ async function runPlanStatus({
   let result;
   try {
     const authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -2047,16 +2269,21 @@ async function runPlanStatus({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    result = await readPlanStatus({
-      cwd,
-      wait: parsed.values.wait,
-      fetchFunction: authentication.fetchFunction,
-      fileSystem: planPushFileSystem,
-      createRequestSignal,
-      sleep: planStatusSleep,
-      now: planStatusNow,
-    });
+    result = await service.settle(
+      readPlanStatus({
+        cwd,
+        wait: parsed.values.wait,
+        fetchFunction: authentication.fetchFunction,
+        fileSystem: planPushFileSystem,
+        createRequestSignal,
+        sleep: planStatusSleep,
+        now: planStatusNow,
+      }),
+    );
   } catch (error) {
+    const stopStatus = writeServiceStop(stderr, error);
+    if (stopStatus !== null) return stopStatus;
+
     if (error instanceof ApiAuthenticationRequiredError) {
       writeAuthenticationRequired(stderr);
       return 1;
@@ -2154,7 +2381,7 @@ async function runPlanStatus({
 }
 
 /**
- * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials">} options
+ * @param {Pick<CommandOptions, "argv" | "stdout" | "stderr" | "cwd" | "fetchFunction" | "planPushFileSystem" | "createTemporaryId" | "createRequestSignal" | "planCompileSleep" | "planCompileNow" | "planPublishSleep" | "planPublishNow" | "compilationSleep" | "compilationNow" | "planCompilePush" | "planCompileReadStatus" | "planCompilePublish" | "planCompileDownload" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "credentials" | "service">} options
  */
 async function runPlanCompile({
   argv,
@@ -2180,6 +2407,7 @@ async function runPlanCompile({
   stagingApiToken,
   staging,
   credentials,
+  service,
 }) {
   const parsed = parseArguments(() =>
     parseArgs({
@@ -2221,7 +2449,7 @@ async function runPlanCompile({
   let authentication;
   try {
     authentication = authenticateApiCommand({
-      fetchFunction,
+      fetchFunction: service.fetch(fetchFunction),
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -2252,13 +2480,15 @@ async function runPlanCompile({
   };
   if (!github) {
     try {
-      const result = await compilePlanToDirectory({
-        ...shared,
-        output: output ?? ".",
-        compilationSleep,
-        compilationNow,
-        compile: planCompileDownload,
-      });
+      const result = await service.settle(
+        compilePlanToDirectory({
+          ...shared,
+          output: output ?? ".",
+          compilationSleep,
+          compilationNow,
+          compile: planCompileDownload,
+        }),
+      );
       writeJson(stdout, result);
       return 0;
     } catch (error) {
@@ -2267,12 +2497,14 @@ async function runPlanCompile({
   }
 
   try {
-    const result = await compilePlanToGitHub({
-      ...shared,
-      publicationSleep: planPublishSleep,
-      publicationNow: planPublishNow,
-      publish: planCompilePublish,
-    });
+    const result = await service.settle(
+      compilePlanToGitHub({
+        ...shared,
+        publicationSleep: planPublishSleep,
+        publicationNow: planPublishNow,
+        publish: planCompilePublish,
+      }),
+    );
     const repository =
       /** @type {NonNullable<typeof result.publication.repository>} */ (
         result.publication.repository
@@ -2286,6 +2518,9 @@ async function runPlanCompile({
 
 /** @param {Writer} writer @param {unknown} error */
 function writePlanCompileError(writer, error) {
+  const stopStatus = writeServiceStop(writer, error);
+  if (stopStatus !== null) return stopStatus;
+
   if (error instanceof ApiAuthenticationRequiredError) {
     writeAuthenticationRequired(writer);
     return 1;
@@ -2837,6 +3072,648 @@ function runPlanInit({
   return 0;
 }
 
+/** @param {ServiceCommandOptions} options */
+async function runAccount({
+  argv,
+  stdout,
+  stderr,
+  fetchFunction,
+  createRequestSignal,
+  credentials,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+  service,
+}) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: ACCOUNT_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(ACCOUNT_HELP);
+    return 0;
+  }
+
+  const authentication = authenticateAccountCommand(stderr, {
+    fetchFunction,
+    credentials,
+    apiUrl,
+    apiToken,
+    stagingApiToken,
+    staging: staging || parsed.values.staging,
+    service,
+  });
+  if (typeof authentication === "number") return authentication;
+
+  try {
+    const account = await service.settle(
+      readAccount({
+        origin: authentication.origin,
+        fetchFunction: authentication.fetchFunction,
+        createRequestSignal,
+      }),
+    );
+    writeJson(stdout, account);
+    return 0;
+  } catch (error) {
+    const status =
+      writeAccountCommandError(stderr, error) ??
+      writeAccountReadError(stderr, error, {
+        unavailable: ACCOUNT_UNAVAILABLE_DETAIL,
+        invalid: ACCOUNT_INVALID_RESPONSE_DETAIL,
+      });
+    if (status !== null) return status;
+
+    throw error;
+  }
+}
+
+/**
+ * @param {Writer} writer
+ * @param {unknown} error
+ * @param {{unavailable: string, invalid: string}} details
+ * @returns {number | null}
+ */
+function writeAccountReadError(writer, error, { unavailable, invalid }) {
+  if (error instanceof AccountUnavailableError) {
+    if (isAuthenticationProblem(error.status, error.response)) {
+      writeAuthenticationRequired(writer, error.status, error.response);
+      return 1;
+    }
+    writeJson(writer, {
+      error: "account_unavailable",
+      detail: unavailable,
+      ...(typeof error.status === "number" ? { status: error.status } : {}),
+      ...(error.response ? { response: error.response } : {}),
+    });
+    return 1;
+  }
+
+  if (error instanceof AccountResponseInvalidError) {
+    writeJson(writer, {
+      error: "invalid_server_response",
+      detail: invalid,
+      status: error.status,
+    });
+    return 1;
+  }
+
+  return null;
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runReport(options) {
+  const [command, ...rest] = options.argv;
+  if (command === "progress") {
+    return runReportProgress({ ...options, argv: rest });
+  }
+  if (command === "failure") {
+    return runReportFailure({ ...options, argv: rest });
+  }
+
+  return runCommandGroup(options, "report", REPORT_HELP);
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runReportProgress(options) {
+  const { argv, stdout, stderr, staging } = options;
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        step: { type: "string" },
+        examples: { type: "string" },
+        failures: { type: "string" },
+        "behavior-to-write-failures": { type: "string" },
+        "items-remaining": { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  const invalid = () => {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: REPORT_PROGRESS_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  };
+  if (!parsed || repeatedValueOption(parsed.tokens)) return invalid();
+
+  if (parsed.values.help) {
+    stdout.write(REPORT_PROGRESS_HELP);
+    return 0;
+  }
+
+  const [compilationId] = parsed.positionals;
+  const { step } = parsed.values;
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const [option, key] of /** @type {const} */ ([
+    ["examples", "examples"],
+    ["failures", "failures"],
+    ["behavior-to-write-failures", "behavior_to_write_failures"],
+    ["items-remaining", "items_remaining"],
+  ])) {
+    const value = parsed.values[option];
+    if (value === undefined) continue;
+    const count = parseReportCount(value);
+    if (count === null) return invalid();
+    counts[key] = count;
+  }
+  if (
+    parsed.positionals.length !== 1 ||
+    !isUuidV7(compilationId) ||
+    step === undefined ||
+    !PROGRESS_STEPS.includes(step)
+  ) {
+    return invalid();
+  }
+
+  return sendReportCommand(
+    { ...options, staging: staging || parsed.values.staging },
+    {
+      noun: "progress report",
+      wrapper: "progress_report",
+      route: SERVICE_ROUTES.sendProgressReport,
+      compilationId,
+      body: () => ({ body: progressReportBody(step, counts), omitted: [] }),
+    },
+  );
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runReportFailure(options) {
+  const { argv, stdout, stderr, staging } = options;
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        staging: { type: "boolean" },
+        kind: { type: "string" },
+        rerun: { type: "string" },
+        "error-class": { type: "string" },
+        message: { type: "string" },
+        frame: { type: "string", multiple: true },
+        "fix-summary": { type: "string" },
+        "ruby-version": { type: "string" },
+        "rails-version": { type: "string" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  const invalid = () => {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: REPORT_FAILURE_INVALID_ARGUMENTS_DETAIL,
+    });
+    return 2;
+  };
+  if (!parsed || repeatedValueOption(parsed.tokens, ["frame"])) {
+    return invalid();
+  }
+
+  if (parsed.values.help) {
+    stdout.write(REPORT_FAILURE_HELP);
+    return 0;
+  }
+
+  const [compilationId] = parsed.positionals;
+  const {
+    kind,
+    rerun,
+    "error-class": errorClass,
+    message,
+    frame: frames,
+    "fix-summary": fixSummary,
+    "ruby-version": rubyVersion,
+    "rails-version": railsVersion,
+  } = parsed.values;
+  if (
+    parsed.positionals.length !== 1 ||
+    !isUuidV7(compilationId) ||
+    kind === undefined ||
+    !FAILURE_KINDS.includes(kind)
+  ) {
+    return invalid();
+  }
+
+  return sendReportCommand(
+    { ...options, staging: staging || parsed.values.staging },
+    {
+      noun: "failure report",
+      wrapper: "failure_report",
+      route: SERVICE_ROUTES.sendFailureReport,
+      compilationId,
+      body: (cwd) =>
+        failureReportBody(
+          {
+            kind,
+            rerun,
+            errorClass,
+            message,
+            frames,
+            fixSummary,
+            rubyVersion,
+            railsVersion,
+          },
+          cwd,
+        ),
+    },
+  );
+}
+
+/**
+ * @param {string} value
+ * @returns {number | null} null when the value is not a count
+ */
+function parseReportCount(value) {
+  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) return null;
+
+  const count = Number(value);
+  return count <= MAX_REPORT_COUNT ? count : null;
+}
+
+// First Draft refuses a larger count.
+const MAX_REPORT_COUNT = 1_000_000;
+
+/**
+ * Reads the account at the Project's pinned origin and, only when it has
+ * reports on, prints the exact report and sends those bytes once there.
+ *
+ * @param {ServiceCommandOptions} options
+ * @param {{noun: string, wrapper: string, route: {method: string, path: string}, compilationId: string, body: (cwd: string) => {body: unknown, omitted: string[]}}} report
+ */
+async function sendReportCommand(
+  options,
+  { noun, wrapper, route, compilationId, body },
+) {
+  const { stdout, stderr, createRequestSignal, service } = options;
+  try {
+    const pinned = authenticatePinnedProject(options);
+    if (pinned === null) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+
+    const shaped = body(pinned.cwd);
+    const text = `${JSON.stringify(shaped.body, null, 2)}\n`;
+    const outcome = await service.settle(
+      (async () => {
+        // Reports are off until the person says yes, so with them off no
+        // report body leaves this machine.
+        const account = await readAccount({
+          origin: pinned.apiUrl,
+          fetchFunction: pinned.fetchFunction,
+          createRequestSignal,
+        });
+        if (account.reports !== "on") return "reports_off";
+
+        service.throwIfStopped();
+        stdout.write(
+          `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}` +
+            (shaped.omitted.length === 0
+              ? ""
+              : `Left out: ${shaped.omitted.join("; ")}.\n`),
+        );
+        // The person can turn reports off between the two requests, which
+        // First Draft answers with 403 reports_off.
+        const sent = await sendReport({
+          origin: pinned.apiUrl,
+          route,
+          projectId: pinned.projectId,
+          compilationId,
+          body: text,
+          wrapper,
+          fetchFunction: pinned.fetchFunction,
+          createRequestSignal,
+        });
+        return sent.outcome;
+      })(),
+    );
+    stdout.write(outcome === "sent" ? "Sent.\n" : REPORTS_OFF_MESSAGE);
+    return 0;
+  } catch (error) {
+    const status =
+      writePinnedProjectError(stderr, error) ??
+      writeAccountReadError(stderr, error, {
+        unavailable: REPORT_ACCOUNT_UNAVAILABLE_DETAIL,
+        invalid: REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL,
+      });
+    if (status !== null) return status;
+
+    if (error instanceof ReportRejectedError) {
+      if (isAuthenticationProblem(error.status, error.response)) {
+        writeAuthenticationRequired(stderr, error.status, error.response);
+        return 1;
+      }
+      writeJson(stderr, {
+        error: "report_rejected",
+        detail: REPORT_REJECTED_DETAIL,
+        status: error.status,
+        response: error.response,
+      });
+      return 1;
+    }
+
+    if (error instanceof ReportUnavailableError) {
+      writeJson(stderr, {
+        error: "report_unavailable",
+        detail: REPORT_UNAVAILABLE_DETAIL,
+        ...(typeof error.status === "number" ? { status: error.status } : {}),
+        ...(error.response ? { response: error.response } : {}),
+      });
+      return 1;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Reads the Project that a successful push pinned and authenticates its
+ * origin, before a command prints what it will send there. Returns null when
+ * no token is available for that origin.
+ *
+ * @param {ServiceCommandOptions} options
+ */
+function authenticatePinnedProject({
+  cwd,
+  getCwd,
+  fetchFunction,
+  credentials,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  staging,
+  service,
+}) {
+  const authentication = authenticateApiCommand({
+    fetchFunction: service.fetch(fetchFunction),
+    apiUrl,
+    apiToken,
+    stagingApiToken,
+    staging,
+    readStoredTokens: storedTokenReader(credentials),
+  });
+  if (authentication === null) return null;
+
+  const directory = cwd ?? getCwd();
+  const project = readPinnedProject({ cwd: directory });
+  if (staging && project.apiUrl !== STAGING_API_URL) {
+    throw new PlanPushConfigurationError(
+      "The requested API environment does not match the Project origin. No request was made.",
+    );
+  }
+  if (!authentication.hasTokenFor(project.apiUrl)) return null;
+
+  return {
+    cwd: directory,
+    ...project,
+    fetchFunction: authentication.fetchFunction,
+  };
+}
+
+/**
+ * The local and environment errors of a command that sends to the pinned
+ * Project.
+ *
+ * @param {Writer} writer
+ * @param {unknown} error
+ */
+function writePinnedProjectError(writer, error) {
+  const status = writeAccountCommandError(writer, error);
+  if (status !== null) return status;
+
+  if (error instanceof PlanPushLocalError) {
+    writeJson(writer, {
+      error: "local_input_unreadable",
+      detail: PINNED_LOCAL_INPUT_UNREADABLE_DETAIL,
+    });
+    return 1;
+  }
+
+  if (error instanceof PlanStateNotPushedError) {
+    writeJson(writer, {
+      error: "project_not_pushed",
+      detail: PINNED_NOT_PUSHED_DETAIL,
+    });
+    return 1;
+  }
+
+  return null;
+}
+
+/**
+ * Prints a command group's help, or its usage error for anything else.
+ *
+ * @param {Pick<ServiceCommandOptions, "argv" | "stdout" | "stderr">} options
+ * @param {string} group
+ * @param {string} help
+ */
+function runCommandGroup({ argv, stdout, stderr }, group, help) {
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: { help: { type: "boolean", short: "h" } },
+      allowPositionals: true,
+      strict: true,
+    }),
+  );
+
+  if (!parsed || parsed.positionals.length > 0) {
+    stderr.write(
+      `${parsed ? "Unknown command." : "Invalid arguments."}\nRun 'firstdraft ${group} --help' for usage.\n`,
+    );
+    return 2;
+  }
+
+  stdout.write(help);
+  return 0;
+}
+
+/**
+ * Selects the origin as login does (--staging, else FIRSTDRAFT_API_URL, else
+ * production) for a command that is not tied to a Project, and authenticates
+ * it. Returns the exit status when it has already written an error.
+ *
+ * @param {Writer} stderr
+ * @param {Pick<ServiceCommandOptions, "fetchFunction" | "credentials" | "apiUrl" | "apiToken" | "stagingApiToken" | "staging" | "service">} options
+ * @returns {{origin: string, fetchFunction: typeof globalThis.fetch} | number}
+ */
+function authenticateAccountCommand(
+  stderr,
+  {
+    fetchFunction,
+    credentials,
+    apiUrl,
+    apiToken,
+    stagingApiToken,
+    staging,
+    service,
+  },
+) {
+  const origin = selectLoginOrigin(stderr, { apiUrl, staging });
+  if (origin === null) return 2;
+
+  const authentication = authenticateApiCommand({
+    fetchFunction: service.fetch(fetchFunction),
+    apiUrl: origin,
+    apiToken,
+    stagingApiToken,
+    staging,
+    readStoredTokens: storedTokenReader(credentials),
+  });
+  // Checked before a report is printed, so a missing token prints nothing.
+  if (authentication === null || !authentication.hasTokenFor(origin)) {
+    writeAuthenticationRequired(stderr);
+    return 1;
+  }
+  return { origin, fetchFunction: authentication.fetchFunction };
+}
+
+/**
+ * The errors that every account and report command handles
+ * the same way.
+ *
+ * @param {Writer} writer
+ * @param {unknown} error
+ */
+function writeAccountCommandError(writer, error) {
+  const stopStatus = writeServiceStop(writer, error);
+  if (stopStatus !== null) return stopStatus;
+
+  if (error instanceof ApiAuthenticationRequiredError) {
+    writeAuthenticationRequired(writer);
+    return 1;
+  }
+
+  if (error instanceof PlanPushConfigurationError) {
+    writeJson(writer, {
+      error: "invalid_configuration",
+      detail: error.message,
+    });
+    return 2;
+  }
+
+  return null;
+}
+
+/**
+ * Writes the error for a response that told the CLI to stop before the
+ * command finished. A Compilation that had already started is named, so the
+ * caller follows it instead of starting another.
+ *
+ * @param {Writer} writer
+ * @param {unknown} error
+ * @returns {number | null}
+ */
+function writeServiceStop(writer, error) {
+  if (!(error instanceof ServiceStopError)) return null;
+
+  const current =
+    error.replaced instanceof CompilationRetainedError
+      ? error.replaced.current
+      : undefined;
+  const update = `Tell the person to update with the steps at ${UPDATE_URL}, then`;
+  const next =
+    current === undefined
+      ? "run the same command again, with the same options."
+      : "follow the Compilation that had already started with 'firstdraft compilation status " +
+        `${current.compilation.id}' instead of compiling again.`;
+  const stopped =
+    "The CLI stopped before the command finished and sent nothing more.";
+
+  if (error instanceof UpdateRequiredError) {
+    writeJson(writer, {
+      error: "update_required",
+      detail: `${stopSentence(error)} ${stopped} ${update} ${next}`,
+      ...(error.component === "plugin"
+        ? {
+            plugin_version: error.installed,
+            cli_version: VERSION,
+            minimum_plugin_version: error.minimum,
+          }
+        : { cli_version: VERSION, minimum_cli_version: error.minimum }),
+      update_url: UPDATE_URL,
+      ...(current === undefined ? {} : { current }),
+    });
+    return 1;
+  }
+
+  if (error instanceof ApiContractUnsupportedError) {
+    writeJson(writer, {
+      error: "api_contract_unsupported",
+      detail:
+        `${stopSentence(error)} ${stopped} ` +
+        (error.kind === "newer"
+          ? `${update} ${next}`
+          : "Use the CLI version that this First Draft origin supports."),
+      api_contract: error.contract,
+      accepted_api_contract: API_CONTRACT_RANGE,
+      cli_version: VERSION,
+      update_url: UPDATE_URL,
+      ...(current === undefined ? {} : { current }),
+    });
+    return 1;
+  }
+
+  const retryAt = error instanceof RateLimitedError ? error.retryAt : undefined;
+  const limit = error instanceof RateLimitedError ? error.response : null;
+  // A limit without Retry-After or a problem detail, such as the one shared
+  // by device logins, lasts about a minute.
+  const retry =
+    retryAt !== undefined
+      ? `Try again after ${retryAt}; response.detail, when present, says which limit.`
+      : limit
+        ? "Try again when response.detail says."
+        : "Try again in a minute.";
+  writeJson(writer, {
+    error: "rate_limited",
+    detail:
+      `${stopSentence(error)} The refused request did nothing, and the CLI sent nothing after it. ` +
+      retry +
+      (current === undefined
+        ? ""
+        : ` A Compilation had already started: follow it with 'firstdraft compilation status ${current.compilation.id}' instead of compiling again.`),
+    status: 429,
+    ...(error instanceof RateLimitedError && error.retryAt !== undefined
+      ? { retry_at: error.retryAt }
+      : {}),
+    ...(error instanceof RateLimitedError && error.response
+      ? { response: error.response }
+      : {}),
+    ...(current === undefined ? {} : { current }),
+  });
+  return 1;
+}
+
 /** @param {unknown} value */
 function parseUuidCount(value) {
   if (value === undefined) return 1;
@@ -2861,14 +3738,18 @@ function parseArguments(callback) {
   }
 }
 
-/** @param {readonly {kind: string, name?: string}[]} tokens */
-function repeatedValueOption(tokens) {
+/**
+ * @param {readonly {kind: string, name?: string}[]} tokens
+ * @param {readonly string[]} [repeatable] options that may appear more than once
+ */
+function repeatedValueOption(tokens, repeatable = []) {
   const names = tokens
     .filter(
       (token) =>
         token.kind === "option" &&
         typeof token.name === "string" &&
-        token.name !== "help",
+        token.name !== "help" &&
+        !repeatable.includes(token.name),
     )
     .map((token) => token.name);
 

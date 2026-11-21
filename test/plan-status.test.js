@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 
 import { run } from "../src/cli.js";
 import { MAX_PLAN_STATUS_RESPONSE_BYTES } from "../src/commands/plan-status.js";
+import { RAILS_TARGET_PROFILE } from "../src/compilation-artifact.js";
+import { VERSION } from "../src/version.js";
 
 /** @typedef {{input: string | URL | Request, init: RequestInit | undefined}} FetchCall */
 
@@ -37,7 +39,7 @@ const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
-const TARGET = { id: "rails", profile: "rails-sketch/2026-10" };
+const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const PLAN_STATUS_HELP = `First Draft CLI
 
 Usage:
@@ -146,13 +148,11 @@ test("plan status makes one bounded GET to only the pinned origin", async (conte
   assert.equal(call.init?.method, "GET");
   assert.equal(call.init?.redirect, "error");
   assert.equal(call.init?.signal, signal);
-  assert.deepEqual(
-    new Headers(call.init?.headers),
-    new Headers({
-      Accept: "application/json, application/problem+json",
-      Authorization: `Bearer ${API_TOKEN}`,
-    }),
-  );
+  assert.deepEqual(Object.fromEntries(new Headers(call.init?.headers)), {
+    accept: "application/json, application/problem+json",
+    authorization: `Bearer ${API_TOKEN}`,
+    "firstdraft-client": `cli/${VERSION}; os/${process.platform}`,
+  });
   assert.equal(call.init?.body, undefined);
   assert.doesNotMatch(result.stdout, /api\.example|opaque|canary-secret/);
 });
@@ -250,7 +250,7 @@ test("plan status accepts the pinned Service zero-gap canonical digest", async (
   const body = analysisBody("valid");
   body.analysis.gap_set.gaps = [];
   body.analysis.gap_set_sha256 =
-    "c38373ec9f208fb4abb6eeec29c447142dc4f6dd706c8a48286abee4d55d66a8";
+    "c9599e35f30761180fc0cb1d57e33fd0106b4a8d8ff93df056b322e6fdfcfe58";
   const result = await invoke(["plan", "status"], {
     cwd,
     fetchFunction: recordingFetch([jsonResponse(body)], []),
@@ -1119,6 +1119,7 @@ async function invoke(argv, overrides = {}) {
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
     apiToken: API_TOKEN,
+    env: {},
     ...overrides,
   });
 
