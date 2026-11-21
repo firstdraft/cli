@@ -46,15 +46,14 @@ Rails target to profile `rails-sketch/2026-11` and the accepted API contract to 
 - `firstdraft report progress` and `firstdraft report failure` first read the account at the Project's pinned origin,
   and send no report unless it has reports on. With reports off, they print a line that says so and exit 0. With
   reports on, unless the account response stopped the CLI, they print the exact JSON report, send it once, and print
-  `Sent.` only on First Draft's `201`
-  acknowledgment; a `403 reports_off` answer to the report prints the reports-off line and exits 0. `--step` is
-  `setup`, `specs_first_run`, `behavior_written`, `specs_passing`, or `preview_started`, with optional counts of at
-  most 1000000. `--kind` is `spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`. A failure report keeps
-  each field only in its shape: an RSpec run of the application's specs, a Ruby constant, up to 20 application frames
-  sent as `path:LINE`, version numbers, and the plain words of the first line of the message (at most 300 characters)
-  and fix summary (at most 200). A `Left out:` line names each field and frame left out; the printed JSON is exactly
-  what is sent. Both commands find the Project from the
-  generated application's root after root adoption, or from the Project's directory.
+  `Sent.` only on First Draft's `201` acknowledgment; a `403 reports_off` answer to the report prints the reports-off
+  line and exits 0. `--step` is `setup`, `specs_first_run`, `behavior_written`, `specs_passing`, or
+  `preview_started`, with optional counts of at most 1000000. `--kind` is `spec_failure`, `setup_failure`,
+  `boot_error`, or `lint_failure`. A failure report keeps each field only in its shape: an RSpec run of the
+  application's specs, a Ruby constant, up to 20 application frames sent as `path:LINE`, version numbers, and the plain
+  words of the first line of the message (at most 300 characters) and fix summary (at most 200). A `Left out:` line
+  names each field and frame left out; the printed JSON is exactly what is sent. Both commands find the Project from
+  the generated application's root after root adoption, or from the Project's directory.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
