@@ -7,6 +7,7 @@ import {
   isValidApplicationName,
 } from "./application-identity.js";
 import {
+  NOTES_ON_LINES,
   REPORTS_ON_LINES,
   commandLine,
   deviceLoginExpiredLines,
@@ -117,15 +118,26 @@ import {
   progressReportBody,
   sendReport,
 } from "./commands/report.js";
+import {
+  NOTE_FIELDS,
+  NOTE_KINDS,
+  NoteIncompleteError,
+  noteArgumentsValid,
+  noteBody,
+} from "./commands/note.js";
 import { readLoginState, readReadiness } from "./commands/start.js";
 import { SERVICE_ROUTES } from "./api-response.js";
 import { storedTokenReader } from "./credentials.js";
 import { isFileSystemError } from "./file-system.js";
 import { createPlanCompileProgressReporter } from "./plan-compile-progress.js";
 import {
+  CompilationNotRecordedError,
+  CompilationRecordWriteError,
   PlanStateNotPushedError,
   isUuidV7,
   readPinnedProject,
+  readRecordedCompilation,
+  recordCompilation,
 } from "./plan-state.js";
 import {
   API_CONTRACT_RANGE,
@@ -152,6 +164,7 @@ Commands:
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
+  note         Send a note about a problem with First Draft
   plan         Work with Foundation Plans
   report       Send a progress or failure report to First Draft
   start        Check versions, login, and reports before other work
@@ -218,7 +231,7 @@ Options:
 const REPORT_PROGRESS_HELP = `First Draft CLI
 
 Usage:
-  firstdraft report progress <compilation-id> --step <step> [counts]
+  firstdraft report progress [<compilation-id>] --step <step> [counts]
 
 Options:
       --staging                         Use staging; reject a different saved origin
@@ -237,13 +250,15 @@ Environment:
 
 The command first reads the account at the origin pinned by a successful plan
 push. With reports on, it prints the exact report, then sends it once there.
-With reports off, it sends no report and still exits 0.
+With reports off, it sends no report and still exits 0. Without
+<compilation-id>, the report names the Compilation whose code plan compile or
+compilation download last wrote for the Project.
 `;
 
 const REPORT_FAILURE_HELP = `First Draft CLI
 
 Usage:
-  firstdraft report failure <compilation-id> --kind <kind> [options]
+  firstdraft report failure [<compilation-id>] --kind <kind> [options]
 
 Options:
       --staging               Use staging; reject a different saved origin
@@ -269,8 +284,98 @@ version numbers, and the plain words of free text. It first reads the account
 at the origin pinned by a successful plan push. With reports on, it prints the
 exact report and what it left out, then sends it once there. With reports off,
 it sends no report and still exits 0. Run it from the generated application's
-root.
+root. Without <compilation-id>, the report names the Compilation whose code
+plan compile or compilation download last wrote for the Project.
 `;
+
+const NOTE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft note <kind> [options]
+
+Commands:
+  unstated_request  The person asked for something the Plan could not state
+  unclear_guidance  A Skill page or a diagnostic was unclear
+  wrong_output      Analysis or generated code was wrong
+
+Options:
+  -h, --help  Show help
+
+A note belongs to the Project, so it can be sent only after the Plan's first
+push. Each note command reads the account first and sends nothing while
+reports are off.
+`;
+
+const NOTE_TRAILER = `Each text keeps the plain words of its first line, at most 300 characters.
+The command first reads the account at the origin pinned by a successful plan
+push. With reports on, it prints the exact note and what it left out, then
+sends it once there. With reports off, it sends no note and still exits 0.
+`;
+
+const NOTE_ENVIRONMENT = `Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+`;
+
+const NOTE_UNSTATED_REQUEST_HELP = `First Draft CLI
+
+Usage:
+  firstdraft note unstated_request --request <text> [--workaround <text>]
+
+Options:
+      --staging            Use staging; reject a different saved origin
+      --request <text>     What the person asked for
+      --workaround <text>  What you wrote in the Plan instead, or left for later
+  -h, --help               Show help
+
+${NOTE_ENVIRONMENT}
+${NOTE_TRAILER}`;
+
+const NOTE_UNCLEAR_GUIDANCE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft note unclear_guidance --page <page> --unclear <text> [options]
+  firstdraft note unclear_guidance --code <code> --unclear <text> [options]
+
+Options:
+      --staging            Use staging; reject a different saved origin
+      --page <page>        The Skill page: SKILL.md or a path inside the Skill
+                           ending in .md, with an optional #anchor
+      --code <code>        The diagnostic code or CLI error value
+      --unclear <text>     What it says or leaves out, and what you needed
+      --workaround <text>  What you did instead
+  -h, --help               Show help
+
+${NOTE_ENVIRONMENT}
+Give --page, --code, or both.
+${NOTE_TRAILER}`;
+
+const NOTE_WRONG_OUTPUT_HELP = `First Draft CLI
+
+Usage:
+  firstdraft note wrong_output --source analysis --expected <text>
+    --actual <text> [--code <code>] [--workaround <text>]
+  firstdraft note wrong_output --source generated_code --expected <text>
+    --actual <text> [--compilation-id <id>] [--file <path[:line]>]
+    [--workaround <text>]
+
+Options:
+      --staging              Use staging; reject a different saved origin
+      --source <source>      analysis or generated_code
+      --code <code>          The diagnostic code (analysis only)
+      --compilation-id <id>  The Compilation the code came from (generated_code
+                             only; default: the one the CLI recorded)
+      --file <path[:line]>   The file in the generated application
+                             (generated_code only)
+      --expected <text>      What the Plan or the page says should happen
+      --actual <text>        What happened
+      --workaround <text>    What you changed
+  -h, --help                 Show help
+
+${NOTE_ENVIRONMENT}
+Without --compilation-id, a note about generated code names the Compilation
+whose code plan compile or compilation download last wrote for the Project.
+${NOTE_TRAILER}`;
 
 const PLAN_HELP = `First Draft CLI
 
@@ -702,6 +807,18 @@ const REPORT_ACCOUNT_UNAVAILABLE_DETAIL =
   "Could not read whether this account sends reports, so no report was sent. Continue without it.";
 const REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL =
   "First Draft returned an invalid account response, so no report was sent. Continue without it.";
+const REPORT_NOT_RECORDED_DETAIL =
+  "No Compilation is recorded for this Project, so nothing was sent. 'firstdraft plan compile' and 'firstdraft compilation download' record the one whose code they write; to name one yourself, put its compilation.id right after 'report progress' or 'report failure'.";
+const NOTE_NOT_RECORDED_DETAIL =
+  "No Compilation is recorded for this Project, so nothing was sent. 'firstdraft plan compile' and 'firstdraft compilation download' record the one whose code they write; to name one yourself, pass its compilation.id with --compilation-id.";
+const NOTE_REJECTED_DETAIL =
+  "First Draft rejected the note, so it was not kept; response.code says why. Continue without it.";
+const NOTE_UNAVAILABLE_DETAIL =
+  "Could not confirm that First Draft received the note, and First Draft may hold it already. Continue without it rather than sending it again.";
+const NOTE_ACCOUNT_UNAVAILABLE_DETAIL =
+  "Could not read whether this account sends reports and notes, so no note was sent. Continue without it.";
+const NOTE_ACCOUNT_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid account response, so no note was sent. Continue without it.";
 const PINNED_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state, so nothing was sent. Run the command from the generated application's root after root adoption, or from the Project's directory.";
 const PINNED_NOT_PUSHED_DETAIL =
@@ -886,9 +1003,15 @@ export async function run({
     });
   }
 
-  if (argv[0] === "account" || argv[0] === "report" || argv[0] === "start") {
+  if (
+    argv[0] === "account" ||
+    argv[0] === "note" ||
+    argv[0] === "report" ||
+    argv[0] === "start"
+  ) {
     const commands = {
       account: runAccount,
+      note: runNote,
       report: runReport,
       start: runStart,
     };
@@ -1435,6 +1558,7 @@ async function runCompilationDownload({
         createRequestSignal,
       }),
     );
+    recordWrittenCompilation(stderr, cwd, result.compilation.id);
     writeJson(stdout, result);
     return 0;
   } catch (error) {
@@ -2721,6 +2845,7 @@ async function runPlanCompile({
           compile: planCompileDownload,
         }),
       );
+      recordWrittenCompilation(stderr, cwd, result.compilation.id);
       writeJson(stdout, result);
       return 0;
     } catch (error) {
@@ -3473,7 +3598,9 @@ async function runStart({
     writeLines(stdout, [
       ...loginSentences,
       readyLine(login.environmentVariable),
-      ...(account.reports === "on" ? REPORTS_ON_LINES : []),
+      ...(account.reports === "on"
+        ? [...REPORTS_ON_LINES, ...NOTES_ON_LINES]
+        : []),
     ]);
     return 0;
   } catch (error) {
@@ -3615,8 +3742,8 @@ async function runReportProgress(options) {
     counts[key] = count;
   }
   if (
-    parsed.positionals.length !== 1 ||
-    !isUuidV7(compilationId) ||
+    parsed.positionals.length > 1 ||
+    (compilationId !== undefined && !isUuidV7(compilationId)) ||
     step === undefined ||
     !PROGRESS_STEPS.includes(step)
   ) {
@@ -3626,11 +3753,16 @@ async function runReportProgress(options) {
   return sendReportCommand(
     { ...options, staging: staging || parsed.values.staging },
     {
+      ...REPORT_OUTGOING,
       noun: "progress report",
       wrapper: "progress_report",
       route: SERVICE_ROUTES.sendProgressReport,
       compilationId,
-      body: () => ({ body: progressReportBody(step, counts), omitted: [] }),
+      body: () => ({
+        body: progressReportBody(step, counts),
+        omitted: [],
+        missing: [],
+      }),
     },
   );
 }
@@ -3687,8 +3819,8 @@ async function runReportFailure(options) {
     "rails-version": railsVersion,
   } = parsed.values;
   if (
-    parsed.positionals.length !== 1 ||
-    !isUuidV7(compilationId) ||
+    parsed.positionals.length > 1 ||
+    (compilationId !== undefined && !isUuidV7(compilationId)) ||
     kind === undefined ||
     !FAILURE_KINDS.includes(kind)
   ) {
@@ -3698,12 +3830,13 @@ async function runReportFailure(options) {
   return sendReportCommand(
     { ...options, staging: staging || parsed.values.staging },
     {
+      ...REPORT_OUTGOING,
       noun: "failure report",
       wrapper: "failure_report",
       route: SERVICE_ROUTES.sendFailureReport,
       compilationId,
-      body: (cwd) =>
-        failureReportBody(
+      body: (cwd) => ({
+        ...failureReportBody(
           {
             kind,
             rerun,
@@ -3716,6 +3849,102 @@ async function runReportFailure(options) {
           },
           cwd,
         ),
+        missing: [],
+      }),
+    },
+  );
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runNote(options) {
+  const [kind, ...rest] = options.argv;
+  if (
+    kind !== undefined &&
+    /** @type {readonly string[]} */ (NOTE_KINDS).includes(kind)
+  ) {
+    return runNoteKind(
+      { ...options, argv: rest },
+      /** @type {import("./commands/note.js").NoteKind} */ (kind),
+    );
+  }
+
+  return runCommandGroup(options, "note", NOTE_HELP);
+}
+
+const NOTE_KIND_HELP = {
+  unstated_request: NOTE_UNSTATED_REQUEST_HELP,
+  unclear_guidance: NOTE_UNCLEAR_GUIDANCE_HELP,
+  wrong_output: NOTE_WRONG_OUTPUT_HELP,
+};
+
+/**
+ * @param {ServiceCommandOptions} options
+ * @param {import("./commands/note.js").NoteKind} kind
+ */
+async function runNoteKind(options, kind) {
+  const { argv, stdout, stderr, staging } = options;
+  const fieldNames = NOTE_FIELDS[kind];
+  /** @type {Record<string, {type: "string" | "boolean", short?: string}>} */
+  const optionTypes = {
+    staging: { type: "boolean" },
+    help: { type: "boolean", short: "h" },
+  };
+  for (const field of fieldNames) {
+    optionTypes[field.replaceAll("_", "-")] = { type: "string" };
+  }
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: optionTypes,
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  const invalid = () => {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: `Invalid arguments. Run 'firstdraft note ${kind} --help' for usage.`,
+    });
+    return 2;
+  };
+  if (!parsed || repeatedValueOption(parsed.tokens)) return invalid();
+
+  if (parsed.values.help) {
+    stdout.write(NOTE_KIND_HELP[kind]);
+    return 0;
+  }
+
+  /** @type {Record<string, string>} */
+  const fields = {};
+  for (const field of fieldNames) {
+    const value = parsed.values[field.replaceAll("_", "-")];
+    if (typeof value === "string") fields[field] = value;
+  }
+  if (!noteArgumentsValid(kind, fields)) return invalid();
+
+  const namesCompilation =
+    kind === "wrong_output" && fields.source === "generated_code";
+  return sendReportCommand(
+    {
+      ...options,
+      staging: staging || parsed.values.staging === true,
+    },
+    {
+      ...NOTE_OUTGOING,
+      noun: `${kind} note`,
+      wrapper: "note",
+      route: SERVICE_ROUTES.sendNote,
+      namesCompilation,
+      compilationInPath: false,
+      compilationId: fields.compilation_id,
+      help: `firstdraft note ${kind} --help`,
+      body: (_cwd, compilationId) =>
+        noteBody(kind, {
+          ...fields,
+          ...(compilationId === null ? {} : { compilation_id: compilationId }),
+        }),
     },
   );
 }
@@ -3735,17 +3964,64 @@ function parseReportCount(value) {
 const MAX_REPORT_COUNT = 1_000_000;
 
 /**
+ * What a report or note command sends, and the words of its errors.
+ *
+ * @typedef {object} OutgoingReport
+ * @property {string} noun such as "progress report", for the preview
+ * @property {string} wrapper the key of First Draft's acknowledgment
+ * @property {{method: string, path: string}} route
+ * @property {boolean} namesCompilation whether it names a Compilation: the
+ *   given one, or else the one the CLI recorded
+ * @property {boolean} compilationInPath whether the route's path names it
+ * @property {string | undefined} compilationId the one the caller gave
+ * @property {(cwd: string, compilationId: string | null) => {body: unknown, omitted: string[], missing: string[]}} body
+ *   `missing` names the left-out fields it needs, so nothing is sent
+ * @property {string} help the command that describes each field
+ * @property {"report_rejected" | "note_rejected"} rejected
+ * @property {string} rejectedDetail
+ * @property {"report_unavailable" | "note_unavailable"} unavailable
+ * @property {string} unavailableDetail
+ * @property {string} accountUnavailableDetail
+ * @property {string} accountInvalidDetail
+ * @property {string} notRecordedDetail
+ */
+
+/** @satisfies {Partial<OutgoingReport>} */
+const REPORT_OUTGOING = {
+  namesCompilation: true,
+  compilationInPath: true,
+  help: "firstdraft report --help",
+  rejected: /** @type {const} */ ("report_rejected"),
+  rejectedDetail: REPORT_REJECTED_DETAIL,
+  unavailable: /** @type {const} */ ("report_unavailable"),
+  unavailableDetail: REPORT_UNAVAILABLE_DETAIL,
+  accountUnavailableDetail: REPORT_ACCOUNT_UNAVAILABLE_DETAIL,
+  accountInvalidDetail: REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL,
+  notRecordedDetail: REPORT_NOT_RECORDED_DETAIL,
+};
+
+/** @satisfies {Partial<OutgoingReport>} */
+const NOTE_OUTGOING = {
+  rejected: /** @type {const} */ ("note_rejected"),
+  rejectedDetail: NOTE_REJECTED_DETAIL,
+  unavailable: /** @type {const} */ ("note_unavailable"),
+  unavailableDetail: NOTE_UNAVAILABLE_DETAIL,
+  accountUnavailableDetail: NOTE_ACCOUNT_UNAVAILABLE_DETAIL,
+  accountInvalidDetail: NOTE_ACCOUNT_INVALID_RESPONSE_DETAIL,
+  notRecordedDetail: NOTE_NOT_RECORDED_DETAIL,
+};
+
+/**
  * Reads the account at the Project's pinned origin and, only when it has
- * reports on, prints the exact report and sends those bytes once there.
+ * reports on, prints the exact report or note and sends those bytes once
+ * there. One yes covers reports and notes.
  *
  * @param {ServiceCommandOptions} options
- * @param {{noun: string, wrapper: string, route: {method: string, path: string}, compilationId: string, body: (cwd: string) => {body: unknown, omitted: string[]}}} report
+ * @param {OutgoingReport} outgoing
  */
-async function sendReportCommand(
-  options,
-  { noun, wrapper, route, compilationId, body },
-) {
+async function sendReportCommand(options, outgoing) {
   const { stdout, stderr, createRequestSignal, service } = options;
+  const { noun, wrapper, route, namesCompilation, body } = outgoing;
   try {
     const pinned = authenticatePinnedProject(options);
     if (pinned === null) {
@@ -3753,12 +4029,10 @@ async function sendReportCommand(
       return 1;
     }
 
-    const shaped = body(pinned.cwd);
-    const text = `${JSON.stringify(shaped.body, null, 2)}\n`;
     const outcome = await service.settle(
       (async () => {
-        // Reports are off until the person says yes, so with them off no
-        // report body leaves this machine.
+        // Reports are off until the person says yes, so with them off nothing
+        // leaves this machine, and nothing else is checked.
         const account = await readAccount({
           origin: pinned.apiUrl,
           fetchFunction: pinned.fetchFunction,
@@ -3767,8 +4041,17 @@ async function sendReportCommand(
         if (account.reports !== "on") return "reports_off";
 
         service.throwIfStopped();
+        const compilationId = namesCompilation
+          ? (outgoing.compilationId ??
+            readRecordedCompilation({ stateDirectory: pinned.stateDirectory }))
+          : null;
+        const shaped = body(pinned.cwd, compilationId);
+        if (shaped.missing.length > 0) {
+          throw new NoteIncompleteError(shaped.missing);
+        }
+        const text = `${JSON.stringify(shaped.body, null, 2)}\n`;
         stdout.write(
-          `Sending this ${noun} for Compilation ${compilationId} to ${pinned.apiUrl}:\n${text}` +
+          `Sending this ${noun}${compilationId === null ? "" : ` for Compilation ${compilationId}`} to ${pinned.apiUrl}:\n${text}` +
             (shaped.omitted.length === 0
               ? ""
               : `Left out: ${shaped.omitted.join("; ")}.\n`),
@@ -3778,7 +4061,12 @@ async function sendReportCommand(
         const sent = await sendReport({
           origin: pinned.apiUrl,
           route,
-          projectId: pinned.projectId,
+          parameters: {
+            project_id: pinned.projectId,
+            ...(outgoing.compilationInPath && compilationId !== null
+              ? { compilation_id: compilationId }
+              : {}),
+          },
           compilationId,
           body: text,
           wrapper,
@@ -3794,10 +4082,26 @@ async function sendReportCommand(
     const status =
       writePinnedProjectError(stderr, error) ??
       writeAccountReadError(stderr, error, {
-        unavailable: REPORT_ACCOUNT_UNAVAILABLE_DETAIL,
-        invalid: REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL,
+        unavailable: outgoing.accountUnavailableDetail,
+        invalid: outgoing.accountInvalidDetail,
       });
     if (status !== null) return status;
+
+    if (error instanceof CompilationNotRecordedError) {
+      writeJson(stderr, {
+        error: "compilation_not_recorded",
+        detail: outgoing.notRecordedDetail,
+      });
+      return 1;
+    }
+
+    if (error instanceof NoteIncompleteError) {
+      writeJson(stderr, {
+        error: "note_incomplete",
+        detail: `Nothing was sent, because a field the note needs did not fit its shape: ${error.missing.join("; ")}. Run '${outgoing.help}' for what each field may hold.`,
+      });
+      return 2;
+    }
 
     if (error instanceof ReportRejectedError) {
       if (isAuthenticationProblem(error.status, error.response)) {
@@ -3805,8 +4109,8 @@ async function sendReportCommand(
         return 1;
       }
       writeJson(stderr, {
-        error: "report_rejected",
-        detail: REPORT_REJECTED_DETAIL,
+        error: outgoing.rejected,
+        detail: outgoing.rejectedDetail,
         status: error.status,
         response: error.response,
       });
@@ -3815,8 +4119,8 @@ async function sendReportCommand(
 
     if (error instanceof ReportUnavailableError) {
       writeJson(stderr, {
-        error: "report_unavailable",
-        detail: REPORT_UNAVAILABLE_DETAIL,
+        error: outgoing.unavailable,
+        detail: outgoing.unavailableDetail,
         ...(typeof error.status === "number" ? { status: error.status } : {}),
         ...(error.response ? { response: error.response } : {}),
       });
@@ -3824,6 +4128,27 @@ async function sendReportCommand(
     }
 
     throw error;
+  }
+}
+
+/**
+ * Records the Compilation whose code the command just wrote, so a later
+ * report or note names it. The code is already in place, so a record that
+ * cannot be written leaves the command's result as it is and says so.
+ *
+ * @param {Writer} stderr
+ * @param {string} cwd
+ * @param {string} compilationId
+ */
+function recordWrittenCompilation(stderr, cwd, compilationId) {
+  try {
+    recordCompilation({ cwd, compilationId });
+  } catch (error) {
+    if (!(error instanceof CompilationRecordWriteError)) throw error;
+
+    stderr.write(
+      `First Draft: the code is in place, but the CLI could not record Compilation ${compilationId} for later reports and notes. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
+    );
   }
 }
 

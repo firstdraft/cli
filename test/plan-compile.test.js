@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -243,6 +244,21 @@ test("plan compile --output completes the HTTP journey without GitHub Publicatio
     readFileSync(path.join(cwd, "application", "README.md"), "utf8"),
     "Movie Catalog\n",
   );
+  // Reports and notes from the Project's directory name this Compilation.
+  const record = path.join(cwd, ".firstdraft", "compilation.json");
+  assert.equal(
+    readFileSync(record, "utf8"),
+    `{\n  "format": "firstdraft.cli-compilation/1",\n  "compilation_id": "${COMPILATION_ID}"\n}\n`,
+  );
+  if (process.platform !== "win32") {
+    assert.equal(statSync(record).mode & 0o777, 0o600);
+  }
+  assert.equal(
+    existsSync(
+      path.join(cwd, "application", ".firstdraft", "compilation.json"),
+    ),
+    false,
+  );
   assert.equal(
     result.stderr,
     `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\nFirst Draft: Compiling application...\nFirst Draft: Application compiled.\n`,
@@ -293,6 +309,11 @@ test("plan compile may push unchanged bytes before analysis and Publication", as
   assert.deepEqual(order, [["push", cwd], ["analysis", true], ["publication"]]);
   assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
   assert.equal(result.stderr, SUCCESS_PROGRESS);
+  // Publication writes no code into this folder, so nothing is recorded.
+  assert.equal(
+    existsSync(path.join(cwd, ".firstdraft", "compilation.json")),
+    false,
+  );
 });
 
 test("plan compile --output starts a direct Compilation without Publication", async (context) => {
@@ -354,6 +375,40 @@ test("plan compile --output starts a direct Compilation without Publication", as
   assert.equal(
     result.stderr,
     `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\nFirst Draft: Compiling application...\nFirst Draft: Application compiled.\n`,
+  );
+});
+
+test("a Compilation record that cannot be written leaves the result and says so", async (context) => {
+  const cwd = localDirectory(context, PLAN_SOURCE, {
+    api_url: "https://api.example.test",
+    foundation_plan_etag: ETAG,
+  });
+  // A directory in the record's place makes the rename fail.
+  mkdirSync(path.join(cwd, ".firstdraft", "compilation.json"));
+  const directResult = {
+    project: { id: PROJECT_ID, graph_version: 1 },
+    compilation: { id: COMPILATION_ID, status: "succeeded" },
+    output: { path: path.join(cwd, "application"), file_count: 1 },
+  };
+  const result = await invoke(
+    ["plan", "compile", "--output", "./application"],
+    {
+      cwd,
+      planCompilePush: async () => successfulPush(),
+      planCompileReadStatus: async () => ({
+        status: 200,
+        body: analysisBody("valid"),
+      }),
+      planCompileDownload: async () => directResult,
+    },
+  );
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(JSON.parse(result.stdout), directResult);
+  assert.equal(
+    result.stderr,
+    `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\n` +
+      `First Draft: the code is in place, but the CLI could not record Compilation ${COMPILATION_ID} for later reports and notes. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
   );
 });
 

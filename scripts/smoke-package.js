@@ -302,6 +302,17 @@ try {
       "Invalid arguments. Run 'firstdraft report failure --help' for usage.",
   });
 
+  for (const kind of ["unstated_request", "unclear_guidance", "wrong_output"]) {
+    const invalidNote = spawnPackedCli(
+      ["note", kind, "--canary-secret-option"],
+      installationDirectory,
+    );
+    assertHandledFailure(invalidNote, 2, {
+      error: "invalid_arguments",
+      detail: `Invalid arguments. Run 'firstdraft note ${kind} --help' for usage.`,
+    });
+  }
+
   const invalidLogin = spawnPackedCli(
     ["login", "--canary-secret-option"],
     installationDirectory,

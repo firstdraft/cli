@@ -1,4 +1,5 @@
-import { lstatSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { lstatSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
@@ -50,23 +51,135 @@ export function readPlanState({ cwd, fileSystem = DEFAULT_FILE_SYSTEM }) {
  * @param {PlanStateFileSystem} [options.fileSystem]
  */
 export function readPinnedProject({ cwd, fileSystem }) {
-  // Only an adopted root, whose real .firstdraft holds no state.json, falls
-  // back; any other local problem is reported for this directory.
-  const adoptedRoot =
-    isDirectory(path.join(cwd, ".firstdraft"), fileSystem) &&
-    isAbsent(path.join(cwd, ".firstdraft", "state.json"), fileSystem) &&
-    isDirectory(path.join(cwd, ".firstdraft", "design"), fileSystem);
-  const state = readPlanState({
-    cwd: adoptedRoot ? path.join(cwd, ".firstdraft", "design") : cwd,
-    fileSystem,
-  });
+  const projectDirectory = pinnedProjectDirectory(cwd, fileSystem);
+  const state = readPlanState({ cwd: projectDirectory, fileSystem });
   if (state.api_url === undefined) {
     throw new PlanStateNotPushedError(
       "The local Foundation Plan has not been pushed.",
     );
   }
 
-  return { apiUrl: state.api_url, projectId: state.project_id };
+  return {
+    apiUrl: state.api_url,
+    projectId: state.project_id,
+    stateDirectory: path.join(projectDirectory, ".firstdraft"),
+  };
+}
+
+/**
+ * The directory whose .firstdraft holds the Project's state: `cwd`, or the
+ * archive at .firstdraft/design when `cwd` is an adopted application root.
+ *
+ * @param {string} cwd
+ * @param {PlanStateFileSystem} [fileSystem]
+ */
+function pinnedProjectDirectory(cwd, fileSystem) {
+  // Only an adopted root, whose real .firstdraft holds no state.json, falls
+  // back; any other local problem is reported for this directory.
+  const adoptedRoot =
+    isDirectory(path.join(cwd, ".firstdraft"), fileSystem) &&
+    isAbsent(path.join(cwd, ".firstdraft", "state.json"), fileSystem) &&
+    isDirectory(path.join(cwd, ".firstdraft", "design"), fileSystem);
+  return adoptedRoot ? path.join(cwd, ".firstdraft", "design") : cwd;
+}
+
+// The Compilation whose code the CLI last wrote for the Project, kept in its
+// own file beside state.json so the state format stays as it is. It moves
+// with the planning state into an adopted root's archive.
+const COMPILATION_RECORD_NAME = "compilation.json";
+const COMPILATION_RECORD_FORMAT = "firstdraft.cli-compilation/1";
+
+export class CompilationRecordWriteError extends Error {}
+export class CompilationNotRecordedError extends Error {}
+
+/**
+ * Records `compilationId` as the Compilation whose code the CLI just wrote,
+ * beside the state of the Project found from `cwd` as readPinnedProject
+ * finds it, replacing any earlier record.
+ *
+ * @param {object} options
+ * @param {string} options.cwd
+ * @param {string} options.compilationId
+ * @param {() => string} [options.createTemporaryId]
+ * @returns {string} the record's path
+ */
+export function recordCompilation({
+  cwd,
+  compilationId,
+  createTemporaryId = randomUUID,
+}) {
+  const recordPath = path.join(
+    pinnedProjectDirectory(cwd),
+    ".firstdraft",
+    COMPILATION_RECORD_NAME,
+  );
+  const temporaryPath = `${recordPath}.${createTemporaryId()}.tmp`;
+  const source = `${JSON.stringify(
+    { format: COMPILATION_RECORD_FORMAT, compilation_id: compilationId },
+    null,
+    2,
+  )}\n`;
+  try {
+    writeFileSync(temporaryPath, source, {
+      flag: "wx",
+      mode: 0o600,
+      flush: true,
+    });
+    renameSync(temporaryPath, recordPath);
+  } catch (error) {
+    if (!isFileSystemError(error)) throw error;
+
+    throw new CompilationRecordWriteError(
+      "The Compilation record could not be written.",
+      { cause: error },
+    );
+  }
+  return recordPath;
+}
+
+/**
+ * The Compilation that recordCompilation recorded in `stateDirectory`.
+ *
+ * @param {object} options
+ * @param {string} options.stateDirectory from readPinnedProject
+ * @param {PlanStateFileSystem} [options.fileSystem]
+ * @returns {string}
+ */
+export function readRecordedCompilation({
+  stateDirectory,
+  fileSystem = DEFAULT_FILE_SYSTEM,
+}) {
+  const recordPath = path.join(stateDirectory, COMPILATION_RECORD_NAME);
+  if (isAbsent(recordPath, fileSystem)) {
+    throw new CompilationNotRecordedError(
+      "No Compilation is recorded for this Project.",
+    );
+  }
+
+  const source = readLocalFile(recordPath, MAX_STATE_BYTES, fileSystem);
+  let record;
+  try {
+    record = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(source),
+    );
+  } catch (error) {
+    if (!(error instanceof SyntaxError || error instanceof TypeError)) {
+      throw error;
+    }
+
+    throw new PlanStateLocalError("The Compilation record is invalid.", {
+      cause: error,
+    });
+  }
+  if (
+    !isRecord(record) ||
+    !arraysEqual(Object.keys(record).sort(), ["compilation_id", "format"]) ||
+    record.format !== COMPILATION_RECORD_FORMAT ||
+    !isUuidV7(record.compilation_id)
+  ) {
+    throw new PlanStateLocalError("The Compilation record is invalid.");
+  }
+  return record.compilation_id;
 }
 
 /** @param {string} value */

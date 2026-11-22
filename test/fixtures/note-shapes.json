@@ -1,0 +1,296 @@
+{
+  "about": "Examples of what the First Draft service accepts and refuses in each note field and in whole notes, written from the notes contract's rules. The service tests its own copy of these cases, and the CLI tests its shaping against this one. limit is a field's longest accepted length in characters.",
+  "fields": {
+    "kind": {
+      "accepted": ["unstated_request", "unclear_guidance", "wrong_output"],
+      "refused": ["", "unstated-request", "Wrong_output", "bug", "progress"]
+    },
+    "request": {
+      "accepted": [
+        "A weekly digest email of new movies",
+        "Members invite others by […]",
+        "Validation failed: Email has already been taken",
+        "[…] […] expected 3, got 4"
+      ],
+      "refused": [
+        "Send mail to sam@example.com",
+        "Use the 'owner' role",
+        "Setting \"secret value\"",
+        "run `make`",
+        "it's broken",
+        "DATABASE_URL=postgres://db failed",
+        "Read /tmp/sample.log",
+        "see https://example.com",
+        "path C:\\Users",
+        "token abcdefghijklmnopqrstuvwxyz",
+        "two\nlines",
+        "two\rlines",
+        "two\u2028lines",
+        "two\u2029lines",
+        "two\u0085lines",
+        "one\ttab"
+      ],
+      "limit": 300
+    },
+    "workaround": {
+      "accepted": ["Left it for later", "Wrote a […] field instead"],
+      "refused": [
+        "Set TOKEN=abc in […]",
+        "Moved it to app/models",
+        "Used 'admin'"
+      ],
+      "limit": 300
+    },
+    "unclear": {
+      "accepted": [
+        "It never says whether a role can be empty",
+        "It names no fix"
+      ],
+      "refused": ["It says `role: owner`", "See references/plan/policies.md"],
+      "limit": 300
+    },
+    "expected": {
+      "accepted": ["Only the owner edits a movie", "The Plan is valid"],
+      "refused": ["owner_id == current_user.id", "scope = Movie.mine"],
+      "limit": 300
+    },
+    "actual": {
+      "accepted": ["Any member can edit it", "Analysis refused it"],
+      "refused": ["raise 'not allowed'", "user@example.com could edit"],
+      "limit": 300
+    },
+    "page": {
+      "accepted": [
+        "SKILL.md",
+        "references/interview.md",
+        "references/plan/policies.md",
+        "references/plan/policies.md#roles",
+        "references/modeling-guide.md#state_machines-2"
+      ],
+      "refused": [
+        "",
+        "../SKILL.md",
+        "references/../SKILL.md",
+        "/Users/sam/skills/SKILL.md",
+        "references/plan/policies",
+        "references/plan/policies.txt",
+        "references\\plan\\policies.md",
+        "references/plan policies.md",
+        "references//policies.md",
+        "SKILL.md#",
+        "SKILL.md#a.b",
+        "SKILL.md#roles#more",
+        "https://example.com/SKILL.md"
+      ],
+      "limit": 200
+    },
+    "code": {
+      "accepted": [
+        "invalid_output_path",
+        "report_rejected",
+        "foundation_plan.identity.reserved_constant_collision",
+        "x1.y2_z"
+      ],
+      "refused": [
+        "",
+        "Foundation_plan.identity",
+        "foundation-plan.identity",
+        "foundation_plan..identity",
+        ".identity",
+        "identity.",
+        "invalid output path",
+        "foundation_plan/identity",
+        "Rails/Delegate"
+      ],
+      "limit": 120
+    },
+    "source": {
+      "accepted": ["analysis", "generated_code"],
+      "refused": ["", "Analysis", "generated-code", "code", "plan"]
+    },
+    "compilation_id": {
+      "accepted": [
+        "01900000-0000-7000-8000-000000000001",
+        "0190ab12-cdef-7abc-9def-0123456789ab"
+      ],
+      "refused": [
+        "",
+        "0190AB12-CDEF-7ABC-9DEF-0123456789AB",
+        "01900000-0000-4000-8000-000000000001",
+        "01900000-0000-7000-c000-000000000001",
+        "01900000000070008000000000000001",
+        "not-a-uuid"
+      ]
+    },
+    "file": {
+      "accepted": [
+        "app/models/movie.rb",
+        "app/models/movie.rb:12",
+        "app/views/movies/_form.html.erb:9",
+        "db/migrate/20261121000000_create_movies.rb",
+        "Gemfile",
+        ".github/workflows/ci.yml",
+        "./app/models/movie.rb"
+      ],
+      "refused": [
+        "",
+        "/Users/sam/app/models/movie.rb",
+        "../secrets.rb",
+        "app/../config/master.key",
+        "app/models/movie.rb:12:in 'Movie#rate'",
+        "app/models/movie.rb:12:3",
+        "app/models/movie.rb:",
+        "app/models/movie.rb:12345678",
+        "app\\models\\movie.rb",
+        "app/models/my movie.rb",
+        "app//models/movie.rb",
+        "app/models/",
+        "C:/Users/sam/movie.rb"
+      ],
+      "limit": 300
+    }
+  },
+  "notes": {
+    "accepted": [
+      {
+        "kind": "unstated_request",
+        "request": "A weekly digest email of new movies"
+      },
+      {
+        "kind": "unstated_request",
+        "request": "Members invite others by […]",
+        "workaround": "Left it for later"
+      },
+      {
+        "kind": "unclear_guidance",
+        "page": "SKILL.md",
+        "unclear": "It never says when to push"
+      },
+      {
+        "kind": "unclear_guidance",
+        "code": "foundation_plan.identity.reserved_constant_collision",
+        "unclear": "It names no fix"
+      },
+      {
+        "kind": "unclear_guidance",
+        "page": "references/plan/policies.md#roles",
+        "code": "invalid_output_path",
+        "unclear": "It never says whether a role can be empty",
+        "workaround": "Wrote a […] field instead"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "code": "foundation_plan.identity.reserved_constant_collision",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it",
+        "workaround": "Renamed the entity"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "expected": "Only the owner edits a movie",
+        "actual": "Any member can edit it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "file": "app/policies/movie_policy.rb:12",
+        "expected": "Only the owner edits a movie",
+        "actual": "Any member can edit it",
+        "workaround": "Checked the owner in the policy"
+      }
+    ],
+    "refused": [
+      {},
+      { "request": "A weekly digest email" },
+      { "kind": "bug", "request": "A weekly digest email" },
+      { "kind": "unstated_request" },
+      { "kind": "unstated_request", "workaround": "Left it for later" },
+      {
+        "kind": "unstated_request",
+        "request": "A weekly digest email",
+        "page": "SKILL.md"
+      },
+      { "kind": "unstated_request", "request": "Use the 'owner' role" },
+      { "kind": "unclear_guidance", "unclear": "It names no fix" },
+      { "kind": "unclear_guidance", "page": "SKILL.md" },
+      {
+        "kind": "unclear_guidance",
+        "page": "../SKILL.md",
+        "unclear": "It names no fix"
+      },
+      {
+        "kind": "unclear_guidance",
+        "code": "invalid_output_path",
+        "unclear": "It names no fix",
+        "file": "app/models/movie.rb"
+      },
+      {
+        "kind": "wrong_output",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "plan",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "expected": "The Plan is valid"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "file": "app/models/movie.rb",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "code": "invalid_output_path",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "file": "/Users/sam/app/models/movie.rb",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      }
+    ]
+  }
+}

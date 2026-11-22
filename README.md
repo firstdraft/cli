@@ -99,7 +99,7 @@ The published package:
 - has no runtime dependencies or install scripts;
 - sends nothing in the background or beyond the command the caller runs. [What the CLI sends](docs/commands.md#what-the-cli-sends)
   lists each command's requests and their `FirstDraft-Client` header: CLI and plugin versions, agent, and operating
-  system. `report` sends nothing while reports are off and prints its exact report before sending it;
+  system. `report` and `note` send nothing while reports are off and print exactly what they send before sending it;
 - makes no update check of its own: its update line comes from First Draft's answer to the command;
 - reads Bearer credentials from the environment or its private `firstdraft login` credentials file; and
 - carries npm provenance linking registry bytes to its GitHub workflow and commit.

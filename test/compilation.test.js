@@ -297,6 +297,10 @@ test("compilation download distinguishes Head and Plan provenance without starti
   assert.equal(body.compilation.head_source_sha256, RETAINED_HEAD);
   assert.equal(body.output.path, output);
   assert.equal(body.output.file_count, 1);
+  assert.equal(
+    readFileSync(path.join(cwd, ".firstdraft", "compilation.json"), "utf8"),
+    compilationRecord(),
+  );
 });
 
 test("compilation download adopts the current directory without starting work", async (context) => {
@@ -368,6 +372,19 @@ test("compilation download adopts the current directory without starting work", 
   );
   assert.equal(existsSync(path.join(cwd, ".firstdraft/state.json")), false);
   assert.equal(existsSync(path.join(cwd, "design")), false);
+  // The record sits beside the archived state, where reports from the
+  // application root find it, and not among the generated files.
+  assert.equal(
+    readFileSync(
+      path.join(cwd, ".firstdraft/design/.firstdraft/compilation.json"),
+      "utf8",
+    ),
+    compilationRecord(),
+  );
+  assert.equal(
+    existsSync(path.join(cwd, ".firstdraft/compilation.json")),
+    false,
+  );
 });
 
 test("download requires succeeded status and validates historical Head provenance", async (context) => {
@@ -758,6 +775,11 @@ function authenticationProblem() {
     }),
     { status: 401, headers: { "Content-Type": "application/problem+json" } },
   );
+}
+
+/** The record a download leaves, naming the Compilation whose code it wrote. */
+function compilationRecord() {
+  return `{\n  "format": "firstdraft.cli-compilation/1",\n  "compilation_id": "${COMPILATION_ID}"\n}\n`;
 }
 
 /** @param {import("node:test").TestContext} context */

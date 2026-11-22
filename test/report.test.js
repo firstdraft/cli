@@ -90,8 +90,15 @@ test("report help lists both reports and each report's options", async () => {
 
 test("report progress validates its arguments before any request", async () => {
   for (const argv of [
-    ["report", "progress", "--step", "setup"],
     ["report", "progress", "not-a-uuid", "--step", "setup"],
+    [
+      "report",
+      "progress",
+      "0190000A-0000-7000-8000-000000009101",
+      "--step",
+      "setup",
+    ],
+    ["report", "progress", "--step", "setup", "--examples", "x"],
     ["report", "progress", COMPILATION_ID],
     ["report", "progress", COMPILATION_ID, "--step", "canary"],
     [...PROGRESS, "--step", "setup"],
@@ -835,6 +842,123 @@ test("reports run from an adopted application root find the archived Project", a
     ["app/models/movie.rb:12"],
   );
 });
+
+test("a report without an id names the Compilation the CLI recorded", async (context) => {
+  const recorded = "01900000-0000-7000-8000-000000009102";
+  const root = temporaryDirectory(context);
+  const design = path.join(root, ".firstdraft", "design", ".firstdraft");
+  mkdirSync(design, { recursive: true });
+  writeFileSync(
+    path.join(design, "state.json"),
+    `${JSON.stringify({
+      format: "firstdraft.cli-state/1",
+      project_id: PROJECT_ID,
+      api_url: PRODUCTION,
+      foundation_plan_etag: '"sha256:' + "1".repeat(64) + '"',
+    })}\n`,
+  );
+  writeRecord(design, recorded);
+
+  for (const [argv, expected] of /** @type {[string[], string][]} */ ([
+    [["report", "progress", "--step", "setup"], recorded],
+    [["report", "failure", "--kind", "boot_error"], recorded],
+    // A given id takes the place of the recorded one.
+    [PROGRESS, COMPILATION_ID],
+  ])) {
+    /** @type {string[]} */
+    const urls = [];
+    const result = await invoke(argv, {
+      cwd: root,
+      fetchFunction: reportsOn(async (input) => {
+        urls.push(String(input));
+        return new Response(
+          JSON.stringify({
+            [String(input).endsWith("/progress-reports")
+              ? "progress_report"
+              : "failure_report"]: { id: STORED_ID, compilation_id: expected },
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(urls.length, 1);
+    assert.match(
+      String(urls[0]),
+      new RegExp(`/v1/projects/${PROJECT_ID}/compilations/${expected}/`),
+    );
+    assert.match(result.stdout, new RegExp(`for Compilation ${expected} to `));
+    assert.ok(result.stdout.endsWith("Sent.\n"));
+  }
+});
+
+test("a report with no Compilation given or recorded sends nothing", async (context) => {
+  const cwd = projectDirectory(context, PRODUCTION);
+  for (const argv of [
+    ["report", "progress", "--step", "setup"],
+    ["report", "failure", "--kind", "boot_error"],
+  ]) {
+    /** @type {string[]} */
+    const urls = [];
+    const result = await invoke(argv, {
+      cwd,
+      fetchFunction: reportsOn(async (input) => {
+        urls.push(String(input));
+        return acknowledgment("progress_report");
+      }),
+    });
+    assert.deepEqual(urls, []);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.deepEqual(JSON.parse(result.stderr), {
+      error: "compilation_not_recorded",
+      detail:
+        "No Compilation is recorded for this Project, so nothing was sent. 'firstdraft plan compile' and 'firstdraft compilation download' record the one whose code they write; to name one yourself, put its compilation.id right after 'report progress' or 'report failure'.",
+    });
+
+    // With reports off, the account read settles it first.
+    const off = await invoke(argv, {
+      cwd,
+      fetchFunction: async () => account("off"),
+    });
+    assert.deepEqual(off, { status: 0, stdout: REPORTS_OFF, stderr: "" });
+  }
+});
+
+test("a malformed Compilation record is reported, and nothing is sent", async (context) => {
+  const cwd = projectDirectory(context, PRODUCTION);
+  for (const source of [
+    "{canary\n",
+    `${JSON.stringify({ format: "firstdraft.cli-compilation/1", compilation_id: "canary" })}\n`,
+    `${JSON.stringify({ format: "firstdraft.cli-state/1", compilation_id: COMPILATION_ID })}\n`,
+    `${JSON.stringify({ format: "firstdraft.cli-compilation/1", compilation_id: COMPILATION_ID, canary: 1 })}\n`,
+  ]) {
+    writeFileSync(path.join(cwd, ".firstdraft", "compilation.json"), source);
+    const result = await invoke(["report", "progress", "--step", "setup"], {
+      cwd,
+      fetchFunction: reportsOn(async () =>
+        assert.fail("No report was expected"),
+      ),
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(JSON.parse(result.stderr).error, "local_input_unreadable");
+    assert.doesNotMatch(result.stderr, /canary/);
+  }
+});
+
+/**
+ * Writes the record that plan compile and compilation download leave.
+ *
+ * @param {string} stateDirectory
+ * @param {string} compilationId
+ */
+function writeRecord(stateDirectory, compilationId) {
+  writeFileSync(
+    path.join(stateDirectory, "compilation.json"),
+    `${JSON.stringify({ format: "firstdraft.cli-compilation/1", compilation_id: compilationId }, null, 2)}\n`,
+  );
+}
 
 /**
  * Answers the account read at the pinned production origin with reports on,
