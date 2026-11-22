@@ -598,9 +598,10 @@ format of `state.json`, and it sits in the same planning folder, whose ignore fi
 
 The CLI writes it with mode `0600` through a temporary file and a rename, replacing the previous record, so it names
 the Compilation whose code the CLI wrote last for the Project, wherever that code went. `plan compile --github` writes
-no code into the folder and records nothing. If the record cannot be written, the command keeps its result, and one
-`First Draft:` line on standard error names the Compilation to pass to later reports and notes. A record that is not
-exactly this shape stops a report or note with `local_input_unreadable`.
+no code into the folder and records nothing. If the record cannot be written, the command keeps its result, any earlier
+record stays as it was, and one `First Draft:` line on standard error names the Compilation to pass to later reports
+and notes. Only a report, or a note about generated code, that names no Compilation reads the record; one that is not
+exactly this shape stops it with `local_input_unreadable`.
 
 ### Publish through GitHub
 
@@ -783,7 +784,8 @@ Free text keeps plain words only: the CLI takes the first line, replaces everyth
 quote character (`'`, `"`, or a backtick, including an apostrophe inside a word) to the end of the line with one `[…]`,
 replaces each earlier word that contains `=`, `/`, `\`, or `@` or is longer than 24 characters with `[…]`, and keeps the
 words that fit the length limit. A `lint_failure` therefore sends no rule name, and a rerun command that is not an
-RSpec run is left out. The CLI reads no file for a failure report and attaches no diff or environment variable, but
+RSpec run is left out. Besides the Project's state and the Compilation record, the CLI reads no file for a failure
+report and attaches no diff or environment variable, but
 the plain words of a message or fix summary it is given can still quote code, so pass only text that may be sent.
 
 Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push. Unless
@@ -863,8 +865,10 @@ line and exits 0, having checked nothing else. With reports on:
 First Draft answers `403 reports_off` when the person turned reports off after the account read, and the command writes
 the reports-off line and exits 0. A refusal, such as `invalid_note`, `compilation_not_found`, or
 `compilation_not_succeeded`, is `note_rejected`; a network failure or server error is `note_unavailable`; and an
-account's limit of 30 notes an hour is `rate_limited`. The command never retries. It reads no file and no conversation:
-a note holds only what its options give, so pass only text that may be sent, and never code from the person's project.
+account's limit of 30 notes an hour is `rate_limited`. The command never retries. It reads the Project's state, and the
+Compilation record only for a note about generated code without `--compilation-id`; it reads no file of the
+application and no conversation. A note holds only what its options give, plus that recorded ID, so pass only text
+that may be sent, and never code from the person's project.
 
 ## Service endpoints
 

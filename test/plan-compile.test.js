@@ -408,7 +408,7 @@ test("a Compilation record that cannot be written leaves the result and says so"
   assert.equal(
     result.stderr,
     `First Draft: Analyzing Foundation Plan...\nFirst Draft: Foundation Plan analysis valid.\n` +
-      `First Draft: the code is in place, but the CLI could not record Compilation ${COMPILATION_ID} for later reports and notes. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
+      `First Draft: the code is in place, but the CLI could not record Compilation ${COMPILATION_ID}, so later reports and notes may name an earlier Compilation or none. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
   );
 });
 

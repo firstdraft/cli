@@ -4147,7 +4147,7 @@ function recordWrittenCompilation(stderr, cwd, compilationId) {
     if (!(error instanceof CompilationRecordWriteError)) throw error;
 
     stderr.write(
-      `First Draft: the code is in place, but the CLI could not record Compilation ${compilationId} for later reports and notes. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
+      `First Draft: the code is in place, but the CLI could not record Compilation ${compilationId}, so later reports and notes may name an earlier Compilation or none. Name it in each: put it right after 'report progress' or 'report failure', and pass it with --compilation-id to a note about generated code.\n`,
     );
   }
 }
