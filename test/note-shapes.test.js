@@ -9,9 +9,8 @@ import {
   noteBody,
 } from "../src/commands/note.js";
 
-// Examples written from the notes contract's rules. The First Draft service
-// keeps its own copy of the same cases; when the two are reconciled into one
-// file, copy it here unchanged so both sides test the same strings.
+// A copy of the service's note examples, kept unchanged so the two sides test
+// the same strings. Refresh it whenever the service's copy changes.
 const shapes = JSON.parse(
   readFileSync(new URL("fixtures/note-shapes.json", import.meta.url), "utf8"),
 );
