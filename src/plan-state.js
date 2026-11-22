@@ -83,9 +83,9 @@ function pinnedProjectDirectory(cwd, fileSystem) {
   return adoptedRoot ? path.join(cwd, ".firstdraft", "design") : cwd;
 }
 
-// The Compilation whose code the CLI last wrote for the Project, kept in its
-// own file beside state.json so the state format stays as it is. It moves
-// with the planning state into an adopted root's archive.
+// The Compilation whose code the CLI last recorded writing for the Project,
+// kept in its own file beside state.json so the state format stays as it
+// is. It moves with the planning state into an adopted root's archive.
 const COMPILATION_RECORD_NAME = "compilation.json";
 const COMPILATION_RECORD_FORMAT = "firstdraft.cli-compilation/1";
 

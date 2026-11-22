@@ -251,8 +251,8 @@ Environment:
 The command first reads the account at the origin pinned by a successful plan
 push. With reports on, it prints the exact report, then sends it once there.
 With reports off, it sends no report and still exits 0. Without
-<compilation-id>, the report names the Compilation whose code plan compile or
-compilation download last wrote for the Project.
+<compilation-id>, the report names the Compilation the CLI last recorded for
+the Project when plan compile or compilation download wrote its code.
 `;
 
 const REPORT_FAILURE_HELP = `First Draft CLI
@@ -284,8 +284,9 @@ version numbers, and the plain words of free text. It first reads the account
 at the origin pinned by a successful plan push. With reports on, it prints the
 exact report and what it left out, then sends it once there. With reports off,
 it sends no report and still exits 0. Run it from the generated application's
-root. Without <compilation-id>, the report names the Compilation whose code
-plan compile or compilation download last wrote for the Project.
+root. Without <compilation-id>, the report names the Compilation the CLI last
+recorded for the Project when plan compile or compilation download wrote its
+code.
 `;
 
 const NOTE_HELP = `First Draft CLI
@@ -374,7 +375,8 @@ Options:
 
 ${NOTE_ENVIRONMENT}
 Without --compilation-id, a note about generated code names the Compilation
-whose code plan compile or compilation download last wrote for the Project.
+the CLI last recorded for the Project when plan compile or compilation
+download wrote its code.
 ${NOTE_TRAILER}`;
 
 const PLAN_HELP = `First Draft CLI

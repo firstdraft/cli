@@ -298,7 +298,7 @@ when `FIRSTDRAFT_PLUGIN_VERSION` holds a version. When First Draft names a newer
   Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates, and notes about problems with First Draft itself.
   Progress: run 'firstdraft report progress --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.
   Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.
-  Each report names the Compilation whose code 'firstdraft plan compile' or 'firstdraft compilation download' last wrote for this Project, which the CLI records; to name a different one, put its compilation.id right after 'report progress' or 'report failure'.
+  Each report names the Compilation that the CLI last recorded for this Project when 'firstdraft plan compile' or 'firstdraft compilation download' wrote its code; to name a different one, put its compilation.id right after 'report progress' or 'report failure'.
   Run each report and note command from the generated application's root, or from the Project's directory before the code is written or after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.
   Notes: send a note only when a problem with First Draft cost you a real detour and is likely to happen again, never for routine debugging, and only after the Plan has been pushed once with 'firstdraft plan push' or 'firstdraft plan compile'.
   Unstated request: when the person asked for something the Plan could not state, run 'firstdraft note unstated_request --request <text>', adding --workaround <text> for what you wrote in the Plan instead or left for later.
@@ -760,7 +760,7 @@ firstdraft report failure --kind spec_failure \
 The full forms are `firstdraft report progress [<compilation-id>] --step <step> [counts]` and
 `firstdraft report failure [<compilation-id>] --kind <kind> [options]`. A report names one Compilation: the
 `<compilation-id>` given, which is `compilation.id` from `plan compile`, or else the one the CLI
-[recorded](#record-the-compilation-whose-code-was-written) when it last wrote a Compilation's code for the Project.
+[last recorded](#record-the-compilation-whose-code-was-written) for the Project when it wrote a Compilation's code.
 So an agent can report in a later session, after another Compile, or during maintenance without carrying the ID. With
 none given and none recorded, the command sends nothing and ends with `compilation_not_recorded`. `--step` is `setup`, `specs_first_run`,
 `behavior_written`, `specs_passing`, or `preview_started`. The counts are optional whole numbers of at most 1000000:
