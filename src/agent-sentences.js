@@ -78,14 +78,25 @@ export function rejectedLoginLines(origin, environmentVariable) {
 
 /**
  * Printed when the person said yes to reports, and only then: the agent of a
- * person who said no hears nothing about reports. Any command that tells the
- * agent about reports prints these same sentences.
+ * person who said no hears nothing about reports or notes. One yes covers
+ * both, so any command that tells the agent about reports prints these same
+ * sentences, followed by NOTES_ON_LINES.
  */
 export const REPORTS_ON_LINES = Object.freeze([
-  "Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates.",
-  "Progress: run 'firstdraft report progress <compilation-id> --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.",
-  "Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure <compilation-id> --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.",
-  "Use compilation.id from 'firstdraft plan compile', and run each report command from the generated application's root, or from the Project's directory after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.",
+  "Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates, and notes about problems with First Draft itself.",
+  "Progress: run 'firstdraft report progress --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.",
+  "Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.",
+  "Each report names the Compilation that the CLI last recorded for this Project when 'firstdraft plan compile' or 'firstdraft compilation download' wrote its code; to name a different one, put its compilation.id right after 'report progress' or 'report failure'.",
+  "Run each report and note command from the generated application's root, or from the Project's directory before the code is written or after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.",
+]);
+
+/** The notes half of what REPORTS_ON_LINES introduces, printed right after it. */
+export const NOTES_ON_LINES = Object.freeze([
+  "Notes: send a note only when a problem with First Draft cost you a real detour and is likely to happen again, never for routine debugging, and only after the Plan has been pushed once with 'firstdraft plan push' or 'firstdraft plan compile'.",
+  "Unstated request: when the person asked for something the Plan could not state, run 'firstdraft note unstated_request --request <text>', adding --workaround <text> for what you wrote in the Plan instead or left for later.",
+  "Unclear guidance: when a Skill page or a diagnostic was unclear, run 'firstdraft note unclear_guidance --page <page> --unclear <text>', where <page> is the page's path inside the Skill, such as SKILL.md or references/plan/policies.md; for a diagnostic code or a CLI error value, give --code <code> in place of or beside --page, and add --workaround <text> for what you did instead.",
+  "Wrong output: when analysis or generated code was wrong, run 'firstdraft note wrong_output --source <source> --expected <text> --actual <text>', where <source> is analysis or generated_code; a note about generated code names the recorded Compilation as a report does, and 'firstdraft note wrong_output --help' lists --code, --file, and --workaround.",
+  "Write each note in your own plain words, at most 300 characters a field: never secrets, credentials, personal data, or code from the person's project.",
 ]);
 
 /**

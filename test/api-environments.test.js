@@ -36,6 +36,17 @@ const REMOTE_COMMANDS = [
     "--error-class",
     "Rails/Delegate",
   ],
+  ["note", "unstated_request", "--request", "A weekly digest email"],
+  [
+    "note",
+    "wrong_output",
+    "--source",
+    "generated_code",
+    "--expected",
+    "Only the owner edits",
+    "--actual",
+    "Anyone edits",
+  ],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {

@@ -47,7 +47,7 @@ const FRAME = new RegExp(
   String.raw`^(?:\./)?((?:app|lib|config|db|spec)/${SAFE_PATH}):(\d{1,7})(?::in .*)?$`,
 );
 // Checked in every argument and frame: spec/.. spec/models has one too.
-const PARENT_SEGMENT = /(?:^|[/\s:])\.\.(?=[/\s:]|$)/;
+export const PARENT_SEGMENT = /(?:^|[/\s:])\.\.(?=[/\s:]|$)/;
 // 4.0.6, 8.1.4.1, 8.2.0.beta1, 3.4.0-preview2
 const VERSION_NUMBER =
   /^\d{1,4}(?:\.\d{1,4}){0,3}(?:[.-](?:alpha|beta|rc|pre|preview)\d{0,3})?$/;
@@ -353,17 +353,18 @@ export function plainWords(text, limit) {
  * @typedef {object} SendReportOptions
  * @property {string} origin
  * @property {{method: string, path: string}} route
- * @property {string} projectId
- * @property {string} compilationId
+ * @property {Record<string, string>} parameters the route's path parameters
+ * @property {string | null} compilationId the Compilation the stored report
+ *   or note names, which a note may leave null
  * @property {string} body the exact JSON text that was printed
- * @property {string} wrapper the key, such as progress_report, under which
- *   First Draft acknowledges the stored report with its id and Compilation
+ * @property {string} wrapper the key, such as progress_report or note, under
+ *   which First Draft acknowledges what it stored with its id and Compilation
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
  */
 
 /**
- * Sends one report once. A report is never retried: First Draft may already
+ * Sends one report or note once. Neither is retried: First Draft may already
  * hold it when the outcome is unconfirmed.
  *
  * @param {SendReportOptions} options
@@ -372,17 +373,14 @@ export function plainWords(text, limit) {
 export async function sendReport({
   origin,
   route,
-  projectId,
+  parameters,
   compilationId,
   body,
   wrapper,
   fetchFunction = globalThis.fetch,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
 }) {
-  const endpoint = serviceEndpoint(route, origin, {
-    project_id: projectId,
-    compilation_id: compilationId,
-  });
+  const endpoint = serviceEndpoint(route, origin, parameters);
   let response;
   try {
     response = await sendRequest(fetchFunction, endpoint, {
@@ -448,7 +446,7 @@ function isRecord(value) {
 
 /**
  * @param {Record<string, unknown>} report
- * @param {string} compilationId
+ * @param {string | null} compilationId
  */
 function isStoredReport(report, compilationId) {
   return (

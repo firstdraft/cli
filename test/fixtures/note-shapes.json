@@ -1,0 +1,445 @@
+{
+  "about": "Examples of what the service accepts and refuses in each field of a note, and in whole notes. The service tests Project::Note against this file, and the CLI tests its own shaping against a copy. A compilation_id that does not fit is answered with invalid_compilation_id; every other refusal here is invalid_note. Every example here is a string; the service also refuses a field that is not one. docs/architecture/reference/README.md#current-account-and-report-http states the rules.",
+  "fields": {
+    "kind": {
+      "accepted": ["unstated_request", "unclear_guidance", "wrong_output"],
+      "refused": [
+        "",
+        "praise",
+        "Unstated_request",
+        "unstated request",
+        "wrong-output",
+        "unstated-request",
+        "Wrong_output",
+        "bug",
+        "progress"
+      ]
+    },
+    "request": {
+      "accepted": [
+        "A waitlist when an event is full",
+        "Let guests pay at the door […]",
+        "Send a reminder 24 hours before the party, and again […]",
+        "A weekly digest email of new movies",
+        "Members invite others by […]",
+        "Validation failed: Email has already been taken",
+        "[…] […] expected 3, got 4"
+      ],
+      "refused": [
+        "Import guests from 'Airtable'",
+        "Sync with https://example.com",
+        "Email sam@example.com when a guest signs up",
+        "two\nlines",
+        "token abcdefghijklmnopqrstuvwxyz",
+        "Send mail to sam@example.com",
+        "Use the 'owner' role",
+        "Setting \"secret value\"",
+        "run `make`",
+        "it's broken",
+        "DATABASE_URL=postgres://db failed",
+        "Read /tmp/sample.log",
+        "see https://example.com",
+        "path C:\\Users",
+        "two\rlines",
+        "two\u2028lines",
+        "two\u2029lines",
+        "two\u0085lines",
+        "one\ttab"
+      ],
+      "limit": 300
+    },
+    "workaround": {
+      "accepted": [
+        "Left the waitlist for later in the README.",
+        "Used a yes-or-no Field instead […]",
+        "Left it for later",
+        "Wrote a […] field instead"
+      ],
+      "refused": [
+        "Set API_KEY=abc in […]",
+        "Wrote it in app/models/event.rb",
+        "Ran `bin/rails db:seed`",
+        "Set TOKEN=abc in […]",
+        "Moved it to app/models",
+        "Used 'admin'"
+      ],
+      "limit": 300
+    },
+    "unclear": {
+      "accepted": [
+        "It does not say whether a Reference can point at the Account Entity.",
+        "The fix names a key the Plan does not have.",
+        "It never says whether a role can be empty",
+        "It names no fix"
+      ],
+      "refused": [
+        "It says \"use owner\" without an example",
+        "two\u2028lines",
+        "one\ttab",
+        "It says `role: owner`",
+        "See references/plan/policies.md"
+      ],
+      "limit": 300
+    },
+    "expected": {
+      "accepted": [
+        "Deleting a Movie deletes its Credits",
+        "The index page lists every Post.",
+        "Only the owner edits a movie",
+        "The Plan is valid"
+      ],
+      "refused": [
+        "Visit /posts to see the list",
+        "It returns 'none'",
+        "owner_id == current_user.id",
+        "scope = Movie.mine"
+      ],
+      "limit": 300
+    },
+    "actual": {
+      "accepted": [
+        "Deleting a Movie raised […]",
+        "The page showed 3 of 4 posts",
+        "Any member can edit it",
+        "Analysis refused it"
+      ],
+      "refused": [
+        "Raised NoMethodError at app/models/post.rb:12",
+        "Failed in C:\\app",
+        "two\rlines",
+        "raise 'not allowed'",
+        "user@example.com could edit"
+      ],
+      "limit": 300
+    },
+    "page": {
+      "accepted": [
+        "SKILL.md",
+        "references/modeling-guide.md",
+        "references/modeling-guide.md#associations",
+        "references/foundation-plan-023.md#field_types",
+        "references/interview.md",
+        "references/plan/policies.md",
+        "references/plan/policies.md#roles",
+        "references/modeling-guide.md#state_machines-2"
+      ],
+      "refused": [
+        "SKILL",
+        "",
+        "references/modeling-guide.txt",
+        "/references/interview.md",
+        "../SKILL.md",
+        "references/../SKILL.md",
+        "references/interview.md#",
+        "references/interview.md#a.b",
+        "references/interview.md#a b",
+        "https://example.com/SKILL.md",
+        "references\\interview.md",
+        "SKILL.md\n",
+        "/Users/sam/skills/SKILL.md",
+        "references/plan/policies",
+        "references/plan/policies.txt",
+        "references\\plan\\policies.md",
+        "references/plan policies.md",
+        "references//policies.md",
+        "SKILL.md#",
+        "SKILL.md#a.b",
+        "SKILL.md#roles#more"
+      ],
+      "limit": 200
+    },
+    "code": {
+      "accepted": [
+        "foundation_plan.association.cycle",
+        "reports_off",
+        "compilation.render_failed",
+        "invalid_note",
+        "invalid_output_path",
+        "report_rejected",
+        "foundation_plan.identity.reserved_constant_collision",
+        "x1.y2_z"
+      ],
+      "refused": [
+        "",
+        "Foundation_plan.association.cycle",
+        "foundation-plan.association.cycle",
+        "foundation_plan..cycle",
+        ".cycle",
+        "cycle.",
+        "foundation_plan.association.cycle extra",
+        "reports_off\n",
+        "Foundation_plan.identity",
+        "foundation-plan.identity",
+        "foundation_plan..identity",
+        ".identity",
+        "identity.",
+        "invalid output path",
+        "foundation_plan/identity",
+        "Rails/Delegate"
+      ],
+      "limit": 120
+    },
+    "source": {
+      "accepted": ["analysis", "generated_code"],
+      "refused": ["", "Analysis", "generated code", "compiler", "generated-code", "code", "plan"]
+    },
+    "compilation_id": {
+      "accepted": [
+        "01900000-0000-7000-8000-000000000002",
+        "019a8c3e-5f1b-7c2d-8e4f-0123456789ab",
+        "01900000-0000-7000-8000-000000000001",
+        "0190ab12-cdef-7abc-9def-0123456789ab"
+      ],
+      "refused": [
+        "",
+        "01900000-0000-4000-8000-000000000002",
+        "01900000-0000-7000-8000-00000000000A",
+        "01900000000070008000000000000002",
+        "not-a-uuid",
+        "0190AB12-CDEF-7ABC-9DEF-0123456789AB",
+        "01900000-0000-4000-8000-000000000001",
+        "01900000-0000-7000-c000-000000000001",
+        "01900000000070008000000000000001"
+      ]
+    },
+    "file": {
+      "accepted": [
+        "Gemfile",
+        "app/models/post.rb",
+        "app/models/post.rb:12",
+        "app/views/posts/_form.html.erb:7",
+        "spec/system/posts_spec.rb:42",
+        "app/models/movie.rb",
+        "app/models/movie.rb:12",
+        "app/views/movies/_form.html.erb:9",
+        "db/migrate/20261121000000_create_movies.rb",
+        ".github/workflows/ci.yml",
+        "./app/models/movie.rb"
+      ],
+      "refused": [
+        "",
+        "/app/models/post.rb",
+        "app/../config/master.key",
+        "app/models/post.rb:12:3",
+        "app/models/post.rb:",
+        "app/models/post.rb:12345678",
+        "app/models/my post.rb",
+        "app\\models\\post.rb",
+        "~/app/models/post.rb",
+        "C:/app/models/post.rb",
+        "/Users/sam/app/models/movie.rb",
+        "../secrets.rb",
+        "app/models/movie.rb:12:in 'Movie#rate'",
+        "app/models/movie.rb:12:3",
+        "app/models/movie.rb:",
+        "app/models/movie.rb:12345678",
+        "app\\models\\movie.rb",
+        "app/models/my movie.rb",
+        "app//models/movie.rb",
+        "app/models/",
+        "C:/Users/sam/movie.rb"
+      ],
+      "limit": 300
+    }
+  },
+  "notes": {
+    "accepted": [
+      {"kind": "unstated_request", "request": "A waitlist when an event is full"},
+      {
+        "kind": "unstated_request",
+        "request": "A waitlist when an event is full",
+        "workaround": "Left the waitlist for later in the README."
+      },
+      {
+        "kind": "unclear_guidance",
+        "page": "references/modeling-guide.md#associations",
+        "unclear": "It does not say whether a Reference can point at the Account Entity."
+      },
+      {
+        "kind": "unclear_guidance",
+        "code": "foundation_plan.association.cycle",
+        "unclear": "The fix names a key the Plan does not have.",
+        "workaround": "Removed the Association."
+      },
+      {
+        "kind": "unclear_guidance",
+        "page": "SKILL.md",
+        "code": "reports_off",
+        "unclear": "It does not say what to tell the person."
+      },
+      {"kind": "wrong_output", "source": "analysis", "expected": "No diagnostic", "actual": "A cycle diagnostic"},
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "code": "foundation_plan.association.cycle",
+        "expected": "No diagnostic for a self Reference",
+        "actual": "A cycle diagnostic"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000002",
+        "expected": "Deleting a Movie deletes its Credits",
+        "actual": "Deleting a Movie raised […]"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000002",
+        "file": "app/models/movie.rb:12",
+        "expected": "Deleting a Movie deletes its Credits",
+        "actual": "Deleting a Movie raised […]",
+        "workaround": "Added the missing dependent option."
+      },
+      {"kind": "unstated_request", "request": "A weekly digest email of new movies"},
+      {"kind": "unstated_request", "request": "Members invite others by […]", "workaround": "Left it for later"},
+      {"kind": "unclear_guidance", "page": "SKILL.md", "unclear": "It never says when to push"},
+      {
+        "kind": "unclear_guidance",
+        "code": "foundation_plan.identity.reserved_constant_collision",
+        "unclear": "It names no fix"
+      },
+      {
+        "kind": "unclear_guidance",
+        "page": "references/plan/policies.md#roles",
+        "code": "invalid_output_path",
+        "unclear": "It never says whether a role can be empty",
+        "workaround": "Wrote a […] field instead"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "code": "foundation_plan.identity.reserved_constant_collision",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it",
+        "workaround": "Renamed the entity"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "expected": "Only the owner edits a movie",
+        "actual": "Any member can edit it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "file": "app/policies/movie_policy.rb:12",
+        "expected": "Only the owner edits a movie",
+        "actual": "Any member can edit it",
+        "workaround": "Checked the owner in the policy"
+      }
+    ],
+    "refused": [
+      {},
+      {"kind": "praise"},
+      {"kind": "unstated_request"},
+      {"kind": "unstated_request", "request": ""},
+      {"kind": "unstated_request", "request": "A waitlist", "page": "SKILL.md"},
+      {"kind": "unstated_request", "request": "A waitlist", "compilation_id": "01900000-0000-7000-8000-000000000002"},
+      {"kind": "unstated_request", "request": "Import from 'Airtable'"},
+      {"kind": "unclear_guidance", "unclear": "It does not say."},
+      {"kind": "unclear_guidance", "page": "SKILL.md"},
+      {"kind": "unclear_guidance", "page": "SKILL.md", "unclear": "It does not say.", "source": "analysis"},
+      {"kind": "wrong_output", "expected": "No diagnostic", "actual": "A cycle diagnostic"},
+      {"kind": "wrong_output", "source": "analysis", "expected": "No diagnostic"},
+      {"kind": "wrong_output", "source": "compiler", "expected": "No diagnostic", "actual": "A cycle diagnostic"},
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "compilation_id": "01900000-0000-7000-8000-000000000002",
+        "expected": "No diagnostic",
+        "actual": "A cycle diagnostic"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "file": "app/models/movie.rb",
+        "expected": "No diagnostic",
+        "actual": "A cycle diagnostic"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "expected": "Deleting a Movie deletes its Credits",
+        "actual": "Deleting a Movie raised […]"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000002",
+        "code": "foundation_plan.association.cycle",
+        "expected": "Deleting a Movie deletes its Credits",
+        "actual": "Deleting a Movie raised […]"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000002",
+        "file": "/Users/sam/app/app/models/movie.rb",
+        "expected": "Deleting a Movie deletes its Credits",
+        "actual": "Deleting a Movie raised […]"
+      },
+      {"request": "A weekly digest email"},
+      {"kind": "bug", "request": "A weekly digest email"},
+      {"kind": "unstated_request", "workaround": "Left it for later"},
+      {"kind": "unstated_request", "request": "A weekly digest email", "page": "SKILL.md"},
+      {"kind": "unstated_request", "request": "Use the 'owner' role"},
+      {"kind": "unclear_guidance", "unclear": "It names no fix"},
+      {"kind": "unclear_guidance", "page": "../SKILL.md", "unclear": "It names no fix"},
+      {
+        "kind": "unclear_guidance",
+        "code": "invalid_output_path",
+        "unclear": "It names no fix",
+        "file": "app/models/movie.rb"
+      },
+      {"kind": "wrong_output", "expected": "The Plan is valid", "actual": "Analysis refused it"},
+      {"kind": "wrong_output", "source": "plan", "expected": "The Plan is valid", "actual": "Analysis refused it"},
+      {"kind": "wrong_output", "source": "analysis", "expected": "The Plan is valid"},
+      {"kind": "wrong_output", "source": "analysis", "actual": "Analysis refused it"},
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "analysis",
+        "file": "app/models/movie.rb",
+        "expected": "The Plan is valid",
+        "actual": "Analysis refused it"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "code": "invalid_output_path",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      },
+      {
+        "kind": "wrong_output",
+        "source": "generated_code",
+        "compilation_id": "01900000-0000-7000-8000-000000000001",
+        "file": "/Users/sam/app/models/movie.rb",
+        "expected": "Only the owner edits",
+        "actual": "Anyone edits"
+      }
+    ]
+  }
+}

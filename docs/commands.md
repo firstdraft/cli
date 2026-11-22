@@ -7,32 +7,35 @@ The current `0.10.x` source line contains the auditable command shell, the agent
 login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize and private publish orchestration, retained-Compilation inspection and
-cancellation, the account's report setting, and progress and failure reports. It requires the service's `0.9.x` API
+cancellation, the account's report setting, progress and failure reports, and notes. It requires the service's `0.9.x` API
 contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
 
-| Command                               | Network | Purpose                                                     |
-| ------------------------------------- | ------- | ----------------------------------------------------------- |
-| `firstdraft start`                    | Yes     | Check versions, login, and reports before other work        |
-| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity  |
-| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                |
-| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities     |
-| `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin |
-| `firstdraft login --no-wait`          | Yes     | Start a device login for an agent and exit                  |
-| `firstdraft login --finish`           | Yes     | Finish that device login once the person approved           |
-| `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin             |
-| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                   |
-| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis           |
-| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder    |
-| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub            |
-| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                        |
-| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation    |
-| `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                |
-| `firstdraft account`                  | Yes     | Show whether the account sends reports                      |
-| `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come  |
-| `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code   |
+| Command                               | Network | Purpose                                                       |
+| ------------------------------------- | ------- | ------------------------------------------------------------- |
+| `firstdraft start`                    | Yes     | Check versions, login, and reports before other work          |
+| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity    |
+| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                  |
+| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities       |
+| `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin   |
+| `firstdraft login --no-wait`          | Yes     | Start a device login for an agent and exit                    |
+| `firstdraft login --finish`           | Yes     | Finish that device login once the person approved             |
+| `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin               |
+| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                     |
+| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis             |
+| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder      |
+| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub              |
+| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                          |
+| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation      |
+| `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                  |
+| `firstdraft account`                  | Yes     | Show whether the account sends reports                        |
+| `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come    |
+| `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code     |
+| `firstdraft note unstated_request`    | Yes     | Print, then send, a request the Plan could not state          |
+| `firstdraft note unclear_guidance`    | Yes     | Print, then send, a Skill page or diagnostic that was unclear |
+| `firstdraft note wrong_output`        | Yes     | Print, then send, analysis or generated code that was wrong   |
 
 ## Select an environment and authenticate
 
@@ -224,6 +227,7 @@ Beyond the header, a command sends only what it needs:
 | `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag               |
 | `plan status`, `compilation *`, `account` | Only the IDs in the request path                                 |
 | `report progress`, `report failure`       | An account read; with reports on, the report printed just before |
+| `note <kind>`                             | An account read; with reports on, the note printed just before   |
 
 ### Update line and refusals
 
@@ -287,15 +291,23 @@ when `FIRSTDRAFT_PLUGIN_VERSION` holds a version. When First Draft names a newer
   Ready: First Draft accepted this computer's login.
   ```
 
-- **Ready, reports on** (exit 0). The same two lines, then the sentences that say when to send reports and with which
-  command:
+- **Ready, reports on** (exit 0). The same two lines, then the sentences that say when to send reports and notes and
+  with which command. One yes covers both, so the agent of a person who said no hears about neither:
 
   ```text
-  Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates.
-  Progress: run 'firstdraft report progress <compilation-id> --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.
-  Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure <compilation-id> --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.
-  Use compilation.id from 'firstdraft plan compile', and run each report command from the generated application's root, or from the Project's directory after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.
+  Reports are on: this person agreed that you send First Draft progress and failure reports about the code it generates, and notes about problems with First Draft itself.
+  Progress: run 'firstdraft report progress --step <step>' when bin/setup finishes (setup), when the first spec run finishes (specs_first_run), when every item under the README's Behavior to write is written (behavior_written), when the specs pass (specs_passing), and when the preview starts (preview_started). Add the counts you have; 'firstdraft report progress --help' lists them.
+  Failure: when generated code fails in a way the README does not list, run 'firstdraft report failure --kind <kind>' once you have fixed it or stopped trying, where <kind> is setup_failure, spec_failure, boot_error, or lint_failure; 'firstdraft report failure --help' lists the other fields.
+  Each report names the Compilation that the CLI last recorded for this Project when 'firstdraft plan compile' or 'firstdraft compilation download' wrote its code; to name a different one, put its compilation.id right after 'report progress' or 'report failure'.
+  Run each report and note command from the generated application's root, or from the Project's directory before the code is written or after --output. Each prints what it sends: pass only text that may leave this computer, never secrets or the person's data.
+  Notes: send a note only when a problem with First Draft cost you a real detour and is likely to happen again, never for routine debugging, and only after the Plan has been pushed once with 'firstdraft plan push' or 'firstdraft plan compile'.
+  Unstated request: when the person asked for something the Plan could not state, run 'firstdraft note unstated_request --request <text>', adding --workaround <text> for what you wrote in the Plan instead or left for later.
+  Unclear guidance: when a Skill page or a diagnostic was unclear, run 'firstdraft note unclear_guidance --page <page> --unclear <text>', where <page> is the page's path inside the Skill, such as SKILL.md or references/plan/policies.md; for a diagnostic code or a CLI error value, give --code <code> in place of or beside --page, and add --workaround <text> for what you did instead.
+  Wrong output: when analysis or generated code was wrong, run 'firstdraft note wrong_output --source <source> --expected <text> --actual <text>', where <source> is analysis or generated_code; a note about generated code names the recorded Compilation as a report does, and 'firstdraft note wrong_output --help' lists --code, --file, and --workaround.
+  Write each note in your own plain words, at most 300 characters a field: never secrets, credentials, personal data, or code from the person's project.
   ```
+
+  The first five are `REPORTS_ON_LINES` and the rest `NOTES_ON_LINES` in `src/agent-sentences.js`.
 
 - **An environment token** (exit 0 when accepted). The login lines say which token is used:
 
@@ -567,6 +579,30 @@ inside another Git worktree, initialize the application as its own repository be
 inspect Git; otherwise Git resolves to the parent worktree. Progress on stderr reports analysis and Compilation
 only.
 
+### Record the Compilation whose code was written
+
+After `plan compile` or `compilation download` writes and verifies a Compilation's code, the CLI records that
+Compilation's ID in `compilation.json` beside the Project's `state.json`, so a later session's
+[report](#send-progress-and-failure-reports) or [note](#send-notes) about generated code names it without being told.
+When the command writes to an absent `--output`, that is `.firstdraft/compilation.json` in the directory the command
+ran from. After root adoption, it is `.firstdraft/design/.firstdraft/compilation.json`, beside the archived state, where commands
+run from the application root find it. The file is a new one rather than a change to the `firstdraft.cli-state/1`
+format of `state.json`, and it sits in the same planning folder, whose ignore file keeps it out of Git:
+
+```json
+{
+  "format": "firstdraft.cli-compilation/1",
+  "compilation_id": "<compilation-id>"
+}
+```
+
+The CLI writes it with mode `0600` through a temporary file and a rename, replacing the previous record, so it names
+the Compilation whose code the CLI wrote last for the Project, wherever that code went. `plan compile --github` writes
+no code into the folder and records nothing. If the record cannot be written, the command keeps its result, any earlier
+record stays as it was, and one `First Draft:` line on standard error names the Compilation to pass to later reports
+and notes. Only a report, or a note about generated code, that names no Compilation reads the record; one that is not
+exactly this shape stops it with `local_input_unreadable`.
+
 ### Publish through GitHub
 
 Use the explicit GitHub option for the Publication journey:
@@ -640,8 +676,9 @@ An earlier format or profile is rejected before materialization, even when the r
 
 Successful root adoption is intentionally one-way. The original `.firstdraft` authoring state moves under
 `.firstdraft/design/.firstdraft`; run later Plan and Compilation commands from `.firstdraft/design`. Run ordinary
-Rails setup, preview, and tests, and `report`, from the generated application root, where
-the CLI finds the archived Project and failure frames are relative to the application. Retain the archive when further First Draft
+Rails setup, preview, and tests, and `report` and `note`, from the generated application root, where
+the CLI finds the archived Project and failure frames are relative to the application. A successful download
+[records](#record-the-compilation-whose-code-was-written) the Compilation it wrote, as `plan compile` does. Retain the archive when further First Draft
 authoring is useful. The CLI does not run or qualify the generated application's setup, preview, or test commands.
 Compiling a later Plan revision does not overwrite an already adopted root: choose a new absent output and
 deliberately reconcile it with application work.
@@ -712,15 +749,20 @@ failure in generated code. Run these from the generated application's root after
 the Project's state archived at `.firstdraft/design`, or from the Project's directory:
 
 ```sh
-firstdraft report progress <compilation-id> --step specs_first_run --examples 120 --failures 14 \
+firstdraft report progress --step specs_first_run --examples 120 --failures 14 \
   --behavior-to-write-failures 12 --items-remaining 9
-firstdraft report failure <compilation-id> --kind spec_failure \
+firstdraft report failure --kind spec_failure \
   --rerun "bin/rspec ./spec/models/movie_spec.rb:42" --error-class NoMethodError \
   --message "undefined method 'stars' for nil" --frame "app/models/movie.rb:12:in 'Movie#average'" \
   --fix-summary "Guarded a nil rating in Movie#average"
 ```
 
-`<compilation-id>` is `compilation.id` from `plan compile`. `--step` is `setup`, `specs_first_run`,
+The full forms are `firstdraft report progress [<compilation-id>] --step <step> [counts]` and
+`firstdraft report failure [<compilation-id>] --kind <kind> [options]`. A report names one Compilation: the
+`<compilation-id>` given, which is `compilation.id` from `plan compile`, or else the one the CLI
+[last recorded](#record-the-compilation-whose-code-was-written) for the Project when it wrote a Compilation's code.
+So an agent can report in a later session, after another Compile, or during maintenance without carrying the ID. With
+none given and none recorded, the command sends nothing and ends with `compilation_not_recorded`. `--step` is `setup`, `specs_first_run`,
 `behavior_written`, `specs_passing`, or `preview_started`. The counts are optional whole numbers of at most 1000000:
 examples in the spec
 run, failing examples, failing examples that the README's Behavior to write names, and Behavior to write items still
@@ -742,12 +784,13 @@ Free text keeps plain words only: the CLI takes the first line, replaces everyth
 quote character (`'`, `"`, or a backtick, including an apostrophe inside a word) to the end of the line with one `[…]`,
 replaces each earlier word that contains `=`, `/`, `\`, or `@` or is longer than 24 characters with `[…]`, and keeps the
 words that fit the length limit. A `lint_failure` therefore sends no rule name, and a rerun command that is not an
-RSpec run is left out. The CLI reads no file for a failure report and attaches no diff or environment variable, but
+RSpec run is left out. Besides the Project's state and the Compilation record, the CLI reads no file for a failure
+report and attaches no diff or environment variable, but
 the plain words of a message or fix summary it is given can still quote code, so pass only text that may be sent.
 
 Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push. Unless
 First Draft answers `{"reports": "on"}`, no report is sent. With reports off, the command writes a line that says so
-and exits 0, so the agent's work continues. When the account read fails, no report is sent either. The command then
+and exits 0, so the agent's work continues; it reads no Compilation record first. When the account read fails, no report is sent either. The command then
 ends with `account_unavailable`, with `invalid_server_response` when the answer breaks the account's contract, or with
 an error that any request can give: [`authentication_required`](errors.md#environment-and-credential-errors), or
 `rate_limited` or an update refusal ([update and limit errors](errors.md#update-and-limit-errors)).
@@ -755,14 +798,82 @@ an error that any request can give: [`authentication_required`](errors.md#enviro
 With reports on, the command writes `Sending this <progress or failure> report for Compilation <id> to <origin>:`, the
 exact JSON body, and, when a field did not fit its shape, a `Left out:` line naming it, on standard output. It then
 sends that body once in a `POST` to the same origin, and writes `Sent.` once First Draft acknowledges the stored report
-with `201`; any other success is `report_unavailable`. If the person turns reports off between the two requests, First
+with `201` and names the same Compilation; any other success is `report_unavailable`. If the person turns reports off between the two requests, First
 Draft answers `403 reports_off` and keeps nothing, and the command writes the same line and exits 0. Neither command
 retries.
+
+## Send notes
+
+When reports are on, an agent also sends First Draft a note about a problem with First Draft itself: a request the Plan
+could not state, guidance that was unclear, or output that was wrong. One yes covers reports and notes. A note belongs to
+the Project, so the agent can send one during the interview, before any Compile, once the Plan's first push has pinned
+the Project; before that push the command ends with `project_not_pushed`. Run it from the Project's directory, or from
+the generated application's root after root adoption, as a report:
+
+```sh
+firstdraft note unstated_request --request "A weekly digest email of new movies" \
+  --workaround "Left it for later"
+firstdraft note unclear_guidance --page references/plan/policies.md#roles \
+  --unclear "It never says whether a role can be empty"
+firstdraft note wrong_output --source analysis --code foundation_plan.identity.reserved_constant_collision \
+  --expected "The Plan is valid" --actual "Analysis refused it"
+firstdraft note wrong_output --source generated_code --file app/policies/movie_policy.rb:12 \
+  --expected "Only the owner edits a movie" --actual "Any member can edit it"
+```
+
+Each kind is a command, and its options are named after its fields:
+
+| Kind               | Option             | Field            | Needed                                                 | What it may contain                                                                                                                                             |
+| ------------------ | ------------------ | ---------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unstated_request` | `--request`        | `request`        | Yes                                                    | Plain words: what the person asked for.                                                                                                                         |
+|                    | `--workaround`     | `workaround`     | No                                                     | Plain words: what the agent wrote in the Plan instead, or left for later.                                                                                       |
+| `unclear_guidance` | `--page`           | `page`           | `--page`, `--code`, or both                            | A Skill page: `SKILL.md` or a path inside the Skill ending in `.md`, such as `references/plan/policies.md`, with an optional `#anchor`. At most 200 characters. |
+|                    | `--code`           | `code`           | See `--page`                                           | A diagnostic code or CLI error value, such as `invalid_output_path`. At most 120 characters.                                                                    |
+|                    | `--unclear`        | `unclear`        | Yes                                                    | Plain words: what it says or leaves out, and what the agent needed.                                                                                             |
+|                    | `--workaround`     | `workaround`     | No                                                     | Plain words: what the agent did instead.                                                                                                                        |
+| `wrong_output`     | `--source`         | `source`         | Yes                                                    | `analysis` or `generated_code`.                                                                                                                                 |
+|                    | `--code`           | `code`           | No; `analysis` only                                    | A diagnostic code, as above.                                                                                                                                    |
+|                    | `--compilation-id` | `compilation_id` | `generated_code` only; the recorded one when not given | A lowercase UUIDv7: the Compilation the code came from.                                                                                                         |
+|                    | `--file`           | `file`           | No; `generated_code` only                              | A file in the generated application: a relative path with an optional `:LINE`, such as `app/models/movie.rb:12`. At most 300 characters.                        |
+|                    | `--expected`       | `expected`       | Yes                                                    | Plain words: what the Plan or the page says should happen.                                                                                                      |
+|                    | `--actual`         | `actual`         | Yes                                                    | Plain words: what happened.                                                                                                                                     |
+|                    | `--workaround`     | `workaround`     | No                                                     | Plain words: what the agent changed.                                                                                                                            |
+
+Plain words follow the [failure report's rule](#send-progress-and-failure-reports), at most 300 characters each. A page
+is made of letters, digits, `_`, `.`, and `-` in parts separated by single slashes, and its anchor of letters, digits,
+`_`, and `-`. A code is lowercase letters, digits, and `_`, in parts separated by single dots. A file is made of the
+same characters as a page, without an anchor. Neither a page nor a file may have a `..` part. An option the kind does
+not have, a needed option left out, a source other than the two, an option the source does not take, or a Compilation
+that is not a lowercase UUIDv7 is `invalid_arguments`, and nothing is read or sent.
+
+Like a report, each note command first reads the account at the pinned origin, and with reports off it writes the same
+line and exits 0, having checked nothing else. With reports on:
+
+1. A note about generated code takes its Compilation from `--compilation-id`, or else from the
+   [record](#record-the-compilation-whose-code-was-written); with neither, the command sends nothing and ends with
+   `compilation_not_recorded`. Other notes name no Compilation.
+2. It shapes each field. A field that does not fit its shape is left out. When a field the note needs is left with
+   nothing, such as a request whose first line is blank, or guidance with neither a page nor a code left, the command
+   sends nothing and ends with `note_incomplete`, which names each such field.
+3. It writes `Sending this <kind> note to <origin>:`, with ` for Compilation <id>` before ` to` for a note about
+   generated code, then the exact JSON body, `{"note": {...}}` with `kind` first, and a `Left out:` line when a field was
+   left out.
+4. It sends that body once in a `POST` to `/v1/projects/{project_id}/notes` at the same origin, and writes `Sent.` once
+   First Draft acknowledges the stored note with `201` and names the same Compilation, or none. Any other success is
+   `note_unavailable`.
+
+First Draft answers `403 reports_off` when the person turned reports off after the account read, and the command writes
+the reports-off line and exits 0. A refusal, such as `invalid_note`, `compilation_not_found`, or
+`compilation_not_succeeded`, is `note_rejected`; a network failure or server error is `note_unavailable`; and an
+account's limit of 30 notes an hour is `rate_limited`. The command never retries. It reads the Project's state, and the
+Compilation record only for a note about generated code without `--compilation-id`; it reads no file of the
+application and no conversation. A note holds only what its options give, plus that recorded ID, so pass only text
+that may be sent, and never code from the person's project.
 
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`account` and `start` read `/v1/account` at the origin selected as for `login`; the report commands read it, and every other
+`account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands read it, and every other
 `/v1` request goes, to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
@@ -782,6 +893,7 @@ timeout. Each request takes its method and path from one
 | `GET`  | `/v1/account`                                                              | Read whether the account reports     |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports` | Send a progress report               |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`  | Send a failure report                |
+| `POST` | `/v1/projects/{project_id}/notes`                                          | Send a note                          |
 | `POST` | `/oauth/token`                                                             | Exchange a login grant for a token   |
 | `POST` | `/oauth/device_authorization`                                              | Start a device-flow login            |
 | `POST` | `/oauth/revoke`                                                            | Revoke a saved token                 |
@@ -790,7 +902,8 @@ timeout. Each request takes its method and path from one
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
-`report progress` and `report failure` read it and, with reports on, post their report.
+`report progress` and `report failure` read it and, with reports on, post their report. Each `note` command reads it
+and, with reports on, posts its note.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `login --no-wait` makes only the first request, and
 `login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the

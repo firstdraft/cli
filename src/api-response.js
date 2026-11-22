@@ -71,6 +71,10 @@ export const SERVICE_ROUTES = {
     method: "POST",
     path: "/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports",
   },
+  sendNote: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/notes",
+  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",

@@ -11,10 +11,10 @@ repository's [tags](https://github.com/firstdraft/cli/tags) identify the source 
 
 ## 0.10.0
 
-Lets First Draft tell a setup that it is out of date, and adds the account, report, and `start` commands and a device
-login in two steps, so a person working alone hears when to update, their agent can log them in, and it can send the
-progress and failure reports the person agreed to. Moves the Rails target to profile `rails-sketch/2026-11` and the
-accepted API contract to `0.9.x`.
+Lets First Draft tell a setup that it is out of date, and adds the account, report, note, and `start` commands and a
+device login in two steps, so a person working alone hears when to update, their agent can log them in, and it can send
+the progress and failure reports and the notes the person agreed to, for the application's whole life. Moves the Rails
+target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x`.
 
 - `plan init` writes Plans that target `rails-sketch/2026-11`. `plan compile` and `compilation download` accept only
   artifacts for that profile; an artifact for `rails-sketch/2026-10` reports `invalid_artifact`. The CLI sends a
@@ -59,12 +59,25 @@ accepted API contract to `0.9.x`.
   left out, a `Left out:` line names each field left out, counts the frames that are not in the application's files
   with a line number, and says when frames after the first 20 were dropped; the printed JSON is exactly what is
   sent. Both commands find the Project from the generated application's root after root adoption, or from the
-  Project's directory.
+  Project's directory. The Compilation ID is optional: without it, a report names the Compilation recorded below.
+- `firstdraft note unstated_request`, `firstdraft note unclear_guidance`, and `firstdraft note wrong_output` send a
+  note about a problem with First Draft itself, with options named after the note's fields: `--request`;
+  `--page` or `--code` with `--unclear`; or `--source analysis` or `--source generated_code` with `--expected` and
+  `--actual`, and `--code`, `--compilation-id`, or `--file` as the source allows. Each takes `--workaround`. A note
+  belongs to the Project, so it needs only the Plan's first push, and goes to `POST /v1/projects/{project_id}/notes`.
+  Like a report, it reads the account first and sends nothing with reports off, keeps each field only in its shape
+  (plain words of at most 300 characters, a Skill page, a diagnostic code, a file in the application, or a lowercase
+  UUIDv7), prints the exact JSON and what it left out, sends it once, and never retries. A note about generated code
+  names the recorded Compilation unless `--compilation-id` names one.
+- `plan compile` and `compilation download` record the Compilation whose code they wrote in `compilation.json` beside
+  the Project's `state.json`, in the archive at `.firstdraft/design/.firstdraft/` after root adoption, as
+  `{"format": "firstdraft.cli-compilation/1", "compilation_id": "<id>"}`. `state.json` keeps its format. A record that
+  cannot be written leaves the command's result and adds one `First Draft:` line on standard error.
 - `firstdraft start`, which an agent runs once before other work, prints fixed sentences on standard output, one fact
   per line: the CLI version and, when `FIRSTDRAFT_PLUGIN_VERSION` holds one, the plugin's; the update line, when
   First Draft names a newer version; whether this computer has a saved login for the origin and whether a token in
-  the environment takes its place; and, when reports are on, when to send progress and failure reports and with
-  which command. With reports off, it says nothing about reports. With a token, it makes one request, an account
+  the environment takes its place; and, when reports are on, when to send progress and failure reports and notes, and
+  with which command. With reports off, it says nothing about reports or notes. With a token, it makes one request, an account
   read; without one, it makes none and names the two login steps below. It exits 0 only when First Draft accepted
   the token. A setup below the minimum or on another API contract fails with `update_required` or
   `api_contract_unsupported`, even though the account read was its only request.
@@ -79,11 +92,13 @@ accepted API contract to `0.9.x`.
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
   unconfirmed Publication under `plan compile --github` is unchanged.
 - New `error` values, each with exit status 1: `update_required`, `api_contract_unsupported`, `rate_limited`,
-  `account_unavailable`, `report_rejected`, `report_unavailable`, and, from `login --finish`, `authorization_pending`
-  and `login_not_started`. `account`, `start`, and the report commands also report `authentication_required` and
-  `invalid_server_response` (exit status 1) and `invalid_arguments` and `invalid_configuration` (exit status 2). The
-  report commands also report `local_input_unreadable` and `project_not_pushed` (exit status 1). `login_failed` gains
-  the reasons `device_login_invalid` and `device_login_unavailable` for the waiting device login's file.
+  `account_unavailable`, `report_rejected`, `report_unavailable`, `note_rejected`, `note_unavailable`,
+  `compilation_not_recorded`, and, from `login --finish`, `authorization_pending` and `login_not_started`; and, from the
+  note commands, `note_incomplete` with exit status 2. `account`, `start`, and the report and note commands also report
+  `authentication_required` and `invalid_server_response` (exit status 1) and `invalid_arguments` and
+  `invalid_configuration` (exit status 2). The report and note commands also report `local_input_unreadable` and
+  `project_not_pushed` (exit status 1). `login_failed` gains the reasons `device_login_invalid` and
+  `device_login_unavailable` for the waiting device login's file.
 
 Use CLI 0.10.0 with a Service that serves API `0.9.x`. Once a response from an origin names API `0.8.x`, the CLI sends
 nothing more and says to use the CLI version that origin supports. A plugin's launcher should set
