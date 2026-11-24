@@ -84,7 +84,7 @@ Options:
       --reason <reason>     pull_request, host_change, not_a_bug, duplicate,
                             or stopped_occurring
       --cause <cause>       generated_code, later_code, configuration_or_host,
-                            data, dependency, or not_a_bug
+                            data, dependency, not_a_bug, or unknown
       --detail <text>       What resolved it, such as a pull request URL
       --environment <name>  Deployed Environment (default: production)
       --staging             Use staging; reject a different saved origin
@@ -243,6 +243,18 @@ test("maintain resolve sends one POST with the reason, the cause, and optional d
         ITEM_ID,
       ],
       request: { reason: "host_change", cause: "configuration_or_host" },
+    },
+    {
+      argv: [
+        "maintain",
+        "resolve",
+        ITEM_ID,
+        "--reason",
+        "stopped_occurring",
+        "--cause",
+        "unknown",
+      ],
+      request: { reason: "stopped_occurring", cause: "unknown" },
     },
   ]) {
     /** @type {FetchCall[]} */
@@ -503,7 +515,7 @@ test("a success response must match the exact maintenance contract", async (cont
     [[...RESOLVE_DUPLICATE], jsonResponse(resolvedBody("duplicate", "data"))],
     [
       [...RESOLVE_DUPLICATE],
-      jsonResponse(resolvedBody("duplicate", "unknown")),
+      jsonResponse(resolvedBody("duplicate", "deployment")),
     ],
     [
       [...RESOLVE_DUPLICATE],
@@ -642,6 +654,34 @@ test("maintain reads no items when the account cannot be read", async (context) 
   }
 });
 
+test("maintain run from an adopted application root reads the archived Project", async (context) => {
+  const root = mkdtempSync(path.join(tmpdir(), "firstdraft-maint-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const design = path.join(root, ".firstdraft", "design");
+  mkdirSync(path.join(design, ".firstdraft"), { recursive: true });
+  writeFileSync(path.join(root, ".firstdraft", "gaps.json"), "{}\n");
+  writeFileSync(
+    path.join(design, ".firstdraft", "state.json"),
+    `${JSON.stringify({
+      format: "firstdraft.cli-state/1",
+      project_id: PROJECT_ID,
+      api_url: API_URL,
+      foundation_plan_etag: `"sha256:${"9".repeat(64)}"`,
+    })}\n`,
+  );
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const body = showBody();
+  const result = await invoke(["maintain", "show", ITEM_ID], {
+    cwd: root,
+    fetchFunction: sequenceFetch([jsonResponse(body)], calls),
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `${JSON.stringify(body, null, 2)}\n`);
+  assert.equal(String(calls[0]?.input), `${API_URL}${ITEM_PATH}`);
+});
+
 test("maintain authentication problems are stable", async (context) => {
   const missing = await invoke(["maintain"], {
     cwd: projectDirectory(context),
@@ -692,7 +732,7 @@ test("maintain syntax and local state fail before network access", async (contex
       ["maintain", "resolve", ITEM_ID, "--reason", "not_a_bug"],
       "maintain resolve",
     ],
-    [[...RESOLVE_DUPLICATE.slice(0, -1), "unknown"], "maintain resolve"],
+    [[...RESOLVE_DUPLICATE.slice(0, -1), "deployment"], "maintain resolve"],
     [[...RESOLVE_DUPLICATE, "--cause", "data"], "maintain resolve"],
     [
       ["maintain", "resolve", ITEM_ID, "--reason", "pull_request", "--detail"],
