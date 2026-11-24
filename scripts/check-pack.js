@@ -45,6 +45,7 @@ if (result.status !== 0) {
     "src/commands/compilation.js",
     "src/commands/login.js",
     "src/commands/logout.js",
+    "src/commands/maintain.js",
     "src/commands/note.js",
     "src/commands/plan-compile.js",
     "src/commands/plan-init.js",
