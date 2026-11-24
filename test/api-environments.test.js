@@ -47,6 +47,7 @@ const REMOTE_COMMANDS = [
     "--actual",
     "Anyone edits",
   ],
+  ["host", "email"],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {

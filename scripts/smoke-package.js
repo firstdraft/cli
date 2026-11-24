@@ -273,6 +273,25 @@ try {
       "Invalid arguments. Run 'firstdraft compilation cancel --help' for usage.",
   });
 
+  const invalidHost = spawnPackedCli(
+    ["host", "status", "--canary-secret-option"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidHost, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft host status --help' for usage.",
+  });
+
+  const unconfirmedDestroy = spawnPackedCli(
+    ["host", "destroy"],
+    installationDirectory,
+  );
+  assertHandledFailure(unconfirmedDestroy, 2, {
+    error: "confirmation_required",
+    detail:
+      "Destroying removes the Droplet and its data. Ask the owner, suggest a database export first, then pass --confirm production. Nothing was sent.",
+  });
+
   const invalidAccount = spawnPackedCli(
     ["account", "--canary-secret-option"],
     installationDirectory,

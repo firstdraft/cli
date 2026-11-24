@@ -36,6 +36,12 @@ contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.
 | `firstdraft note unstated_request`    | Yes     | Print, then send, a request the Plan could not state          |
 | `firstdraft note unclear_guidance`    | Yes     | Print, then send, a Skill page or diagnostic that was unclear |
 | `firstdraft note wrong_output`        | Yes     | Print, then send, analysis or generated code that was wrong   |
+| `firstdraft host create`              | Yes     | Create the app's Droplet and connect its repository           |
+| `firstdraft host status`              | Yes     | Show the host, its release, and what stands in the way        |
+| `firstdraft host resize`              | Yes     | Change the Droplet's size, once the owner agrees              |
+| `firstdraft host destroy`             | Yes     | Remove the Droplet, once the owner agrees                     |
+| `firstdraft host domain`              | Yes     | Connect, check, or disconnect the app's own domain            |
+| `firstdraft host email`               | Yes     | Show email state, or store new SMTP credentials               |
 
 ## Select an environment and authenticate
 
@@ -220,14 +226,20 @@ CLI without the plugin's launcher, such as a direct npm installation, may set th
 
 Beyond the header, a command sends only what it needs:
 
-| Commands                                  | Request content                                                  |
-| ----------------------------------------- | ---------------------------------------------------------------- |
-| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it    |
-| `start`                                   | An account read, and nothing without a token                     |
-| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag               |
-| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                 |
-| `report progress`, `report failure`       | An account read; with reports on, the report printed just before |
-| `note <kind>`                             | An account read; with reports on, the note printed just before   |
+| Commands                                  | Request content                                                                                                                                                         |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                                                                                                           |
+| `start`                                   | An account read, and nothing without a token                                                                                                                            |
+| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                                                                                                                      |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                                                                                                        |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                                                                                                        |
+| `note <kind>`                             | An account read; with reports on, the note printed just before                                                                                                          |
+| `host *`                                  | The Environment name in the path; `host create` adds the region, size, and SSH public key; `resize` the size; `destroy` the confirmation; `domain connect` the hostname |
+
+Host commands also run programs on the owner's computer: `gh`, which sends its own requests to GitHub with the
+person's GitHub login, and `ssh-keygen` and `ssh`. [Operate a First Draft host](#operate-a-first-draft-host) lists
+what each command runs. `host status` also requests `https://<APP_HOST>/up` from the application itself, with no
+token and no `FirstDraft-Client` header.
 
 ### Update line and refusals
 
@@ -870,6 +882,116 @@ Compilation record only for a note about generated code without `--compilation-i
 application and no conversation. A note holds only what its options give, plus that recorded ID, so pass only text
 that may be sent, and never code from the person's project.
 
+## Operate a First Draft host
+
+First Draft hosting runs one application on one DigitalOcean Droplet that First Draft creates. First Draft's service
+never logs in to the Droplet and never receives a private key: the owner's computer holds the SSH key, and GitHub
+Actions deploys. A push to the default branch deploys only when every check in `.github/workflows/ci.yml` passes,
+through that workflow's `deploy` job, which runs Kamal; no host command deploys. A freshly compiled application fails
+its own specs until its Behavior to write is written, so a new host serves nothing until then.
+
+Run host commands from the application's root, where `config/deploy.yml` and the Git repository are; the Project is
+the one pinned there, including an adopted root's `.firstdraft/design`. Each takes `--environment <name>` (default
+`production`) and `--staging`, and uses the pinned origin. Each prints one JSON object on standard output, with a
+`next` sentence that says what to do next, and a handled error as one JSON envelope on standard error. They need:
+
+- `gh`, logged in with access to the application's repository, for Actions secrets, variables, and CI runs;
+- `ssh-keygen` and `ssh` (the OpenSSH client), for `host create`.
+
+They need no Docker, Ruby, or Kamal on the owner's computer.
+
+### Create a host
+
+```sh
+firstdraft host create [--region <slug>] [--size <slug>]
+```
+
+The command first checks that `config/deploy.yml` exists and that `ci.yml` has a `deploy` job, or reports
+`deploy_files_missing`. Each later step is skipped when it is already done, so running the command again continues
+where it stopped:
+
+1. It reads the repository and its default branch with `gh repo view`, then reads the host.
+2. Without a host, it generates an Ed25519 key with `ssh-keygen` at
+   `$XDG_CONFIG_HOME/firstdraft/hosts/<project-id>/<environment>/id_ed25519` (or under `~/.config`), and sends only
+   the public line to First Draft, which creates the Droplet. A host that exists must trust this computer's key (its
+   `ssh_key_fingerprint`), or the command reports `host_key_missing`.
+3. It stores the private key as the Actions secret `SSH_PRIVATE_KEY`, and generates `SECRET_KEY_BASE` and
+   `POSTGRES_PASSWORD` when `gh secret list` does not name them. Each value goes to `gh secret set` on standard
+   input; none is printed.
+4. It waits for the host to be `ready`, then for the Droplet's first-boot setup: it runs `cloud-init status` over
+   `ssh` as the host's `ssh_user`. The first connection records the Droplet's key in that directory's `known_hosts`,
+   and later connections refuse a different one.
+5. Once setup is done, it sets the repository variables `APP_HOST` (the Droplet's `sslip.io` name, unless already
+   set) and `DEPLOY_HOST` (its IPv4). The `deploy` job is skipped until `DEPLOY_HOST` is set, so no deploy reaches a
+   Droplet that is still setting itself up.
+
+It waits at most five minutes and then prints where it stopped in `step`: `provisioning`, `setting_up`, or
+`connected`. The output names the host, the `url`, the secret and variable names it stored, the newest CI run on the
+default branch (`checks`), and `next`. A host whose creation failed reports `host_failed` with `host.failure`; a
+first-boot setup that reported an error reports `host_setup_failed`.
+
+### Read a host's status
+
+```sh
+firstdraft host status [--wait]
+```
+
+The command reads the host, and once it is `ready`, its backups and connected domain; `domain` is `null` without
+one, and `host` is `null` when the Environment has none. It also reads the newest CI run on the default branch with
+`gh run list` and its jobs with `gh run view`, and requests `/up` on `APP_HOST`. `next` tells these apart:
+
+- the Droplet is still being created or setting itself up;
+- CI failed on the default branch, naming the failed jobs, so nothing deployed;
+- CI is still running;
+- the checks passed before the repository was connected, so nothing deployed (push, or `gh run rerun <id>`);
+- the last `deploy` job failed;
+- the app is live, or it deployed but `/up` does not answer.
+
+`host.release` is First Draft's own record of the last deploy. `--wait` repeats the reads every 10 seconds while the
+host or the CI run is busy, for at most five minutes.
+
+### Resize or destroy a host
+
+```sh
+firstdraft host resize --size <slug> --yes
+firstdraft host destroy --confirm <environment>
+```
+
+Both need the owner's agreement first. Without `--yes`, or with a `--confirm` value other than the Environment's
+name, the command sends nothing and reports `confirmation_required` (exit 2). `resize` powers the Droplet off,
+changes its CPU and memory but not its disk, and powers it on; the app is down meanwhile. `destroy` asks First Draft
+to remove the Droplet, then deletes the `DEPLOY_HOST` and `APP_HOST` variables and the `SSH_PRIVATE_KEY` secret with
+`gh`, and this computer's key directory. Its `github.left` names anything `gh` could not delete.
+
+### Connect a domain
+
+```sh
+firstdraft host domain
+firstdraft host domain connect <hostname>
+firstdraft host domain check
+firstdraft host domain disconnect
+```
+
+Domains are the owner's own; First Draft registers none. `connect` returns the DNS records to create at the owner's
+DNS provider, as `{purpose, type, name, value, required, status, found}` rows; email records join them once the app
+record is right. `check` checks them now. Once the `app` record is `ok`, it sets `APP_HOST` to the hostname with
+`gh variable set`, and `app_host_changed` says so: the next deploy serves the domain and obtains its certificate.
+`disconnect` removes the domain and sets `APP_HOST` back to the Droplet's `sslip.io` name. Without a command, the
+command prints the last check.
+
+### Email
+
+```sh
+firstdraft host email
+firstdraft host email connect
+```
+
+Without a command, it prints whether the app can send email, its sending domain, and the month's allowance. Nothing
+is sent before a domain is connected. `connect` asks First Draft for a new SMTP credential, which revokes the earlier
+one, stores the password as the Actions secret `SMTP_PASSWORD`, and stores `SMTP_ADDRESS`, `SMTP_PORT`,
+`SMTP_USERNAME`, and `SMTP_HEADERS` (the headers as JSON) as variables. It prints no password. The app sends email
+after its next deploy.
+
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
@@ -880,23 +1002,34 @@ timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
 `SERVICE_ROUTES` differ, or when no file in `src/` uses a declared route.
 
-| Method | Path                                                                       | Purpose                              |
-| ------ | -------------------------------------------------------------------------- | ------------------------------------ |
-| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                | Create or replace the Head           |
-| `GET`  | `/v1/projects/{project_id}/analysis`                                       | Read the Head's current analysis     |
-| `POST` | `/v1/projects/{project_id}/compilations`                                   | Start a Compilation of the Head      |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                  | Read one retained Compilation        |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`           | Cancel that Compilation              |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`         | Download that Compilation's artifact |
-| `PUT`  | `/v1/projects/{project_id}/github-publication`                             | Start or rejoin the Publication      |
-| `GET`  | `/v1/projects/{project_id}/github-publication`                             | Poll or reconcile the Publication    |
-| `GET`  | `/v1/account`                                                              | Read whether the account reports     |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports` | Send a progress report               |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`  | Send a failure report                |
-| `POST` | `/v1/projects/{project_id}/notes`                                          | Send a note                          |
-| `POST` | `/oauth/token`                                                             | Exchange a login grant for a token   |
-| `POST` | `/oauth/device_authorization`                                              | Start a device-flow login            |
-| `POST` | `/oauth/revoke`                                                            | Revoke a saved token                 |
+| Method   | Path                                                                                    | Purpose                              |
+| -------- | --------------------------------------------------------------------------------------- | ------------------------------------ |
+| `PUT`    | `/v1/projects/{project_id}/foundation-plan`                                             | Create or replace the Head           |
+| `GET`    | `/v1/projects/{project_id}/analysis`                                                    | Read the Head's current analysis     |
+| `POST`   | `/v1/projects/{project_id}/compilations`                                                | Start a Compilation of the Head      |
+| `GET`    | `/v1/projects/{project_id}/compilations/{compilation_id}`                               | Read one retained Compilation        |
+| `POST`   | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`                        | Cancel that Compilation              |
+| `GET`    | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`                      | Download that Compilation's artifact |
+| `PUT`    | `/v1/projects/{project_id}/github-publication`                                          | Start or rejoin the Publication      |
+| `GET`    | `/v1/projects/{project_id}/github-publication`                                          | Poll or reconcile the Publication    |
+| `GET`    | `/v1/account`                                                                           | Read whether the account reports     |
+| `POST`   | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports`              | Send a progress report               |
+| `POST`   | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`               | Send a failure report                |
+| `POST`   | `/v1/projects/{project_id}/notes`                                                       | Send a note                          |
+| `POST`   | `/v1/projects/{project_id}/environments/{environment_name}/host`                        | Create the Environment's host        |
+| `GET`    | `/v1/projects/{project_id}/environments/{environment_name}/host`                        | Read the host                        |
+| `PATCH`  | `/v1/projects/{project_id}/environments/{environment_name}/host`                        | Resize the host                      |
+| `DELETE` | `/v1/projects/{project_id}/environments/{environment_name}/host`                        | Destroy the host                     |
+| `GET`    | `/v1/projects/{project_id}/environments/{environment_name}/host/backups`                | Read the host's backups              |
+| `PUT`    | `/v1/projects/{project_id}/environments/{environment_name}/host/domain`                 | Connect a domain                     |
+| `GET`    | `/v1/projects/{project_id}/environments/{environment_name}/host/domain`                 | Read the domain's last check         |
+| `POST`   | `/v1/projects/{project_id}/environments/{environment_name}/host/domain/check`           | Check the domain's records now       |
+| `DELETE` | `/v1/projects/{project_id}/environments/{environment_name}/host/domain`                 | Disconnect the domain                |
+| `GET`    | `/v1/projects/{project_id}/environments/{environment_name}/host/email`                  | Read the host's email state          |
+| `POST`   | `/v1/projects/{project_id}/environments/{environment_name}/host/email/smtp-credentials` | Create new SMTP credentials          |
+| `POST`   | `/oauth/token`                                                                          | Exchange a login grant for a token   |
+| `POST`   | `/oauth/device_authorization`                                                           | Start a device-flow login            |
+| `POST`   | `/oauth/revoke`                                                                         | Revoke a saved token                 |
 
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
@@ -904,6 +1037,11 @@ Compilation, polls it, and downloads its artifact. With `--github`, it starts an
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
 `report progress` and `report failure` read it and, with reports on, post their report. Each `note` command reads it
 and, with reports on, posts its note.
+`host create` reads the host, and creates it when there is none, then polls it. `host status` reads the host, its
+backups, and its domain. `host resize` and `host destroy` send the `PATCH` and `DELETE`. `host domain` reads the
+domain, `connect` sends the `PUT`, `check` the check `POST`, and `disconnect` reads the host and sends the `DELETE`.
+`host email` reads the email state, and `connect` creates SMTP credentials. These routes are drafted against the
+Service's hosting sketch; no released API contract includes them yet.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `login --no-wait` makes only the first request, and
 `login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the
