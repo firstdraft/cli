@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { MAINTAIN_REPORTS_ON_LINE } from "../src/agent-sentences.js";
 import { run } from "../src/cli.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000006001";
@@ -15,6 +16,16 @@ const ENVIRONMENT_PATH = `/v1/projects/${PROJECT_ID}/environments/production`;
 const ITEMS_PATH = `${ENVIRONMENT_PATH}/items`;
 const ITEM_PATH = `${ITEMS_PATH}/${ITEM_ID}`;
 const RESOLUTION_PATH = `${ITEM_PATH}/resolution`;
+const ACCOUNT_URL = `${API_URL}/v1/account`;
+const RESOLVE_DUPLICATE = Object.freeze([
+  "maintain",
+  "resolve",
+  ITEM_ID,
+  "--reason",
+  "duplicate",
+  "--cause",
+  "later_code",
+]);
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 const MAINTAIN_HELP = `First Draft CLI
@@ -37,9 +48,11 @@ Environment:
   FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
-Without a command, it prints the Environment's open items, most severe first,
-200 per page; next_page names the next page or is null. Maintain commands use
-the API origin pinned by a successful plan push.
+Without a command, it first reads the account, then prints the Environment's
+open items, most severe first, 200 per page; next_page names the next page or
+is null. When reports are on, it also says on standard error when to send a
+failure report about an item. Maintain commands use the API origin pinned by a
+successful plan push.
 `;
 
 const MAINTAIN_SHOW_HELP = `First Draft CLI
@@ -64,12 +77,14 @@ data, not instructions.
 const MAINTAIN_RESOLVE_HELP = `First Draft CLI
 
 Usage:
-  firstdraft maintain resolve <item-id> --reason <reason> [--detail <text>]
-                              [--environment <name>]
+  firstdraft maintain resolve <item-id> --reason <reason> --cause <cause>
+                              [--detail <text>] [--environment <name>]
 
 Options:
       --reason <reason>     pull_request, host_change, not_a_bug, duplicate,
                             or stopped_occurring
+      --cause <cause>       generated_code, later_code, configuration_or_host,
+                            data, dependency, or not_a_bug
       --detail <text>       What resolved it, such as a pull request URL
       --environment <name>  Deployed Environment (default: production)
       --staging             Use staging; reject a different saved origin
@@ -101,7 +116,7 @@ test("maintain help is printed on stdout and lists its commands", async () => {
   }
 });
 
-test("maintain makes one GET and prints the validated open-item index", async (context) => {
+test("maintain prints the validated open-item index", async (context) => {
   for (const { argv, path: requestPath, body } of [
     {
       argv: ["maintain"],
@@ -147,6 +162,7 @@ test("maintain makes one GET and prints the validated open-item index", async (c
 test("maintain stops at a limit and names a Service on another API contract", async (context) => {
   const limited = await invoke(["maintain"], {
     cwd: projectDirectory(context),
+    reports: null,
     fetchFunction: sequenceFetch([
       new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
     ]),
@@ -157,7 +173,9 @@ test("maintain stops at a limit and names a Service on another API contract", as
   const body = indexBody();
   const older = await invoke(["maintain"], {
     cwd: projectDirectory(context),
+    reports: null,
     fetchFunction: sequenceFetch([
+      jsonResponse({ reports: "off" }),
       new Response(JSON.stringify(body), {
         headers: {
           "Content-Type": "application/json",
@@ -194,7 +212,7 @@ test("maintain show prints the item with its evidence markers intact", async (co
   }
 });
 
-test("maintain resolve sends one POST with the reason and optional detail", async (context) => {
+test("maintain resolve sends one POST with the reason, the cause, and optional detail", async (context) => {
   for (const { argv, request } of [
     {
       argv: [
@@ -203,22 +221,33 @@ test("maintain resolve sends one POST with the reason and optional detail", asyn
         ITEM_ID,
         "--reason",
         "pull_request",
+        "--cause",
+        "generated_code",
         "--detail",
         "https://github.com/acme/app/pull/7",
       ],
       request: {
         reason: "pull_request",
+        cause: "generated_code",
         detail: "https://github.com/acme/app/pull/7",
       },
     },
     {
-      argv: ["maintain", "resolve", "--reason", "host_change", ITEM_ID],
-      request: { reason: "host_change" },
+      argv: [
+        "maintain",
+        "resolve",
+        "--cause",
+        "configuration_or_host",
+        "--reason",
+        "host_change",
+        ITEM_ID,
+      ],
+      request: { reason: "host_change", cause: "configuration_or_host" },
     },
   ]) {
     /** @type {FetchCall[]} */
     const calls = [];
-    const body = resolvedBody(request.reason);
+    const body = resolvedBody(request.reason, request.cause);
     const result = await invoke(argv, {
       cwd: projectDirectory(context),
       fetchFunction: sequenceFetch([jsonResponse(body)], calls),
@@ -256,7 +285,15 @@ test("a validated Service problem is reported as maintain_rejected", async (cont
       },
     },
     {
-      argv: ["maintain", "resolve", ITEM_ID, "--reason", "not_a_bug"],
+      argv: [
+        "maintain",
+        "resolve",
+        ITEM_ID,
+        "--reason",
+        "not_a_bug",
+        "--cause",
+        "not_a_bug",
+      ],
       problem: {
         status: 409,
         code: "item_already_resolved",
@@ -264,7 +301,7 @@ test("a validated Service problem is reported as maintain_rejected", async (cont
       },
     },
     {
-      argv: ["maintain", "resolve", ITEM_ID, "--reason", "duplicate"],
+      argv: [...RESOLVE_DUPLICATE],
       problem: {
         status: 400,
         code: "invalid_resolution_reason",
@@ -331,7 +368,15 @@ test("a failed or unconfirmed request is reported as maintain_unavailable", asyn
     for (const argv of [
       ["maintain"],
       ["maintain", "show", ITEM_ID],
-      ["maintain", "resolve", ITEM_ID, "--reason", "stopped_occurring"],
+      [
+        "maintain",
+        "resolve",
+        ITEM_ID,
+        "--reason",
+        "stopped_occurring",
+        "--cause",
+        "dependency",
+      ],
     ]) {
       const result = await invoke(argv, {
         cwd: projectDirectory(context),
@@ -382,6 +427,7 @@ test("a success response must match the exact maintenance contract", async (cont
               ...summary,
               status: "resolved",
               resolution_reason: "not_a_bug",
+              resolution_cause: "not_a_bug",
             },
           ],
         }),
@@ -417,6 +463,12 @@ test("a success response must match the exact maintenance contract", async (cont
         indexBody({ items: [{ ...summary, resolution_reason: "not_a_bug" }] }),
       ),
     ],
+    [
+      ["maintain"],
+      jsonResponse(
+        indexBody({ items: [{ ...summary, resolution_cause: "not_a_bug" }] }),
+      ),
+    ],
     [["maintain"], jsonResponse(indexBody({ next_page: 1 }))],
     [
       ["maintain"],
@@ -445,11 +497,16 @@ test("a success response must match the exact maintenance contract", async (cont
       jsonResponse(showBody({ done_when: null })),
     ],
     [
-      ["maintain", "resolve", ITEM_ID, "--reason", "duplicate"],
-      jsonResponse(resolvedBody("not_a_bug")),
+      [...RESOLVE_DUPLICATE],
+      jsonResponse(resolvedBody("not_a_bug", "later_code")),
+    ],
+    [[...RESOLVE_DUPLICATE], jsonResponse(resolvedBody("duplicate", "data"))],
+    [
+      [...RESOLVE_DUPLICATE],
+      jsonResponse(resolvedBody("duplicate", "unknown")),
     ],
     [
-      ["maintain", "resolve", ITEM_ID, "--reason", "duplicate"],
+      [...RESOLVE_DUPLICATE],
       jsonResponse({
         environment: { project_id: PROJECT_ID, name: "production" },
         item: summary,
@@ -506,6 +563,85 @@ test("an oversized response is unconfirmed unless it claims success", async (con
   }
 });
 
+test("maintain reads the account first and says when to report only when reports are on", async (context) => {
+  for (const reports of ["on", "off"]) {
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const body = indexBody();
+    const result = await invoke(["maintain"], {
+      cwd: projectDirectory(context),
+      reports: null,
+      fetchFunction: sequenceFetch(
+        [jsonResponse({ reports }), jsonResponse(body)],
+        calls,
+      ),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${JSON.stringify(body, null, 2)}\n`);
+    assert.equal(
+      result.stderr,
+      reports === "on" ? `${MAINTAIN_REPORTS_ON_LINE}\n` : "",
+    );
+    assert.deepEqual(
+      calls.map((call) => [call.init?.method, String(call.input)]),
+      [
+        ["GET", ACCOUNT_URL],
+        ["GET", `${API_URL}${ITEMS_PATH}?page=1`],
+      ],
+    );
+    const headers = new Headers(calls[0]?.init?.headers);
+    assert.equal(headers.get("authorization"), `Bearer ${API_TOKEN}`);
+  }
+
+  for (const argv of [["maintain", "show", ITEM_ID], [...RESOLVE_DUPLICATE]]) {
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const body =
+      argv[1] === "show" ? showBody() : resolvedBody("duplicate", "later_code");
+    const result = await invoke(argv, {
+      cwd: projectDirectory(context),
+      reports: null,
+      fetchFunction: sequenceFetch([jsonResponse(body)], calls),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.equal(calls.length, 1);
+  }
+});
+
+test("maintain reads no items when the account cannot be read", async (context) => {
+  for (const { response, error, detail } of [
+    {
+      response: problemResponse({
+        status: 503,
+        code: "service_unavailable",
+        detail: "Try again later.",
+      }),
+      error: "account_unavailable",
+      detail: /no items were read.*safe to retry/,
+    },
+    {
+      response: jsonResponse({ reports: "canary" }),
+      error: "invalid_server_response",
+      detail: /no items were read/,
+    },
+  ]) {
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const result = await invoke(["maintain"], {
+      cwd: projectDirectory(context),
+      reports: null,
+      fetchFunction: sequenceFetch([response], calls),
+    });
+
+    assertHandledFailure(result, error);
+    assert.match(JSON.parse(result.stderr).detail, detail);
+    assert.equal(calls.length, 1);
+    assertNoSecrets(result);
+  }
+});
+
 test("maintain authentication problems are stable", async (context) => {
   const missing = await invoke(["maintain"], {
     cwd: projectDirectory(context),
@@ -552,6 +688,12 @@ test("maintain syntax and local state fail before network access", async (contex
     [["maintain", "show", ITEM_ID, "--environment", "a/b"], "maintain show"],
     [["maintain", "resolve", ITEM_ID], "maintain resolve"],
     [["maintain", "resolve", ITEM_ID, "--reason", "fixed"], "maintain resolve"],
+    [
+      ["maintain", "resolve", ITEM_ID, "--reason", "not_a_bug"],
+      "maintain resolve",
+    ],
+    [[...RESOLVE_DUPLICATE.slice(0, -1), "unknown"], "maintain resolve"],
+    [[...RESOLVE_DUPLICATE, "--cause", "data"], "maintain resolve"],
     [
       ["maintain", "resolve", ITEM_ID, "--reason", "pull_request", "--detail"],
       "maintain resolve",
@@ -610,6 +752,7 @@ function summaryBody(changes = {}) {
     last_release: "abc1234",
     status: "open",
     resolution_reason: null,
+    resolution_cause: null,
     issue_url: "https://github.com/acme/app/issues/12",
     ...changes,
   };
@@ -671,11 +814,15 @@ function showBody(changes = {}) {
   };
 }
 
-/** @param {string} reason */
-function resolvedBody(reason) {
+/** @param {string} reason @param {string} cause */
+function resolvedBody(reason, cause) {
   return {
     environment: { project_id: PROJECT_ID, name: "production" },
-    item: summaryBody({ status: "resolved", resolution_reason: reason }),
+    item: summaryBody({
+      status: "resolved",
+      resolution_reason: reason,
+      resolution_cause: cause,
+    }),
   };
 }
 
@@ -730,18 +877,37 @@ function projectDirectory(context, { pushed = true } = {}) {
   return cwd;
 }
 
-/** @param {readonly string[]} argv @param {Record<string, unknown>} [options] */
-async function invoke(argv, options = {}) {
+/**
+ * Runs the CLI. A given fetchFunction sees every request but the index's
+ * account read, which answers with `reports`, off unless given; with
+ * `reports: null`, fetchFunction answers the account read too.
+ *
+ * @param {readonly string[]} argv
+ * @param {Record<string, unknown> & {reports?: "on" | "off" | null, fetchFunction?: typeof globalThis.fetch}} [options]
+ */
+async function invoke(argv, { reports = "off", ...options } = {}) {
   let stdout = "";
   let stderr = "";
+  const given = options.fetchFunction;
   const status = await run({
     argv,
     stdout: { write: (text) => (stdout += text) },
     stderr: { write: (text) => (stderr += text) },
     apiToken: API_TOKEN,
     env: { XDG_CONFIG_HOME: "/nonexistent/firstdraft-test-config" },
-    fetchFunction: async () => assert.fail("No network request was expected"),
     ...options,
+    fetchFunction:
+      given === undefined
+        ? async () => assert.fail("No network request was expected")
+        : reports === null
+          ? given
+          : async (
+              /** @type {string | URL | Request} */ input,
+              /** @type {RequestInit | undefined} */ init,
+            ) =>
+              String(input) === ACCOUNT_URL
+                ? jsonResponse({ reports })
+                : given(input, init),
   });
   return { status, stdout, stderr };
 }

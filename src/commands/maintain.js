@@ -21,6 +21,16 @@ export const RESOLUTION_REASONS = Object.freeze([
   "duplicate",
   "stopped_occurring",
 ]);
+// What caused the error: code First Draft generated, code written since,
+// configuration or the host, data, a dependency, or nothing wrong.
+export const RESOLUTION_CAUSES = Object.freeze([
+  "generated_code",
+  "later_code",
+  "configuration_or_host",
+  "data",
+  "dependency",
+  "not_a_bug",
+]);
 // The Service's Project::Environment::NAME_PATTERN. Checking it locally also
 // keeps a name from adding path segments to the request URL.
 const ENVIRONMENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
@@ -46,6 +56,7 @@ const SUMMARY_KEYS = [
   "last_release",
   "status",
   "resolution_reason",
+  "resolution_cause",
   "issue_url",
 ];
 const DETAIL_KEYS = [...SUMMARY_KEYS, "evidence", "done_when"];
@@ -116,6 +127,25 @@ export function isResolutionReason(value) {
     typeof value === "string" &&
     /** @type {readonly string[]} */ (RESOLUTION_REASONS).includes(value)
   );
+}
+
+/** @param {unknown} value @returns {value is string} */
+export function isResolutionCause(value) {
+  return (
+    typeof value === "string" &&
+    /** @type {readonly string[]} */ (RESOLUTION_CAUSES).includes(value)
+  );
+}
+
+/**
+ * The origin pinned by the Project's first push, which every maintain request
+ * and its account read use.
+ *
+ * @param {string} cwd
+ * @param {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
+ */
+export function maintainOrigin(cwd, fileSystem = DEFAULT_FILE_SYSTEM) {
+  return readContext(cwd, fileSystem).apiUrl;
 }
 
 /**
@@ -225,13 +255,14 @@ export async function showMaintenanceItem({
  * resolved, but a recurrence reopens it, so an unconfirmed outcome must be
  * checked with `maintain show` before resolving again.
  *
- * @param {MaintainRequestOptions & {itemId: string, reason: string, detail?: string}} options
+ * @param {MaintainRequestOptions & {itemId: string, reason: string, cause: string, detail?: string}} options
  */
 export async function resolveMaintenanceItem({
   cwd,
   environment,
   itemId,
   reason,
+  cause,
   detail,
   fetchFunction = globalThis.fetch,
   fileSystem = DEFAULT_FILE_SYSTEM,
@@ -249,7 +280,7 @@ export async function resolveMaintenanceItem({
   );
   const { status, body } = await request(fetchFunction, endpoint, {
     createRequestSignal,
-    json: { reason, ...(detail === undefined ? {} : { detail }) },
+    json: { reason, cause, ...(detail === undefined ? {} : { detail }) },
   });
   const item = isRecord(body) ? body.item : null;
 
@@ -259,7 +290,8 @@ export async function resolveMaintenanceItem({
     !isSummary(item) ||
     item.id !== itemId ||
     item.status !== "resolved" ||
-    item.resolution_reason !== reason
+    item.resolution_reason !== reason ||
+    item.resolution_cause !== cause
   ) {
     throw new MaintainResponseInvalidError(status);
   }
@@ -369,9 +401,12 @@ function isSummary(value) {
     (value.issue_url === null ||
       (typeof value.issue_url === "string" &&
         GITHUB_ISSUE_URL_PATTERN.test(value.issue_url))) &&
-    ((value.status === "open" && value.resolution_reason === null) ||
+    ((value.status === "open" &&
+      value.resolution_reason === null &&
+      value.resolution_cause === null) ||
       (value.status === "resolved" &&
-        isResolutionReason(value.resolution_reason)))
+        isResolutionReason(value.resolution_reason) &&
+        isResolutionCause(value.resolution_cause)))
   );
 }
 

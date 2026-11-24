@@ -3,7 +3,8 @@ import { STAGING_API_URL } from "./api-authentication.js";
 // The plain sentences the CLI prints for an agent, kept here so they are
 // written once. `firstdraft start` and the two steps of the agent's device
 // login print only these, besides the update line every command shares
-// (src/service-client.js). A First Draft answer only chooses among them, and
+// (src/service-client.js), and `firstdraft maintain` prints one of them
+// beside its JSON. A First Draft answer only chooses among them, and
 // the only values they carry are an origin, versions, a token variable's
 // name, and a device login's validated link, user code, and expiry.
 // docs/commands.md quotes them and the Skill copies them, so a change here is
@@ -98,6 +99,14 @@ export const NOTES_ON_LINES = Object.freeze([
   "Wrong output: when analysis or generated code was wrong, run 'firstdraft note wrong_output --source <source> --expected <text> --actual <text>', where <source> is analysis or generated_code; a note about generated code names the recorded Compilation as a report does, and 'firstdraft note wrong_output --help' lists --code, --file, and --workaround.",
   "Write each note in your own plain words, at most 300 characters a field: never secrets, credentials, personal data, or code from the person's project.",
 ]);
+
+/**
+ * What `firstdraft maintain` prints on standard error when the person said
+ * yes to reports, and only then. An item's evidence can hold end users' text,
+ * so the report carries none of it.
+ */
+export const MAINTAIN_REPORTS_ON_LINE =
+  "Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the generated application's root, adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.";
 
 /**
  * @typedef {object} DeviceLoginLink

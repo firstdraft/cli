@@ -22,6 +22,7 @@ const STAGING = "https://staging.firstdraft.com";
 const PROJECT_ID = "01900000-0000-7000-8000-000000009100";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000009101";
 const STORED_ID = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e";
+const ITEM_ID = "3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f";
 const TOKEN = "canary-report-token";
 const STAGING_TOKEN = "canary-staging-report-token";
 const CWD = path.resolve("/work/movie_catalog");
@@ -63,6 +64,7 @@ test("report help lists both reports and each report's options", async () => {
   assert.equal(failure.status, 0);
   for (const option of [
     "--kind <kind>",
+    "--item <item-id>",
     "--rerun <command>",
     "--error-class <name>",
     "--message <text>",
@@ -497,6 +499,27 @@ test("report failure validates its arguments before any request", async () => {
     [...FAILURE, "--fix-summary", "a", "--fix-summary", "b"],
     [...FAILURE, "--canary"],
     ["report", "failure", "canary", "--kind", "boot_error"],
+    [...FAILURE, "--item", ITEM_ID],
+    ["report", "failure", "--kind", "deployed_error"],
+    ["report", "failure", "--kind", "deployed_error", "--item", "canary"],
+    [
+      "report",
+      "failure",
+      "--kind",
+      "deployed_error",
+      "--item",
+      ITEM_ID.toUpperCase(),
+    ],
+    [
+      "report",
+      "failure",
+      "--kind",
+      "deployed_error",
+      "--item",
+      ITEM_ID,
+      "--message",
+      "undefined method for nil",
+    ],
   ]) {
     const result = await invoke(argv);
     assert.equal(result.status, 2, argv.join(" "));
@@ -568,6 +591,47 @@ test("report failure prints exactly the shaped report and what it left out", asy
       "Left out: 1 frame not in the application's files with a line number; the rails version, which is not a version number.\n" +
       "Sent.\n",
   );
+});
+
+test("a deployed error names its maintain item and carries no message", async (context) => {
+  /** @type {unknown} */
+  let sent;
+  const result = await invoke(
+    [
+      "report",
+      "failure",
+      COMPILATION_ID,
+      "--kind",
+      "deployed_error",
+      "--item",
+      ITEM_ID,
+      "--error-class",
+      "NoMethodError",
+      "--frame",
+      "app/models/movie.rb:12",
+      "--rerun",
+      "bin/rspec spec/models/movie_spec.rb:42",
+    ],
+    {
+      cwd: projectDirectory(context, PRODUCTION),
+      fetchFunction: reportsOn(async (_input, init) => {
+        sent = JSON.parse(String(init?.body));
+        return acknowledgment("failure_report");
+      }),
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(sent, {
+    failure_report: {
+      kind: "deployed_error",
+      maintenance_item_id: ITEM_ID,
+      rerun: "bin/rspec spec/models/movie_spec.rb:42",
+      error_class: "NoMethodError",
+      frames: ["app/models/movie.rb:12"],
+    },
+  });
+  assert.match(result.stdout, /\nSent\.\n$/);
 });
 
 test("a failure report carries only the fields that fit their shapes", async (context) => {
