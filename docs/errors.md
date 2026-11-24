@@ -276,7 +276,8 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
 - `invalid_maintain_response` means a success response violated the contract; retrying the unchanged request will
   not repair it. After a resolution, check the item with `maintain show`.
 - The index reads the account first. When that read fails, it reads no items and ends with `account_unavailable`,
-  which is safe to retry, or `invalid_server_response`, which retrying will not repair.
+  which is safe to retry, `invalid_server_response`, which retrying will not repair, or an error any request can give:
+  `authentication_required`, `rate_limited`, or an update refusal.
 
 ## Error index
 

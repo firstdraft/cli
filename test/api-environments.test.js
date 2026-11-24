@@ -198,9 +198,7 @@ test("status, retained Compilation, and maintain commands ignore an initial URL 
     REMOTE_COMMANDS[4],
     REMOTE_COMMANDS[5],
     REMOTE_COMMANDS[6],
-    REMOTE_COMMANDS[7],
-    REMOTE_COMMANDS[8],
-    REMOTE_COMMANDS[9],
+    ...REMOTE_COMMANDS.filter(([group]) => group === "maintain"),
   ]) {
     assert(argv);
     let requests = 0;

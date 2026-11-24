@@ -223,14 +223,16 @@ CLI without the plugin's launcher, such as a direct npm installation, may set th
 
 Beyond the header, a command sends only what it needs:
 
-| Commands                                  | Request content                                                  |
-| ----------------------------------------- | ---------------------------------------------------------------- |
-| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it    |
-| `start`                                   | An account read, and nothing without a token                     |
-| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag               |
-| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                 |
-| `report progress`, `report failure`       | An account read; with reports on, the report printed just before |
-| `note <kind>`                             | An account read; with reports on, the note printed just before   |
+| Commands                                  | Request content                                                                   |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                     |
+| `start`                                   | An account read, and nothing without a token                                      |
+| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                                |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                  |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                  |
+| `note <kind>`                             | An account read; with reports on, the note printed just before                    |
+| `maintain`, `maintain show`               | An account read for the index; then only the IDs and the page in the request path |
+| `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice       |
 
 ### Update line and refusals
 
@@ -895,13 +897,15 @@ command does, then prints one page of the Environment's open items, most severe 
 `resolution_reason`, `resolution_cause`, and `issue_url`, the GitHub issue First Draft filed and keeps current for
 the item, or `null` before it has one. When `next_page` is a number, pass it as `--page` to read the next page; it is
 `null` on the last page. When the account read fails, it reads no items and ends with `account_unavailable`, which is
-safe to retry, or `invalid_server_response`.
+safe to retry, with `invalid_server_response`, or with an error that any request can give:
+[`authentication_required`](errors.md#environment-and-credential-errors), or `rate_limited` or an update refusal
+([update and limit errors](errors.md#update-and-limit-errors)).
 
 When First Draft answers `{"reports": "on"}`, and only then, `firstdraft maintain` also writes one fixed sentence on
 standard error after the items, `MAINTAIN_REPORTS_ON_LINE` in `src/agent-sentences.js`:
 
 ```text
-Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the generated application's root, adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.
+Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.
 ```
 
 The agent of a person who said no hears nothing about reports, as with `start`.
