@@ -79,7 +79,6 @@ import {
 import { LogoutFailedError, logout } from "./commands/logout.js";
 import {
   DEFAULT_ENVIRONMENT,
-  MaintainNotPushedError,
   MaintainRejectedError,
   MaintainResponseInvalidError,
   MaintainUnavailableError,
@@ -642,7 +641,7 @@ Options:
       --reason <reason>     pull_request, host_change, not_a_bug, duplicate,
                             or stopped_occurring
       --cause <cause>       generated_code, later_code, configuration_or_host,
-                            data, dependency, or not_a_bug
+                            data, dependency, not_a_bug, or unknown
       --detail <text>       What resolved it, such as a pull request URL
       --environment <name>  Deployed Environment (default: production)
       --staging             Use staging; reject a different saved origin
@@ -884,7 +883,7 @@ const MAINTAIN_SHOW_INVALID_ARGUMENTS_DETAIL =
 const MAINTAIN_RESOLVE_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft maintain resolve --help' for usage.";
 const MAINTAIN_LOCAL_INPUT_UNREADABLE_DETAIL =
-  "Could not read valid local First Draft state. No network request was made. Run this command from the directory whose .firstdraft holds the Project's state; after root adoption, that is .firstdraft/design.";
+  "Could not read valid local First Draft state. No network request was made. Run this command from the application's root, where the CLI reads the Project's state archived at .firstdraft/design, or from the directory whose .firstdraft holds that state.";
 const MAINTAIN_NOT_PUSHED_DETAIL =
   "The local Project has no pinned API origin. Run 'firstdraft plan push' first.";
 const MAINTAIN_REJECTED_DETAIL =
@@ -2206,7 +2205,7 @@ async function runMaintainRequest(options, stagingOption, send) {
       return 1;
     }
 
-    if (error instanceof MaintainNotPushedError) {
+    if (error instanceof PlanStateNotPushedError) {
       writeJson(stderr, {
         error: "project_not_pushed",
         detail: MAINTAIN_NOT_PUSHED_DETAIL,

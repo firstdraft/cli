@@ -92,9 +92,10 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   GitHub issue as `issue_url`. It reads the account first and, only when reports are on, says on standard error when
   to send a failure report about an item. `maintain show <item-id>` prints one item with its latest evidence, whose
   `untrusted` list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>`
-  resolves it with a `--reason`, a `--cause` that says what caused the error, and an optional `--detail`, such as the
-  pull request. Each takes `--environment`, `production` by default, uses the Project's pinned origin, and changes no
-  local state.
+  resolves it with a `--reason`, a `--cause` that says what caused the error (`unknown` when the agent could not
+  tell), and an optional `--detail`, such as the pull request. Each takes `--environment`, `production` by default,
+  runs from the generated application's root or the Project's directory, uses the Project's pinned origin, and changes
+  no local state.
 - `report failure --kind deployed_error --item <item-id>` reports an error in a deployed application that
   `maintain resolve` traced to code First Draft generated. It names the item and takes no `--message`.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,

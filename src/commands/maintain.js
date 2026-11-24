@@ -10,7 +10,7 @@ import {
   sendRequest,
   serviceEndpoint,
 } from "../api-response.js";
-import { readPlanState } from "../plan-state.js";
+import { readPinnedProject } from "../plan-state.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_ENVIRONMENT = "production";
@@ -22,7 +22,8 @@ export const RESOLUTION_REASONS = Object.freeze([
   "stopped_occurring",
 ]);
 // What caused the error: code First Draft generated, code written since,
-// configuration or the host, data, a dependency, or nothing wrong.
+// configuration or the host, data, a dependency, nothing wrong, or unknown
+// when the agent looked and could not tell.
 export const RESOLUTION_CAUSES = Object.freeze([
   "generated_code",
   "later_code",
@@ -30,6 +31,7 @@ export const RESOLUTION_CAUSES = Object.freeze([
   "data",
   "dependency",
   "not_a_bug",
+  "unknown",
 ]);
 // The Service's Project::Environment::NAME_PATTERN. Checking it locally also
 // keeps a name from adding path segments to the request URL.
@@ -76,8 +78,6 @@ const TIMESTAMP_PATTERN =
 
 /** @type {import("../plan-state.js").PlanStateFileSystem} */
 const DEFAULT_FILE_SYSTEM = { lstatSync, readFileSync };
-
-export class MaintainNotPushedError extends Error {}
 
 export class MaintainRejectedError extends Error {
   /**
@@ -303,18 +303,15 @@ export async function resolveMaintenanceItem({
 }
 
 /**
+ * The pinned Project, read from `cwd` or, at an adopted application's root,
+ * from its archive at .firstdraft/design, as the report commands read it.
+ *
  * @param {string} cwd
  * @param {import("../plan-state.js").PlanStateFileSystem} fileSystem
  */
 function readContext(cwd, fileSystem) {
-  const state = readPlanState({ cwd, fileSystem });
-  if (state.api_url === undefined) {
-    throw new MaintainNotPushedError(
-      "The local Foundation Plan has not been pushed.",
-    );
-  }
-
-  return { apiUrl: state.api_url, projectId: state.project_id };
+  const { apiUrl, projectId } = readPinnedProject({ cwd, fileSystem });
+  return { apiUrl, projectId };
 }
 
 /**

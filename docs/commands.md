@@ -915,8 +915,9 @@ instructions. `done_when` says what must be true before the item is resolved.
 
 `maintain resolve` resolves an open item with a `--reason` of `pull_request`, `host_change`, `not_a_bug`,
 `duplicate`, or `stopped_occurring`, a `--cause` of `generated_code` (code First Draft generated), `later_code` (code
-written since), `configuration_or_host`, `data`, `dependency`, or `not_a_bug`, and an optional `--detail`, such as
-the pull request URL. The reason says how the item was resolved and the cause what caused its error. The CLI rejects
+written since), `configuration_or_host`, `data`, `dependency`, `not_a_bug`, or `unknown`, and an optional `--detail`,
+such as the pull request URL. The reason says how the item was resolved and the cause what caused its error;
+`unknown` is for an agent that looked and could not tell. The CLI rejects
 any other reason or cause before making a request. Success prints the resolved item. First Draft reopens an item when its error
 recurs. It refuses to resolve an item that is still resolved, with `409 item_already_resolved`. A repeat is refused
 only while the item stays resolved, so after an unconfirmed resolution run `maintain show` and reassess the item before
@@ -924,8 +925,9 @@ resolving again.
 
 Each command takes `--environment`, which defaults to `production`: a lowercase name of letters, digits, and hyphens
 that starts with a letter. Item IDs are lowercase UUIDs. The commands use the Project ID and API origin in
-`.firstdraft/state.json`, so run them from the directory that holds the Project's `.firstdraft` state; after root
-adoption, that is `.firstdraft/design`. `show` and `resolve` make one request, and the index two. Each request has a
+`.firstdraft/state.json`. Run them from the generated application's root, where the CLI finds that state archived at
+`.firstdraft/design` after root adoption, as the report commands do, or from the Project's directory. `show` and
+`resolve` make one request, and the index two. Each request has a
 bounded timeout and refuses redirects; the commands change no local state, and print only a response that matches the
 contract exactly, including its Project ID, Environment name, and item ID. See
 [maintenance recovery](errors.md#maintenance-recovery).
