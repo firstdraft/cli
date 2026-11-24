@@ -267,13 +267,16 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
   `404 environment_not_found` means this account has no Environment of that name in the Project: check
   `--environment`, the directory, and that the environment and login match the Project's. `404 item_not_found` means
   the Environment has no such item; take IDs from the index. `400 invalid_resolution_reason` names an unaccepted
-  reason, and `400 invalid_resolution_detail` a detail over 1,000 characters.
+  reason, `400 invalid_resolution_cause` an unaccepted cause, and `400 invalid_resolution_detail` a detail over
+  1,000 characters.
 - `maintain_unavailable` means a network failure, timeout, server error, or error response without a problem body
   left the result unconfirmed. Retry a read. After a resolution, check the item with `maintain show` and reassess it
   before resolving again. A `404` with no `response` usually
   means the pinned origin's Service has no maintenance routes, so retrying will not help until it is upgraded.
 - `invalid_maintain_response` means a success response violated the contract; retrying the unchanged request will
   not repair it. After a resolution, check the item with `maintain show`.
+- The index reads the account first. When that read fails, it reads no items and ends with `account_unavailable`,
+  which is safe to retry, or `invalid_server_response`, which retrying will not repair.
 
 ## Error index
 
@@ -313,7 +316,7 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
 | Download commands                                          | `artifact_unavailable`, `invalid_artifact`                                                         |    1 | Artifact transport or integrity validation failed; direct Compile post-start errors include `current`.          |
 | Download commands                                          | `invalid_output_path`                                                                              |    2 | The absent destination or root-adoption preconditions failed; `reason` identifies the stable refusal.           |
 | Download commands                                          | `materialization_failed`                                                                           |    1 | The output changed or its transaction failed; `reason` identifies incomplete rollback when applicable.          |
-| `account`, `start`                                         | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
+| `account`, `start`, `maintain`                             | `account_unavailable`, `invalid_server_response`                                                   |    1 | The account read failed or violated its contract.                                                               |
 | `report progress`, `report failure`                        | `report_rejected`, `report_unavailable`, `account_unavailable`, `invalid_server_response`          |    1 | The report was refused or its outcome is unconfirmed, or the account read failed; continue without it.          |
 | `note <kind>`                                              | `note_rejected`, `note_unavailable`, `account_unavailable`, `invalid_server_response`              |    1 | The note was refused or its outcome is unconfirmed, or the account read failed; continue without it.            |
 | `report`, `note wrong_output`                              | `compilation_not_recorded`                                                                         |    1 | No Compilation was given or recorded; nothing was sent ([recovery](#report-and-note-errors)).                   |

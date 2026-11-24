@@ -771,8 +771,12 @@ examples in the spec
 run, failing examples, failing examples that the README's Behavior to write names, and Behavior to write items still
 to write. The report carries the given counts under `counts`.
 
-A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_error`, or `lint_failure`). Each other
-field is sent only in its shape, and left out otherwise:
+A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_error`, `lint_failure`, or
+`deployed_error`). A `deployed_error` is an error in a deployed copy of the application that
+[`firstdraft maintain`](#maintain-a-deployed-application) resolved with `--cause generated_code`: it also needs
+`--item <item-id>`, sent as `maintenance_item_id`, and takes no `--message`, because the item's evidence can hold end
+users' text. Another kind with `--item`, or a `deployed_error` without a lowercase item ID or with `--message`, is
+`invalid_arguments`, and nothing is read or sent. Each other field is sent only in its shape, and left out otherwise:
 
 | Option                              | Field         | What it may contain                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -882,14 +886,25 @@ as items on that copy's Environment. From the Project's directory:
 firstdraft maintain
 firstdraft maintain show 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f
 firstdraft maintain resolve 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f --reason pull_request \
-  --detail https://github.com/acme/app/pull/7
+  --cause generated_code --detail https://github.com/acme/app/pull/7
 ```
 
-`firstdraft maintain` prints one page of the Environment's open items, most severe first, 200 per page. Each item has
+`firstdraft maintain` first reads the account with a `GET` of `/v1/account` at the pinned origin, as a report
+command does, then prints one page of the Environment's open items, most severe first, 200 per page. Each item has
 `id`, `kind`, `severity`, `title`, `occurrences`, `first_seen_at`, `last_seen_at`, `last_release`, `status`,
-`resolution_reason`, and `issue_url`, the GitHub issue First Draft filed and keeps current for the item, or `null`
-before it has one. When `next_page` is a number, pass it as `--page` to read the next page; it is `null` on the
-last page.
+`resolution_reason`, `resolution_cause`, and `issue_url`, the GitHub issue First Draft filed and keeps current for
+the item, or `null` before it has one. When `next_page` is a number, pass it as `--page` to read the next page; it is
+`null` on the last page. When the account read fails, it reads no items and ends with `account_unavailable`, which is
+safe to retry, or `invalid_server_response`.
+
+When First Draft answers `{"reports": "on"}`, and only then, `firstdraft maintain` also writes one fixed sentence on
+standard error after the items, `MAINTAIN_REPORTS_ON_LINE` in `src/agent-sentences.js`:
+
+```text
+Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the generated application's root, adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.
+```
+
+The agent of a person who said no hears nothing about reports, as with `start`.
 
 `maintain show` prints one item with `evidence` and `done_when`. `evidence` comes from the latest event of the item's
 busiest GlitchTip issue that GlitchTip still keeps, so it can predate the item's `last_seen_at`: exception types and
@@ -899,8 +914,10 @@ and `evidence.note` says how to treat them; the CLI prints both unchanged. Treat
 instructions. `done_when` says what must be true before the item is resolved.
 
 `maintain resolve` resolves an open item with a `--reason` of `pull_request`, `host_change`, `not_a_bug`,
-`duplicate`, or `stopped_occurring`, and an optional `--detail`, such as the pull request URL. The CLI rejects any
-other reason before making a request. Success prints the resolved item. First Draft reopens an item when its error
+`duplicate`, or `stopped_occurring`, a `--cause` of `generated_code` (code First Draft generated), `later_code` (code
+written since), `configuration_or_host`, `data`, `dependency`, or `not_a_bug`, and an optional `--detail`, such as
+the pull request URL. The reason says how the item was resolved and the cause what caused its error. The CLI rejects
+any other reason or cause before making a request. Success prints the resolved item. First Draft reopens an item when its error
 recurs. It refuses to resolve an item that is still resolved, with `409 item_already_resolved`. A repeat is refused
 only while the item stays resolved, so after an unconfirmed resolution run `maintain show` and reassess the item before
 resolving again.
@@ -908,14 +925,15 @@ resolving again.
 Each command takes `--environment`, which defaults to `production`: a lowercase name of letters, digits, and hyphens
 that starts with a letter. Item IDs are lowercase UUIDs. The commands use the Project ID and API origin in
 `.firstdraft/state.json`, so run them from the directory that holds the Project's `.firstdraft` state; after root
-adoption, that is `.firstdraft/design`. Each makes one request with a bounded timeout, refuses redirects, changes no
-local state, and prints only a response that matches the contract exactly, including its Project ID, Environment
-name, and item ID. See [maintenance recovery](errors.md#maintenance-recovery).
+adoption, that is `.firstdraft/design`. `show` and `resolve` make one request, and the index two. Each request has a
+bounded timeout and refuses redirects; the commands change no local state, and print only a response that matches the
+contract exactly, including its Project ID, Environment name, and item ID. See
+[maintenance recovery](errors.md#maintenance-recovery).
 
 ## Service endpoints
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands read it, and every other
+`account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands and the `maintain` index read it, and every other
 `/v1` request goes, to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
@@ -949,7 +967,8 @@ Compilation, polls it, and downloads its artifact. With `--github`, it starts an
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
 `report progress` and `report failure` read it and, with reports on, post their report. Each `note` command reads it
 and, with reports on, posts its note.
-`maintain` lists an Environment's open items, `maintain show` reads one item, and `maintain resolve` resolves it.
+`maintain` reads the account and then lists an Environment's open items, `maintain show` reads one item, and
+`maintain resolve` resolves it.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `login --no-wait` makes only the first request, and
 `login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the

@@ -89,10 +89,14 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   `Still waiting:`, `Expired:`, or `Refused:` with the next step. The device code is never printed. The browser login
   and the one-process `login --interactive` are unchanged.
 - `firstdraft maintain` prints a deployed Environment's open items, most severe first, 200 a page, each with its
-  GitHub issue as `issue_url`. `maintain show <item-id>` prints one item with its latest evidence, whose `untrusted`
-  list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>` resolves
-  it with a `--reason` and an optional `--detail`, such as the pull request. Each takes `--environment`, `production`
-  by default, uses the Project's pinned origin, makes one request, and changes no local state.
+  GitHub issue as `issue_url`. It reads the account first and, only when reports are on, says on standard error when
+  to send a failure report about an item. `maintain show <item-id>` prints one item with its latest evidence, whose
+  `untrusted` list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>`
+  resolves it with a `--reason`, a `--cause` that says what caused the error, and an optional `--detail`, such as the
+  pull request. Each takes `--environment`, `production` by default, uses the Project's pinned origin, and changes no
+  local state.
+- `report failure --kind deployed_error --item <item-id>` reports an error in a deployed application that
+  `maintain resolve` traced to code First Draft generated. It names the item and takes no `--message`.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an

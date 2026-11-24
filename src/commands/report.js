@@ -23,6 +23,9 @@ export const FAILURE_KINDS = Object.freeze([
   "setup_failure",
   "boot_error",
   "lint_failure",
+  // An error in a deployed copy of the application, from a `firstdraft
+  // maintain` item: it names the item and carries no message.
+  "deployed_error",
 ]);
 const MAX_FAILURE_FRAMES = 20;
 
@@ -111,6 +114,7 @@ export function progressReportBody(step, counts) {
 /**
  * @typedef {object} FailureReport
  * @property {string} kind one of FAILURE_KINDS
+ * @property {string} [maintenanceItemId] a deployed_error's item, checked by the caller
  * @property {string} [rerun]
  * @property {string} [errorClass]
  * @property {string} [message]
@@ -130,6 +134,7 @@ export function progressReportBody(step, counts) {
 export function failureReportBody(
   {
     kind,
+    maintenanceItemId,
     rerun,
     errorClass,
     message,
@@ -197,6 +202,9 @@ export function failureReportBody(
     body: {
       failure_report: {
         kind,
+        ...(maintenanceItemId === undefined
+          ? {}
+          : { maintenance_item_id: maintenanceItemId }),
         ...(shapedRerun === undefined ? {} : { rerun: shapedRerun }),
         ...(shapedErrorClass === undefined
           ? {}

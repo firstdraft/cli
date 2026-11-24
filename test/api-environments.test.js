@@ -50,7 +50,15 @@ const REMOTE_COMMANDS = [
   ],
   ["maintain"],
   ["maintain", "show", ITEM_ID],
-  ["maintain", "resolve", ITEM_ID, "--reason", "not_a_bug"],
+  [
+    "maintain",
+    "resolve",
+    ITEM_ID,
+    "--reason",
+    "not_a_bug",
+    "--cause",
+    "not_a_bug",
+  ],
 ];
 
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {

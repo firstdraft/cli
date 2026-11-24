@@ -729,6 +729,7 @@ async function exercisePackedCompilation(projectDirectory) {
     last_release: null,
     status: "open",
     resolution_reason: null,
+    resolution_cause: null,
     issue_url: null,
   };
   const maintenanceIndex = { environment, items: [item], next_page: null };
@@ -761,7 +762,12 @@ async function exercisePackedCompilation(projectDirectory) {
   };
   const resolvedItem = {
     environment,
-    item: { ...item, status: "resolved", resolution_reason: "pull_request" },
+    item: {
+      ...item,
+      status: "resolved",
+      resolution_reason: "pull_request",
+      resolution_cause: "generated_code",
+    },
   };
   const seen = {
     plan: false,
@@ -852,6 +858,11 @@ async function exercisePackedCompilation(projectDirectory) {
       return;
     }
 
+    // The maintain index reads the account first.
+    if (request.method === "GET" && request.url === "/v1/account") {
+      respondJson(response, 200, { reports: "off" });
+      return;
+    }
     if (request.method === "GET" && request.url === `${itemsPath}?page=1`) {
       seen.maintenance += 1;
       respondJson(response, 200, maintenanceIndex);
@@ -869,6 +880,7 @@ async function exercisePackedCompilation(projectDirectory) {
       assert.equal(request.headers["content-type"], "application/json");
       assert.deepEqual(JSON.parse(requestBody.toString("utf8")), {
         reason: "pull_request",
+        cause: "generated_code",
         detail: "https://github.com/octocat/oscar-party/pull/1",
       });
       seen.maintenance += 1;
@@ -970,6 +982,8 @@ First Draft: Application compiled.
           itemId,
           "--reason",
           "pull_request",
+          "--cause",
+          "generated_code",
           "--detail",
           "https://github.com/octocat/oscar-party/pull/1",
         ],

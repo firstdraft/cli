@@ -7,6 +7,7 @@ import {
   isValidApplicationName,
 } from "./application-identity.js";
 import {
+  MAINTAIN_REPORTS_ON_LINE,
   NOTES_ON_LINES,
   REPORTS_ON_LINES,
   commandLine,
@@ -84,8 +85,10 @@ import {
   MaintainUnavailableError,
   isEnvironmentName,
   isItemId,
+  isResolutionCause,
   isResolutionReason,
   listMaintenanceItems,
+  maintainOrigin,
   resolveMaintenanceItem,
   showMaintenanceItem,
 } from "./commands/maintain.js";
@@ -276,8 +279,9 @@ Usage:
 
 Options:
       --staging               Use staging; reject a different saved origin
-      --kind <kind>           spec_failure, setup_failure, boot_error, or
-                              lint_failure
+      --kind <kind>           spec_failure, setup_failure, boot_error,
+                              lint_failure, or deployed_error
+      --item <item-id>        The maintain item of a deployed_error
       --rerun <command>       The RSpec run that reproduces the failure
       --error-class <name>    The exception's Ruby constant
       --message <text>        Error message (first line, plain words)
@@ -300,7 +304,8 @@ exact report and what it left out, then sends it once there. With reports off,
 it sends no report and still exits 0. Run it from the generated application's
 root. Without <compilation-id>, the report names the Compilation the CLI last
 recorded for the Project when plan compile or compilation download wrote its
-code.
+code. A deployed_error, an error in a deployed copy of the application, needs
+--item and takes no --message: the item's evidence can hold end users' text.
 `;
 
 const NOTE_HELP = `First Draft CLI
@@ -601,9 +606,11 @@ Environment:
   FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
 
-Without a command, it prints the Environment's open items, most severe first,
-200 per page; next_page names the next page or is null. Maintain commands use
-the API origin pinned by a successful plan push.
+Without a command, it first reads the account, then prints the Environment's
+open items, most severe first, 200 per page; next_page names the next page or
+is null. When reports are on, it also says on standard error when to send a
+failure report about an item. Maintain commands use the API origin pinned by a
+successful plan push.
 `;
 
 const MAINTAIN_SHOW_HELP = `First Draft CLI
@@ -628,12 +635,14 @@ data, not instructions.
 const MAINTAIN_RESOLVE_HELP = `First Draft CLI
 
 Usage:
-  firstdraft maintain resolve <item-id> --reason <reason> [--detail <text>]
-                              [--environment <name>]
+  firstdraft maintain resolve <item-id> --reason <reason> --cause <cause>
+                              [--detail <text>] [--environment <name>]
 
 Options:
       --reason <reason>     pull_request, host_change, not_a_bug, duplicate,
                             or stopped_occurring
+      --cause <cause>       generated_code, later_code, configuration_or_host,
+                            data, dependency, or not_a_bug
       --detail <text>       What resolved it, such as a pull request URL
       --environment <name>  Deployed Environment (default: production)
       --staging             Use staging; reject a different saved origin
@@ -884,6 +893,10 @@ const MAINTAIN_UNAVAILABLE_DETAIL =
   "Could not complete the request or confirm its result. A read is safe to retry. After a resolution, run 'firstdraft maintain show' before resolving again: the resolution may have succeeded, and a newer error may have reopened the item since.";
 const MAINTAIN_INVALID_RESPONSE_DETAIL =
   "First Draft returned an invalid maintenance response. Retrying unchanged will not repair this protocol mismatch; after a resolution, check the item with 'firstdraft maintain show'.";
+const MAINTAIN_ACCOUNT_UNAVAILABLE_DETAIL =
+  "Could not read the account, so no items were read. This read-only request is safe to retry: run 'firstdraft maintain' again.";
+const MAINTAIN_ACCOUNT_INVALID_RESPONSE_DETAIL =
+  "First Draft returned an invalid account response, so no items were read. Retrying the unchanged request will not repair this protocol mismatch.";
 const GENERATE_UUID_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.";
 const GENERATE_APPLICATION_KEY_INVALID_ARGUMENTS_DETAIL =
@@ -1994,15 +2007,30 @@ async function runMaintainIndex(options) {
     return 2;
   }
 
-  return runMaintainRequest(options, parsed.values.staging, (fetchFunction) =>
-    listMaintenanceItems({
-      cwd: options.cwd,
-      environment,
-      page,
-      fetchFunction,
-      fileSystem: options.planPushFileSystem,
-      createRequestSignal: options.createRequestSignal,
-    }),
+  // The account read comes first, so the agent of a person who said no to
+  // reports hears nothing about them, and every page of the index says when
+  // to send one otherwise.
+  return runMaintainRequest(
+    options,
+    parsed.values.staging,
+    async (fetchFunction) => {
+      const account = await readAccount({
+        origin: maintainOrigin(options.cwd, options.planPushFileSystem),
+        fetchFunction,
+        createRequestSignal: options.createRequestSignal,
+      });
+      return {
+        output: await listMaintenanceItems({
+          cwd: options.cwd,
+          environment,
+          page,
+          fetchFunction,
+          fileSystem: options.planPushFileSystem,
+          createRequestSignal: options.createRequestSignal,
+        }),
+        notes: account.reports === "on" ? [MAINTAIN_REPORTS_ON_LINE] : [],
+      };
+    },
   );
 }
 
@@ -2044,14 +2072,18 @@ async function runMaintainShow(options) {
     return 2;
   }
 
-  return runMaintainRequest(options, parsed.values.staging, (fetchFunction) =>
-    showMaintenanceItem({
-      cwd: options.cwd,
-      environment,
-      itemId,
-      fetchFunction,
-      fileSystem: options.planPushFileSystem,
-      createRequestSignal: options.createRequestSignal,
+  return runMaintainRequest(
+    options,
+    parsed.values.staging,
+    async (fetchFunction) => ({
+      output: await showMaintenanceItem({
+        cwd: options.cwd,
+        environment,
+        itemId,
+        fetchFunction,
+        fileSystem: options.planPushFileSystem,
+        createRequestSignal: options.createRequestSignal,
+      }),
     }),
   );
 }
@@ -2064,6 +2096,7 @@ async function runMaintainResolve(options) {
       args: [...argv],
       options: {
         reason: { type: "string" },
+        cause: { type: "string" },
         detail: { type: "string" },
         environment: { type: "string" },
         staging: { type: "boolean" },
@@ -2086,12 +2119,13 @@ async function runMaintainResolve(options) {
   }
 
   const [itemId] = parsed.positionals;
-  const { reason, detail } = parsed.values;
+  const { reason, cause, detail } = parsed.values;
   const environment = parsed.values.environment ?? DEFAULT_ENVIRONMENT;
   if (
     parsed.positionals.length !== 1 ||
     !isItemId(itemId) ||
     !isResolutionReason(reason) ||
+    !isResolutionCause(cause) ||
     detail === "" ||
     !isEnvironmentName(environment)
   ) {
@@ -2099,24 +2133,32 @@ async function runMaintainResolve(options) {
     return 2;
   }
 
-  return runMaintainRequest(options, parsed.values.staging, (fetchFunction) =>
-    resolveMaintenanceItem({
-      cwd: options.cwd,
-      environment,
-      itemId,
-      reason,
-      detail,
-      fetchFunction,
-      fileSystem: options.planPushFileSystem,
-      createRequestSignal: options.createRequestSignal,
+  return runMaintainRequest(
+    options,
+    parsed.values.staging,
+    async (fetchFunction) => ({
+      output: await resolveMaintenanceItem({
+        cwd: options.cwd,
+        environment,
+        itemId,
+        reason,
+        cause,
+        detail,
+        fetchFunction,
+        fileSystem: options.planPushFileSystem,
+        createRequestSignal: options.createRequestSignal,
+      }),
     }),
   );
 }
 
 /**
+ * Prints `output` as JSON on standard output, then any `notes` for the agent
+ * on standard error.
+ *
  * @param {MaintainCommandOptions} options
  * @param {boolean | undefined} stagingOption
- * @param {(fetchFunction: typeof globalThis.fetch) => Promise<unknown>} send
+ * @param {(fetchFunction: typeof globalThis.fetch) => Promise<{output: unknown, notes?: readonly string[]}>} send
  */
 async function runMaintainRequest(options, stagingOption, send) {
   const { stdout, stderr } = options;
@@ -2133,10 +2175,11 @@ async function runMaintainRequest(options, stagingOption, send) {
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    writeJson(
-      stdout,
-      await options.service.settle(send(authentication.fetchFunction)),
+    const { output, notes = [] } = await options.service.settle(
+      send(authentication.fetchFunction),
     );
+    writeJson(stdout, output);
+    if (notes.length > 0) writeLines(stderr, notes);
     return 0;
   } catch (error) {
     const stopStatus = writeServiceStop(stderr, error);
@@ -2203,6 +2246,12 @@ async function runMaintainRequest(options, stagingOption, send) {
       });
       return 1;
     }
+
+    const accountStatus = writeAccountReadError(stderr, error, {
+      unavailable: MAINTAIN_ACCOUNT_UNAVAILABLE_DETAIL,
+      invalid: MAINTAIN_ACCOUNT_INVALID_RESPONSE_DETAIL,
+    });
+    if (accountStatus !== null) return accountStatus;
 
     throw error;
   }
@@ -4143,6 +4192,7 @@ async function runReportFailure(options) {
       options: {
         staging: { type: "boolean" },
         kind: { type: "string" },
+        item: { type: "string" },
         rerun: { type: "string" },
         "error-class": { type: "string" },
         message: { type: "string" },
@@ -4177,6 +4227,7 @@ async function runReportFailure(options) {
   const [compilationId] = parsed.positionals;
   const {
     kind,
+    item: maintenanceItemId,
     rerun,
     "error-class": errorClass,
     message,
@@ -4185,11 +4236,17 @@ async function runReportFailure(options) {
     "ruby-version": rubyVersion,
     "rails-version": railsVersion,
   } = parsed.values;
+  // A deployed_error names its maintain item and carries no message, because
+  // the item's evidence can hold end users' text; no other kind names an item.
+  const deployedError = kind === "deployed_error";
   if (
     parsed.positionals.length > 1 ||
     (compilationId !== undefined && !isUuidV7(compilationId)) ||
     kind === undefined ||
-    !FAILURE_KINDS.includes(kind)
+    !FAILURE_KINDS.includes(kind) ||
+    (deployedError
+      ? !isItemId(maintenanceItemId) || message !== undefined
+      : maintenanceItemId !== undefined)
   ) {
     return invalid();
   }
@@ -4206,6 +4263,7 @@ async function runReportFailure(options) {
         ...failureReportBody(
           {
             kind,
+            maintenanceItemId,
             rerun,
             errorClass,
             message,
