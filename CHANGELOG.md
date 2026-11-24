@@ -11,9 +11,10 @@ repository's [tags](https://github.com/firstdraft/cli/tags) identify the source 
 
 ## 0.10.0
 
-Lets First Draft tell a setup that it is out of date, and adds the account, report, note, and `start` commands and a
-device login in two steps, so a person working alone hears when to update, their agent can log them in, and it can send
-the progress and failure reports and the notes the person agreed to, for the application's whole life. Moves the Rails
+Lets First Draft tell a setup that it is out of date, and adds the account, report, note, `maintain`, and `start`
+commands and a device login in two steps, so a person working alone hears when to update, their agent can log them in,
+it can send the progress and failure reports and the notes the person agreed to, for the application's whole life, and
+it can work through what needs attention in the deployed application. Moves the Rails
 target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x`.
 
 - `plan init` writes Plans that target `rails-sketch/2026-11`. `plan compile` and `compilation download` accept only
@@ -87,17 +88,23 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   removes that file; it also removes it once the grant is refused, expired, or spent. It prints `Logged in:`,
   `Still waiting:`, `Expired:`, or `Refused:` with the next step. The device code is never printed. The browser login
   and the one-process `login --interactive` are unchanged.
+- `firstdraft maintain` prints a deployed Environment's open items, most severe first, 200 a page, each with its
+  GitHub issue as `issue_url`. `maintain show <item-id>` prints one item with its latest evidence, whose `untrusted`
+  list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>` resolves
+  it with a `--reason` and an optional `--detail`, such as the pull request. Each takes `--environment`, `production`
+  by default, uses the Project's pinned origin, makes one request, and changes no local state.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
   what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
   unconfirmed Publication under `plan compile --github` is unchanged.
 - New `error` values, each with exit status 1: `update_required`, `api_contract_unsupported`, `rate_limited`,
   `account_unavailable`, `report_rejected`, `report_unavailable`, `note_rejected`, `note_unavailable`,
-  `compilation_not_recorded`, and, from `login --finish`, `authorization_pending` and `login_not_started`; and, from the
+  `compilation_not_recorded`, `maintain_rejected`, `maintain_unavailable`, `invalid_maintain_response`, and, from
+  `login --finish`, `authorization_pending` and `login_not_started`; and, from the
   note commands, `note_incomplete` with exit status 2. `account`, `start`, and the report and note commands also report
   `authentication_required` and `invalid_server_response` (exit status 1) and `invalid_arguments` and
-  `invalid_configuration` (exit status 2). The report and note commands also report `local_input_unreadable` and
-  `project_not_pushed` (exit status 1). `login_failed` gains the reasons `device_login_invalid` and
+  `invalid_configuration` (exit status 2). The report, note, and `maintain` commands also report `local_input_unreadable`
+  and `project_not_pushed` (exit status 1). `login_failed` gains the reasons `device_login_invalid` and
   `device_login_unavailable` for the waiting device login's file.
 
 Use CLI 0.10.0 with a Service that serves API `0.9.x`. Once a response from an origin names API `0.8.x`, the CLI sends

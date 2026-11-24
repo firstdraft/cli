@@ -75,6 +75,18 @@ export const SERVICE_ROUTES = {
     method: "POST",
     path: "/v1/projects/{project_id}/notes",
   },
+  listMaintenanceItems: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/items",
+  },
+  readMaintenanceItem: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}",
+  },
+  resolveMaintenanceItem: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/resolution",
+  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",
