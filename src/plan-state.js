@@ -98,6 +98,7 @@ export function readPinnedOrApplicationProject({
   );
   const gapSetFile = path.join(cwd, APPLICATION_GAP_SET);
   if (isAbsent(stateFile, fileSystem) && !isAbsent(gapSetFile, fileSystem)) {
+    assertLocalDirectory(path.join(cwd, ".firstdraft"), fileSystem);
     return {
       apiUrl: selectOrigin(),
       projectId: readGapSetProjectId(gapSetFile, fileSystem),
@@ -118,9 +119,13 @@ function readGapSetProjectId(filePath, fileSystem) {
   /** @type {unknown} */
   let document;
   try {
-    document = JSON.parse(source.toString("utf8"));
+    document = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(source),
+    );
   } catch {
-    throw new PlanStateLocalError("The application's GapSet is not JSON.");
+    throw new PlanStateLocalError(
+      "The application's GapSet is not UTF-8 JSON.",
+    );
   }
   const projectId =
     isRecord(document) &&

@@ -109,16 +109,16 @@ export const MAINTAIN_REPORTS_ON_LINE =
   "Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.";
 
 /**
- * What a maintain command, or a deployed_error report, prints on standard
- * error when it found no Project state and read the Project from the
- * application's .firstdraft/gaps.json, as in a fresh clone. Those files hold
- * neither the origin nor the Compilation, so the line says which origin it
- * used and what a report then needs.
+ * What a maintain command prints on standard error when it found no Project
+ * state and read the Project from the
+ * application's .firstdraft/gaps.json, as in a fresh clone. That file holds
+ * no origin, so the line says which origin it used. It says nothing about
+ * reports, which the agent of a person who said no never hears about.
  *
  * @param {string} origin
  */
 export function applicationProjectLine(origin) {
-  return `No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json and used ${origin}: if the Project is on another First Draft origin, add --staging or set FIRSTDRAFT_API_URL. This copy records no Compilation, so a failure report from here needs the Compilation's ID right after 'report failure'.`;
+  return `No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json and used ${origin}: if the Project is on another First Draft origin, add --staging or set FIRSTDRAFT_API_URL.`;
 }
 
 /**
