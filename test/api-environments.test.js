@@ -60,6 +60,23 @@ const REMOTE_COMMANDS = [
   ],
 ];
 
+/**
+ * The REMOTE_COMMANDS entry for `group command`. Tests name the commands they
+ * need instead of indexing the list, which shifts whenever a command is added
+ * or removed.
+ *
+ * @param {string} group
+ * @param {string} command
+ */
+function remoteCommand(group, command) {
+  const argv = REMOTE_COMMANDS.find(
+    ([candidateGroup, candidateCommand]) =>
+      candidateGroup === group && candidateCommand === command,
+  );
+  assert(argv, `REMOTE_COMMANDS has no ${group} ${command}`);
+  return argv;
+}
+
 test("production and staging credentials follow the pinned origin on every remote command", async (context) => {
   for (const argv of REMOTE_COMMANDS) {
     for (const [origin, token] of [
@@ -120,8 +137,10 @@ test("staging accepts a root or remote-command flag and a matching URL override"
 });
 
 test("the first remote request defaults to production or explicitly selects staging", async (context) => {
-  for (const command of [REMOTE_COMMANDS[0], REMOTE_COMMANDS[2]]) {
-    assert(command);
+  for (const command of [
+    remoteCommand("plan", "push"),
+    remoteCommand("plan", "compile"),
+  ]) {
     for (const staging of [false, true]) {
       const cwd = projectDirectory(context);
       let requests = 0;
@@ -193,13 +212,11 @@ test("staging rejects a conflicting URL or pinned origin before any request", as
 
 test("status, retained Compilation, and maintain commands ignore an initial URL override when selecting staging credentials", async (context) => {
   for (const argv of [
-    REMOTE_COMMANDS[1],
-    REMOTE_COMMANDS[4],
-    REMOTE_COMMANDS[5],
-    REMOTE_COMMANDS[6],
-    ...REMOTE_COMMANDS.filter(([group]) => group === "maintain"),
+    remoteCommand("plan", "status"),
+    ...REMOTE_COMMANDS.filter(
+      ([group]) => group === "compilation" || group === "maintain",
+    ),
   ]) {
-    assert(argv);
     let requests = 0;
     const result = await invoke(argv, {
       cwd: projectDirectory(context, STAGING),

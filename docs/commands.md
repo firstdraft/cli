@@ -1018,10 +1018,11 @@ Use this checklist when a change adds a command or subcommand. Each step names t
    - Update the exact group help in the tests: `HELP` in `test/cli.test.js`, `PLAN_HELP` in `test/plan-init.test.js`,
      `GENERATE_HELP` in `test/generate-uuid.test.js`, or `MAINTAIN_HELP` in `test/maintain.test.js`. No test asserts
      the whole `compilation` group help.
-   - Append a command that calls the Service to `REMOTE_COMMANDS` in `test/api-environments.test.js`. Some tests
-     there select entries by index, so add it at the end. The command's first request must reach the pinned origin
-     with that origin's token, and one `401` must produce `authentication_required`. A command not tied to a Project,
-     such as `account`, selects its origin as `login` does; test that in its own file instead.
+   - Add a command that calls the Service to `REMOTE_COMMANDS` in `test/api-environments.test.js`. Tests there
+     pick entries by group or with `remoteCommand(group, command)`, never by index. The command's first request
+     must reach the pinned origin with that origin's token, and one `401` must produce `authentication_required`. A
+     command not tied to a Project, such as `account`, selects its origin as `login` does; test that in its own file
+     instead.
    - Add packed-package cases to `scripts/smoke-package.js`, including at least an invalid-arguments case.
 4. **Package it.** Add each new `src/` file to the exact list in `scripts/check-pack.js`. `firstdraft/skills` keeps
    a copy of that list as `packedFileAllowlist` in `script/cli-contract/config.mjs`. The copy must change when
