@@ -15,7 +15,8 @@ Lets First Draft tell a setup that it is out of date, and adds the account, repo
 commands and a device login in two steps, so a person working alone hears when to update, their agent can log them in,
 it can send the progress and failure reports and the notes the person agreed to, for the application's whole life, and
 it can work through what needs attention in the deployed application. Moves the Rails
-target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x`.
+target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x`. Removes GitHub publication, which
+First Draft no longer offers.
 
 - `plan init` writes Plans that target `rails-sketch/2026-11`. `plan compile` and `compilation download` accept only
   artifacts for that profile; an artifact for `rails-sketch/2026-10` reports `invalid_artifact`. The CLI sends a
@@ -101,8 +102,12 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   `maintain resolve` traced to code First Draft generated. It names the item and takes no `--message`.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
   `request_outcome_unknown` now says to run the same command once more with the same options and environment, and
-  what a `412` or `compilation_active` answer then means, instead of telling the caller to stop. The recovery for an
-  unconfirmed Publication under `plan compile --github` is unchanged.
+  what a `412` or `compilation_active` answer then means, instead of telling the caller to stop.
+- `plan compile --github` is gone: `--github` fails with `invalid_arguments` (exit status 2), like any unknown option,
+  and the CLI no longer calls `/v1/projects/{project_id}/github-publication`. `request_outcome_unknown` no longer has
+  `phase: "publication"`, and these `error` values are gone: `publication_start_rejected`,
+  `publication_status_unavailable`, `invalid_publication_status`, `publication_changed`, `publication_wait_timed_out`,
+  `publication_failed`, and `publication_cancelled`.
 - New `error` values, each with exit status 1: `update_required`, `api_contract_unsupported`, `rate_limited`,
   `account_unavailable`, `report_rejected`, `report_unavailable`, `note_rejected`, `note_unavailable`,
   `compilation_not_recorded`, `maintain_rejected`, `maintain_unavailable`, `invalid_maintain_response`, and, from
@@ -118,7 +123,9 @@ nothing more and says to use the CLI version that origin supports. A plugin's la
 `FIRSTDRAFT_PLUGIN_VERSION` and `FIRSTDRAFT_AGENT`; without the first, the CLI compares its own version with the CLI
 versions. Callers that parse standard error should drop the `First Draft: ` lines, which any network command may now
 write before its result; `start` writes its update line on standard output instead. A Skill that checked
-`firstdraft --help` runs `firstdraft start` in its place and may run the two login steps itself.
+`firstdraft --help` runs `firstdraft start` in its place and may run the two login steps itself. A caller that ran
+`plan compile --github` runs `plan compile --output <absent-directory>`, which works on every platform and writes only
+the application, then initializes, commits, and pushes that directory with `git` and `gh`.
 
 ## 0.9.0
 

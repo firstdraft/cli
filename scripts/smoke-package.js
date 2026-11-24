@@ -529,7 +529,6 @@ async function exercisePackedCompilation(projectDirectory) {
   const projectId = "01900000-0000-7000-8000-000000000901";
   const compilationId = "01900000-0000-7000-8000-000000000902";
   const analysisId = "01900000-0000-7000-8000-000000000903";
-  const publicationId = "01900000-0000-7000-8000-000000000904";
   const plan = readFileSync(
     path.join(projectDirectory, ".firstdraft", "foundation-plan.json"),
   );
@@ -670,51 +669,6 @@ async function exercisePackedCompilation(projectDirectory) {
       completed_at: "2026-07-30T12:00:01.000Z",
     },
   };
-  const publication = {
-    project: {
-      id: projectId,
-      graph_version: 1,
-      head_source_sha256: headSha256,
-    },
-    compilation: {
-      id: compilationId,
-      analysis_run_id: analysisId,
-      graph_version: 1,
-      head_source_sha256: headSha256,
-      status: "succeeded",
-      compiler_release: compilerRelease,
-      target,
-      artifact: {
-        sha256: artifactSha256,
-        manifest_sha256: manifestSha256,
-        file_count: 3,
-      },
-    },
-    publication: {
-      id: publicationId,
-      status: "succeeded",
-      repository: {
-        id: 1_234_567,
-        private: true,
-        owner: { id: 7_654_321, login: "octocat", type: "User" },
-        full_name: "octocat/oscar-party",
-        default_branch: "main",
-        html_url: "https://github.com/octocat/oscar-party",
-        tree_sha: "5".repeat(40),
-        commit_sha: "6".repeat(40),
-      },
-      failure: null,
-      progress: {
-        phase: "completed",
-        retry_at: null,
-        retry_count: 0,
-        reason_code: null,
-      },
-      created_at: "2026-07-30T12:00:00.000Z",
-      started_at: "2026-07-30T12:00:01.000Z",
-      completed_at: "2026-07-30T12:00:02.000Z",
-    },
-  };
   const itemId = "3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f";
   const itemsPath = `/v1/projects/${projectId}/environments/production/items`;
   const environment = { project_id: projectId, name: "production" };
@@ -772,7 +726,6 @@ async function exercisePackedCompilation(projectDirectory) {
   const seen = {
     plan: false,
     analysis: false,
-    publication: 0,
     compilationStarts: 0,
     status: false,
     cancel: false,
@@ -812,16 +765,6 @@ async function exercisePackedCompilation(projectDirectory) {
     ) {
       seen.analysis = true;
       respondJson(response, 200, analysis);
-      return;
-    }
-    if (
-      request.method === "PUT" &&
-      request.url === `/v1/projects/${projectId}/github-publication`
-    ) {
-      assert.equal(request.headers["if-match"], `"sha256:${headSha256}"`);
-      assert.equal(requestBody.byteLength, 0);
-      seen.publication += 1;
-      respondJson(response, 201, publication);
       return;
     }
     if (
@@ -913,23 +856,6 @@ async function exercisePackedCompilation(projectDirectory) {
       { mode: 0o600 },
     );
 
-    const compiled = await spawnPackedCliAsync(
-      ["plan", "compile", "--github"],
-      projectDirectory,
-    );
-    assert.deepEqual(compiled, {
-      status: 0,
-      stdout: `${publication.publication.repository.html_url}\n`,
-      stderr: `First Draft: Analyzing Foundation Plan...
-First Draft: Foundation Plan analysis valid.
-First Draft: Compiling application...
-First Draft: Application compiled.
-First Draft: GitHub publication complete.
-`,
-    });
-    assert.equal(seen.publication, 1);
-    assert.equal(seen.compilationStarts, 0);
-
     const directOutput = path.join(projectDirectory, "application");
     const direct = await spawnPackedCliAsync(
       ["plan", "compile", "--output", directOutput],
@@ -945,7 +871,6 @@ First Draft: Application compiled.
 `,
     );
     assert.equal(JSON.parse(direct.stdout).output.path, directOutput);
-    assert.equal(seen.publication, 1);
     assert.equal(seen.compilationStarts, 1);
     assert.equal(
       readFileSync(path.join(directOutput, "app/models/movie.rb"), "utf8"),
@@ -1112,7 +1037,6 @@ First Draft: Application compiled.
     assert.deepEqual(seen, {
       plan: true,
       analysis: true,
-      publication: 1,
       compilationStarts: expectedCompilationStarts,
       status: true,
       cancel: true,

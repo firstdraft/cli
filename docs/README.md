@@ -50,7 +50,7 @@ npm pack --dry-run --json --ignore-scripts
 Pass Node test options through `npm test` to focus a run while retaining discovery under `test/`:
 
 ```sh
-npm test -- --test-name-pattern="publication"
+npm test -- --test-name-pattern="compilation"
 ```
 
 To reproduce the length-delimited SHA-256 used by external evidence to identify packaged JavaScript runtime inputs

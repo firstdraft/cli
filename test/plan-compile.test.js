@@ -27,79 +27,41 @@ const PROJECT_ID = "01900000-0000-7000-8000-000000002001";
 const ANALYSIS_ID = "01900000-0000-7000-8000-000000002002";
 const STALE_ANALYSIS_ID = "01900000-0000-7000-8000-000000002005";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000002003";
-const PUBLICATION_ID = "01900000-0000-7000-8000-000000002004";
 const API_TOKEN = `fd_${"a".repeat(43)}`;
 const PLAN_SOURCE = Buffer.from(
   '{"format":"firstdraft.foundation-plan.sketch/0.23","application":{"key":"movie_catalog","name":"Movie Catalog"}}\n',
 );
 const HEAD_SHA256 = sha256(PLAN_SOURCE);
 const ETAG = `"sha256:${HEAD_SHA256}"`;
-const CREATED_AT = "2026-08-04T12:00:00.000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000Z";
-const REPOSITORY_URL = "https://github.com/octocat/movie-catalog";
 const ANALYZER_RELEASE =
   "foundation-plan-rails/application-2026-09-27-bookmark-assets";
 const COMPILER_RELEASE =
   "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
 const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
-const SUCCESS_PROGRESS = `First Draft: Analyzing Foundation Plan...
-First Draft: Foundation Plan analysis valid.
-First Draft: Compiling application...
-First Draft: Application compiled.
-First Draft: GitHub publication complete.
+const PLAN_COMPILE_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan compile
+  firstdraft plan compile --output <absent-directory|.>
+
+Options:
+      --staging                      Use staging; reject a different saved origin
+      --output <absent-directory|.>  Materialize here (default: .)
+  -h, --help                         Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+  FIRSTDRAFT_API_URL            Override the initial API origin
+
+The command submits the exact current whole-file Plan, waits for its analysis,
+and proceeds only when that analysis is valid. By default it materializes the
+verified application in the current directory, preserving existing root material
+under .firstdraft/design. --output can select another absent directory.
+Progress is written to stderr.
 `;
-
-test("plan compile submits exact bytes, waits for valid analysis, and publishes once", async (context) => {
-  /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
-  const requests = [];
-  const server = createServer(async (request, response) => {
-    const body = await readRequestBody(request);
-    requests.push({
-      method: request.method,
-      url: request.url,
-      headers: request.headers,
-      body,
-    });
-
-    if (request.method === "PUT" && request.url === planPath()) {
-      respondJson(response, 201, acceptedPlanBody(), { ETag: ETAG });
-      return;
-    }
-    if (request.method === "GET" && request.url === analysisPath()) {
-      respondJson(response, 200, analysisBody("valid"));
-      return;
-    }
-    if (request.method === "PUT" && request.url === publicationPath()) {
-      respondJson(response, 201, publicationBody());
-      return;
-    }
-    response.writeHead(404).end();
-  });
-  const apiUrl = await listen(context, server);
-  const cwd = localDirectory(context, PLAN_SOURCE);
-  const result = await invoke(["plan", "compile", "--github"], { cwd, apiUrl });
-
-  assert.equal(result.status, 0);
-  assert.equal(result.stderr, SUCCESS_PROGRESS);
-  assert.deepEqual(result.stdoutWrites, [`${REPOSITORY_URL}\n`]);
-  assert.deepEqual(
-    requests.map(({ method, url }) => [method, url]),
-    [
-      ["PUT", planPath()],
-      ["GET", analysisPath()],
-      ["PUT", publicationPath()],
-    ],
-  );
-  assert.deepEqual(requests[0]?.body, PLAN_SOURCE);
-  assert.equal(requests[0]?.headers["if-none-match"], "*");
-  assert.equal(requests[2]?.headers["if-match"], ETAG);
-  assert(
-    requests.every(
-      ({ headers }) => headers.authorization === `Bearer ${API_TOKEN}`,
-    ),
-  );
-});
 
 test("staging compilation keeps its own credential through push, analysis, start, and artifact", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE);
@@ -152,7 +114,7 @@ test("staging compilation keeps its own credential through push, analysis, start
   assert.doesNotMatch(result.stdout + result.stderr, /canary/);
 });
 
-test("plan compile --output completes the HTTP journey without GitHub Publication", async (context) => {
+test("plan compile --output submits exact bytes and completes the HTTP journey", async (context) => {
   /** @type {{method: string | undefined, url: string | undefined, headers: import("node:http").IncomingHttpHeaders, body: Buffer}[]} */
   const requests = [];
   const artifact = directArtifactFixture();
@@ -229,6 +191,8 @@ test("plan compile --output completes the HTTP journey without GitHub Publicatio
       ["GET", directArtifactPath()],
     ],
   );
+  assert.deepEqual(requests[0]?.body, PLAN_SOURCE);
+  assert.equal(requests[0]?.headers["if-none-match"], "*");
   assert.equal(requests[2]?.body.byteLength, 0);
   assert.equal(requests[2]?.headers["if-match"], ETAG);
   assert(
@@ -265,58 +229,7 @@ test("plan compile --output completes the HTTP journey without GitHub Publicatio
   );
 });
 
-test("plan compile may push unchanged bytes before analysis and Publication", async (context) => {
-  const cwd = localDirectory(context, PLAN_SOURCE, {
-    api_url: "https://api.example.test",
-    foundation_plan_etag: ETAG,
-  });
-  /** @type {unknown[]} */
-  const order = [];
-  const expected = publicationBody();
-  const result = await invoke(["plan", "compile", "--github"], {
-    cwd,
-    planCompilePush: async (/** @type {{cwd: string}} */ options) => {
-      order.push(["push", options.cwd]);
-      return {
-        status: 200,
-        etag: ETAG,
-        outcome: "updated",
-        body: acceptedPlanBody(),
-      };
-    },
-    planCompileReadStatus: async (/** @type {{wait?: boolean}} */ options) => {
-      order.push(["analysis", options.wait]);
-      return { status: 200, body: analysisBody("valid") };
-    },
-    planCompilePublish: async (
-      /** @type {{onProgress: (progress: unknown) => void}} */ options,
-    ) => {
-      order.push(["publication"]);
-      options.onProgress({ phase: "compilation", status: "waiting" });
-      options.onProgress({
-        phase: "publication",
-        compilationStatus: "succeeded",
-        publicationPhase: "completed",
-        retryAt: null,
-        retryCount: 0,
-        reasonCode: null,
-      });
-      return expected;
-    },
-  });
-
-  assert.equal(result.status, 0);
-  assert.deepEqual(order, [["push", cwd], ["analysis", true], ["publication"]]);
-  assert.equal(result.stdout, `${REPOSITORY_URL}\n`);
-  assert.equal(result.stderr, SUCCESS_PROGRESS);
-  // Publication writes no code into this folder, so nothing is recorded.
-  assert.equal(
-    existsSync(path.join(cwd, ".firstdraft", "compilation.json")),
-    false,
-  );
-});
-
-test("plan compile --output starts a direct Compilation without Publication", async (context) => {
+test("plan compile --output pushes, waits for valid analysis, then compiles", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",
     foundation_plan_etag: ETAG,
@@ -344,9 +257,6 @@ test("plan compile --output starts a direct Compilation without Publication", as
       planCompileReadStatus: async () => {
         order.push("analysis");
         return { status: 200, body: analysisBody("valid") };
-      },
-      planCompilePublish: async () => {
-        throw new Error("Publication must remain untouched");
       },
       planCompileDownload: async (
         /** @type {{expectedEtag: string, expected: Record<string, unknown>, output: string, onProgress: (progress: unknown) => void}} */ options,
@@ -443,7 +353,7 @@ test("plan compile root output locks before push and releases after invalid anal
 });
 
 for (const outputArgs of [[], ["--output", "."]]) {
-  test(`plan compile ${outputArgs.join(" ")} materializes root output without Publication`, async (context) => {
+  test(`plan compile ${outputArgs.join(" ")} materializes root output`, async (context) => {
     if (process.platform === "win32") return context.skip();
     const cwd = localDirectory(context, PLAN_SOURCE, {
       api_url: "https://api.example.test",
@@ -460,9 +370,6 @@ for (const outputArgs of [[], ["--output", "."]]) {
         status: 200,
         body: analysisBody("valid"),
       }),
-      planCompilePublish: async () => {
-        throw new Error("Publication must remain untouched");
-      },
       fetchFunction: sequenceFetch(
         [
           jsonResponse(directCompilationBody("succeeded", artifact), 202, {
@@ -933,8 +840,8 @@ test("plan compile waits past a terminal analysis for the prior graph version", 
   });
   /** @type {unknown[]} */
   const calls = [];
-  let publications = 0;
-  const result = await invoke(["plan", "compile", "--github"], {
+  let compilations = 0;
+  const result = await invoke(["plan", "compile", "--output", "application"], {
     cwd,
     planCompilePush: async () => ({
       status: 200,
@@ -950,15 +857,15 @@ test("plan compile waits past a terminal analysis for the prior graph version", 
       calls,
     ),
     planCompileSleep: async () => {},
-    planCompilePublish: async () => {
-      publications += 1;
-      return publicationBody();
+    planCompileDownload: async () => {
+      compilations += 1;
+      return compiledResult(cwd);
     },
   });
 
   assert.equal(result.status, 0);
   assert.equal(calls.length, 2);
-  assert.equal(publications, 1);
+  assert.equal(compilations, 1);
 });
 
 test("plan compile rejects an older Head at the accepted graph version", async (context) => {
@@ -967,16 +874,16 @@ test("plan compile rejects an older Head at the accepted graph version", async (
     foundation_plan_etag: ETAG,
   });
   const olderHead = "0".repeat(64);
-  let publications = 0;
-  const result = await invoke(["plan", "compile", "--github"], {
+  let compilations = 0;
+  const result = await invoke(["plan", "compile", "--output", "application"], {
     cwd,
     planCompilePush: successfulPush,
     fetchFunction: sequenceFetch([
       jsonResponse(analysisBody("valid", 1, ANALYSIS_ID, olderHead)),
     ]),
-    planCompilePublish: async () => {
-      publications += 1;
-      return publicationBody();
+    planCompileDownload: async () => {
+      compilations += 1;
+      return compiledResult(cwd);
     },
   });
 
@@ -985,10 +892,10 @@ test("plan compile rejects an older Head at the accepted graph version", async (
     errorEnvelope(result.stderr).current.analysis.head_source_sha256,
     olderHead,
   );
-  assert.equal(publications, 0);
+  assert.equal(compilations, 0);
 });
 
-test("invalid JSON and schema diagnostics stop before analysis or Publication", async (context) => {
+test("invalid JSON and schema diagnostics stop before analysis or Compilation", async (context) => {
   for (const code of ["invalid_json", "schema_invalid"]) {
     const source = Buffer.from(
       code === "invalid_json" ? "{\n" : '{"format":"wrong"}\n',
@@ -996,22 +903,25 @@ test("invalid JSON and schema diagnostics stop before analysis or Publication", 
     const cwd = localDirectory(context, source);
     /** @type {unknown[]} */
     const calls = [];
-    const result = await invoke(["plan", "compile", "--github"], {
-      cwd,
-      apiUrl: "https://api.example.test",
-      fetchFunction: sequenceFetch(
-        [
-          jsonResponse(
-            {
-              source_sha256: sha256(source),
-              diagnostics: [diagnostic(code, `Rejected ${code}.`)],
-            },
-            422,
-          ),
-        ],
-        calls,
-      ),
-    });
+    const result = await invoke(
+      ["plan", "compile", "--output", "application"],
+      {
+        cwd,
+        apiUrl: "https://api.example.test",
+        fetchFunction: sequenceFetch(
+          [
+            jsonResponse(
+              {
+                source_sha256: sha256(source),
+                diagnostics: [diagnostic(code, `Rejected ${code}.`)],
+              },
+              422,
+            ),
+          ],
+          calls,
+        ),
+      },
+    );
 
     assertHandledFailure(result, "server_rejected");
     assert.equal(calls.length, 1);
@@ -1022,100 +932,67 @@ test("invalid JSON and schema diagnostics stop before analysis or Publication", 
   }
 });
 
-test("semantic and failed analysis stop before Publication with structured status", async (context) => {
+test("semantic and failed analysis stop before Compilation with structured status", async (context) => {
   for (const status of ["issues_found", "analysis_failed"]) {
     const cwd = localDirectory(context, PLAN_SOURCE, {
       api_url: "https://api.example.test",
       foundation_plan_etag: ETAG,
     });
-    let publications = 0;
+    let compilations = 0;
     const current = analysisBody(status);
-    const result = await invoke(["plan", "compile", "--github"], {
-      cwd,
-      planCompilePush: successfulPush,
-      planCompileReadStatus: async () => ({ status: 200, body: current }),
-      planCompilePublish: async () => {
-        publications += 1;
-        return publicationBody();
+    const result = await invoke(
+      ["plan", "compile", "--output", "application"],
+      {
+        cwd,
+        planCompilePush: successfulPush,
+        planCompileReadStatus: async () => ({ status: 200, body: current }),
+        planCompileDownload: async () => {
+          compilations += 1;
+          return compiledResult(cwd);
+        },
       },
-    });
+    );
 
     assertHandledFailure(result, "plan_not_valid");
     assert.deepEqual(errorEnvelope(result.stderr).current, current);
-    assert.equal(publications, 0);
+    assert.equal(compilations, 0);
   }
 });
 
-test("recurring diagnostics remain repairable and never trigger Publication", async (context) => {
+test("recurring diagnostics remain repairable and never start a Compilation", async (context) => {
   const cwd = localDirectory(context, PLAN_SOURCE, {
     api_url: "https://api.example.test",
     foundation_plan_etag: ETAG,
   });
-  let publications = 0;
+  let compilations = 0;
   const current = analysisBody("issues_found");
   const options = {
     cwd,
     planCompilePush: successfulPush,
     planCompileReadStatus: async () => ({ status: 200, body: current }),
-    planCompilePublish: async () => {
-      publications += 1;
-      return publicationBody();
+    planCompileDownload: async () => {
+      compilations += 1;
+      return compiledResult(cwd);
     },
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await invoke(["plan", "compile", "--github"], options);
+    const result = await invoke(
+      ["plan", "compile", "--output", "application"],
+      options,
+    );
     assertHandledFailure(result, "plan_not_valid");
     assert.equal(
       errorEnvelope(result.stderr).current.analysis.diagnostics[0].code,
       "reference_missing",
     );
   }
-  assert.equal(publications, 0);
-});
-
-test("the final local-byte check stops a stale analyzed Plan before Publication", async (context) => {
-  const cwd = localDirectory(context, PLAN_SOURCE, {
-    api_url: "https://api.example.test",
-    foundation_plan_etag: ETAG,
-  });
-  let networkRequests = 0;
-  const result = await invoke(["plan", "compile", "--github"], {
-    cwd,
-    planCompilePush: successfulPush,
-    planCompileReadStatus: async () => {
-      const replacement = Buffer.concat([PLAN_SOURCE, Buffer.from(" ")]);
-      const replacementEtag = `"sha256:${sha256(replacement)}"`;
-      writeFileSync(planFilePath(cwd), replacement);
-      writeFileSync(
-        stateFilePath(cwd),
-        `${JSON.stringify(
-          {
-            format: "firstdraft.cli-state/1",
-            project_id: PROJECT_ID,
-            api_url: "https://api.example.test",
-            foundation_plan_etag: replacementEtag,
-          },
-          null,
-          2,
-        )}\n`,
-        { mode: 0o600 },
-      );
-      return { status: 200, body: analysisBody("valid") };
-    },
-    fetchFunction: async () => {
-      networkRequests += 1;
-      throw new Error("Publication must not start");
-    },
-  });
-
-  assertHandledFailure(result, "local_plan_changed");
-  assert.equal(networkRequests, 0);
+  assert.equal(compilations, 0);
 });
 
 test("push ambiguity, analysis failures, and rejected reads have distinct errors", async (context) => {
   const pushCwd = localDirectory(context, PLAN_SOURCE);
-  const push = await invoke(["plan", "compile", "--github"], {
+  const push = await invoke(["plan", "compile", "--output", "application"], {
     cwd: pushCwd,
     apiUrl: "https://api.example.test",
     fetchFunction: async () => {
@@ -1148,14 +1025,17 @@ test("push ambiguity, analysis failures, and rejected reads have distinct errors
   ];
   for (const [response, error] of analysisFailures) {
     const cwd = localDirectory(context, PLAN_SOURCE);
-    const result = await invoke(["plan", "compile", "--github"], {
-      cwd,
-      apiUrl: "https://api.example.test",
-      fetchFunction: sequenceFetch([
-        jsonResponse(acceptedPlanBody(), 201, { ETag: ETAG }),
-        response,
-      ]),
-    });
+    const result = await invoke(
+      ["plan", "compile", "--output", "application"],
+      {
+        cwd,
+        apiUrl: "https://api.example.test",
+        fetchFunction: sequenceFetch([
+          jsonResponse(acceptedPlanBody(), 201, { ETag: ETAG }),
+          response,
+        ]),
+      },
+    );
     assertHandledFailure(result, error);
     assert.doesNotMatch(result.stderr, /canary|network failure/);
   }
@@ -1176,24 +1056,30 @@ test("help and invalid direct-output syntax have no prerequisites", async () => 
   const inaccessible = () => {
     throw new Error("dependency must remain inaccessible");
   };
-  const help = await invoke(["plan", "compile", "--help"], {
-    cwd: process.cwd(),
-    apiToken: undefined,
-    getCwd: inaccessible,
-    fetchFunction: inaccessible,
-  });
-  assert.equal(help.status, 0);
-  assert.match(
-    help.stdout,
-    /firstdraft plan compile --output <absent-directory\|\.>/,
-  );
+  for (const argv of [
+    ["plan", "compile", "--help"],
+    ["plan", "compile", "-h"],
+    ["plan", "compile", "--help", "--help"],
+  ]) {
+    const help = await invoke(argv, {
+      cwd: process.cwd(),
+      apiToken: undefined,
+      getCwd: inaccessible,
+      fetchFunction: inaccessible,
+    });
+    assert.deepEqual(
+      { status: help.status, stdout: help.stdout, stderr: help.stderr },
+      { status: 0, stdout: PLAN_COMPILE_HELP, stderr: "" },
+    );
+  }
 
   for (const argv of [
     ["plan", "compile", "--output"],
     ["plan", "compile", "--output", "one", "--output", "two"],
     ["plan", "compile", "application"],
-    ["plan", "compile", "--github", "--output", "."],
-    ["plan", "compile", "--output", "app", "--github"],
+    ["plan", "compile", "--github"],
+    ["plan", "compile", "canary-secret"],
+    ["plan", "compile", "--canary-secret"],
   ]) {
     const invalid = await invoke(argv, {
       cwd: process.cwd(),
@@ -1202,8 +1088,18 @@ test("help and invalid direct-output syntax have no prerequisites", async () => 
       fetchFunction: inaccessible,
     });
     assertHandledFailure(invalid, "invalid_arguments", 2);
+    assert.doesNotMatch(invalid.stderr, /canary-secret/);
   }
 });
+
+/** @param {string} cwd */
+function compiledResult(cwd) {
+  return {
+    project: { id: PROJECT_ID, graph_version: 1 },
+    compilation: { id: COMPILATION_ID, status: "succeeded" },
+    output: { path: path.join(cwd, "application"), file_count: 1 },
+  };
+}
 
 async function successfulPush() {
   return {
@@ -1272,54 +1168,6 @@ function emptyGapSet({ graphVersion, headSourceSha256 }) {
     compiler_release: COMPILER_RELEASE,
     target: TARGET,
     gaps: [],
-  };
-}
-
-function publicationBody() {
-  return {
-    project: {
-      id: PROJECT_ID,
-      graph_version: 1,
-      head_source_sha256: HEAD_SHA256,
-    },
-    compilation: {
-      id: COMPILATION_ID,
-      analysis_run_id: ANALYSIS_ID,
-      graph_version: 1,
-      head_source_sha256: HEAD_SHA256,
-      status: "succeeded",
-      compiler_release: COMPILER_RELEASE,
-      target: TARGET,
-      artifact: {
-        sha256: "1".repeat(64),
-        manifest_sha256: "2".repeat(64),
-        file_count: 10,
-      },
-    },
-    publication: {
-      id: PUBLICATION_ID,
-      status: "succeeded",
-      repository: {
-        id: 123,
-        private: true,
-        owner: { id: 456, login: "octocat", type: "User" },
-        full_name: "octocat/movie-catalog",
-        default_branch: "main",
-        html_url: REPOSITORY_URL,
-        tree_sha: "3".repeat(40),
-        commit_sha: "4".repeat(40),
-      },
-      failure: null,
-      progress: {
-        phase: "completed",
-        retry_at: null,
-        retry_count: 0,
-        reason_code: null,
-      },
-      created_at: CREATED_AT,
-      started_at: STARTED_AT,
-      completed_at: COMPLETED_AT,
-    },
   };
 }
 
@@ -1451,10 +1299,6 @@ function analysisPath() {
   return `/v1/projects/${PROJECT_ID}/analysis`;
 }
 
-function publicationPath() {
-  return `/v1/projects/${PROJECT_ID}/github-publication`;
-}
-
 function compilationCollectionPath() {
   return `/v1/projects/${PROJECT_ID}/compilations`;
 }
@@ -1484,11 +1328,6 @@ function localDirectory(context, source, extraState = {}) {
 /** @param {string} cwd */
 function planFilePath(cwd) {
   return path.join(cwd, ".firstdraft", "foundation-plan.json");
-}
-
-/** @param {string} cwd */
-function stateFilePath(cwd) {
-  return path.join(cwd, ".firstdraft", "state.json");
 }
 
 /** @param {readonly string[]} argv @param {Record<string, unknown>} [options] */
