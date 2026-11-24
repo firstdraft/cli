@@ -75,6 +75,7 @@ import {
   resolveLoginOrigin,
   startDeviceLogin,
 } from "./commands/login.js";
+import { runHost } from "./commands/host-command.js";
 import { LogoutFailedError, logout } from "./commands/logout.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
@@ -162,6 +163,7 @@ Commands:
   account      Show whether this account sends reports
   compilation  Inspect, download, and cancel Compilations
   generate     Generate local values
+  host         Create and operate the application's First Draft host
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
   note         Send a note about a problem with First Draft
@@ -868,6 +870,9 @@ const PINNED_NOT_PUSHED_DETAIL =
  * @property {() => number} [loginNow]
  * @property {import("./oauth.js").StartLoopbackServer} [startLoopbackServer]
  * @property {() => number} [serviceNow] the clock for a limit's retry time
+ * @property {import("./host-tools.js").ToolRunner} [hostTools] runs gh, ssh-keygen, and ssh
+ * @property {(ms: number) => Promise<void>} [hostSleep]
+ * @property {() => number} [hostNow]
  */
 
 /**
@@ -967,6 +972,9 @@ export async function run({
   loginNow,
   startLoopbackServer,
   serviceNow,
+  hostTools,
+  hostSleep,
+  hostNow,
 }) {
   const staging = argv[0] === "--staging";
   if (staging) argv = argv.slice(1);
@@ -1096,6 +1104,42 @@ export async function run({
       staging,
       credentials,
       service,
+    });
+  }
+
+  if (argv[0] === "host") {
+    const directory = cwd ?? getCwd();
+    return runHost({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd: directory,
+      credentials,
+      fetchFunction,
+      createRequestSignal,
+      hostTools,
+      hostSleep,
+      hostNow,
+      shared: {
+        authenticate: (stagingOption) =>
+          authenticatePinnedProject({
+            argv,
+            stdout,
+            stderr,
+            cwd: directory,
+            getCwd,
+            fetchFunction,
+            credentials,
+            apiUrl,
+            apiToken,
+            stagingApiToken,
+            staging: staging || stagingOption === true,
+            service,
+          }),
+        writeSharedError: writePinnedProjectError,
+        writeAuthenticationRequired,
+        settle: (promise) => service.settle(promise),
+      },
     });
   }
 

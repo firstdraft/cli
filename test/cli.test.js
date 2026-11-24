@@ -18,6 +18,7 @@ Commands:
   account      Show whether this account sends reports
   compilation  Inspect, download, and cancel Compilations
   generate     Generate local values
+  host         Create and operate the application's First Draft host
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
   note         Send a note about a problem with First Draft

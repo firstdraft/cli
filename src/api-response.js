@@ -75,6 +75,50 @@ export const SERVICE_ROUTES = {
     method: "POST",
     path: "/v1/projects/{project_id}/notes",
   },
+  createHost: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host",
+  },
+  readHost: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host",
+  },
+  resizeHost: {
+    method: "PATCH",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host",
+  },
+  destroyHost: {
+    method: "DELETE",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host",
+  },
+  readBackups: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/backups",
+  },
+  connectDomain: {
+    method: "PUT",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/domain",
+  },
+  readDomain: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/domain",
+  },
+  checkDomain: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/domain/check",
+  },
+  disconnectDomain: {
+    method: "DELETE",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/domain",
+  },
+  readEmail: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/email",
+  },
+  createSmtpCredentials: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/host/email/smtp-credentials",
+  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",
