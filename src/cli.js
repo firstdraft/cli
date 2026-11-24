@@ -300,7 +300,8 @@ Environment:
 The command keeps each field only in its shape: an RSpec run of the
 application's specs, a Ruby constant, frames in the application's files,
 version numbers, and the plain words of free text. It first reads the account
-at the origin pinned by a successful plan push. With reports on, it prints the
+at the origin pinned by a successful plan push; a deployed_error without
+planning state uses the origin login selects. With reports on, it prints the
 exact report and what it left out, then sends it once there. With reports off,
 it sends no report and still exits 0. Run it from the generated application's
 root. Without <compilation-id>, the report names the Compilation the CLI last
@@ -611,7 +612,8 @@ Without a command, it first reads the account, then prints the Environment's
 open items, most severe first, 200 per page; next_page names the next page or
 is null. When reports are on, it also says on standard error when to send a
 failure report about an item. Maintain commands use the API origin pinned by a
-successful plan push.
+successful plan push. Without planning state here, they read the Project from
+.firstdraft/gaps.json and use --staging, FIRSTDRAFT_API_URL, or production.
 `;
 
 const MAINTAIN_SHOW_HELP = `First Draft CLI

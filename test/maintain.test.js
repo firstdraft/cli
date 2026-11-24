@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -55,7 +61,8 @@ Without a command, it first reads the account, then prints the Environment's
 open items, most severe first, 200 per page; next_page names the next page or
 is null. When reports are on, it also says on standard error when to send a
 failure report about an item. Maintain commands use the API origin pinned by a
-successful plan push.
+successful plan push. Without planning state here, they read the Project from
+.firstdraft/gaps.json and use --staging, FIRSTDRAFT_API_URL, or production.
 `;
 
 const MAINTAIN_SHOW_HELP = `First Draft CLI
@@ -757,6 +764,35 @@ test("an application gaps.json that names no Project is unreadable local state",
     assertHandledFailure(result, "local_input_unreadable");
     assert.match(JSON.parse(result.stderr).detail, /\.firstdraft\/gaps\.json/);
     assertNoSecrets(result);
+  }
+});
+
+test("a linked .firstdraft or a GapSet that is not UTF-8 is read before no request", async (context) => {
+  const linked = mkdtempSync(path.join(tmpdir(), "firstdraft-maint-linked-"));
+  context.after(() => rmSync(linked, { recursive: true, force: true }));
+  symlinkSync(
+    path.join(applicationClone(context), ".firstdraft"),
+    path.join(linked, ".firstdraft"),
+  );
+
+  const malformed = applicationClone(context);
+  writeFileSync(
+    path.join(malformed, ".firstdraft", "gaps.json"),
+    Buffer.concat([
+      Buffer.from(
+        `{"format":"firstdraft.foundation-gaps/2","project":{"id":"${PROJECT_ID}","graph_version":1},"gaps":["`,
+      ),
+      Buffer.from([0xff]),
+      Buffer.from(`"]}\n`),
+    ]),
+  );
+
+  for (const cwd of [linked, malformed]) {
+    const result = await invoke(["maintain", "show", ITEM_ID], {
+      cwd,
+      fetchFunction: async () => assert.fail("No request was expected"),
+    });
+    assertHandledFailure(result, "local_input_unreadable");
   }
 });
 

@@ -781,8 +781,9 @@ A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_err
 users' text. Another kind with `--item`, or a `deployed_error` without a lowercase item ID or with `--message`, is
 `invalid_arguments`, and nothing is read or sent. A `deployed_error` finds its Project as
 [`firstdraft maintain`](#maintain-a-deployed-application) does, from the application's `.firstdraft/gaps.json` too.
-Those files record no Compilation, so without one given right after `report failure` it ends with
-`compilation_not_recorded` and sends nothing. Each other field is sent only in its shape, and left out otherwise:
+Those files record no Compilation. The command reads the account first: with reports off it exits 0 as usual, and
+with reports on, without a Compilation given right after `report failure`, it ends with `compilation_not_recorded` and
+sends nothing. Each other field is sent only in its shape, and left out otherwise:
 
 | Option                              | Field         | What it may contain                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -797,11 +798,13 @@ Free text keeps plain words only: the CLI takes the first line, replaces everyth
 quote character (`'`, `"`, or a backtick, including an apostrophe inside a word) to the end of the line with one `[…]`,
 replaces each earlier word that contains `=`, `/`, `\`, or `@` or is longer than 24 characters with `[…]`, and keeps the
 words that fit the length limit. A `lint_failure` therefore sends no rule name, and a rerun command that is not an
-RSpec run is left out. Besides the Project's state and the Compilation record, the CLI reads no file for a failure
-report and attaches no diff or environment variable, but
+RSpec run is left out. Besides the Project's state and the Compilation record, or, for a `deployed_error` without
+planning state, the application's `.firstdraft/gaps.json`, of which it uses only the Project ID, the CLI reads no file
+for a failure report and attaches no diff or environment variable, but
 the plain words of a message or fix summary it is given can still quote code, so pass only text that may be sent.
 
-Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push. Unless
+Each command first reads the account with a `GET` of `/v1/account` at the origin pinned by a successful push, or,
+for a `deployed_error` without planning state, the origin `login` selects. Unless
 First Draft answers `{"reports": "on"}`, no report is sent. With reports off, the command writes a line that says so
 and exits 0, so the agent's work continues; it reads no Compilation record first. When the account read fails, no report is sent either. The command then
 ends with `account_unavailable`, with `invalid_server_response` when the answer breaks the account's contract, or with
@@ -895,7 +898,7 @@ firstdraft maintain resolve 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f --reason pull_r
   --cause generated_code --detail https://github.com/acme/app/pull/7
 ```
 
-`firstdraft maintain` first reads the account with a `GET` of `/v1/account` at the pinned origin, as a report
+`firstdraft maintain` first reads the account with a `GET` of `/v1/account` at the Project's origin, as a report
 command does, then prints one page of the Environment's open items, most severe first, 200 per page. Each item has
 `id`, `kind`, `severity`, `title`, `occurrences`, `first_seen_at`, `last_seen_at`, `last_release`, `status`,
 `resolution_reason`, `resolution_cause`, and `issue_url`, the GitHub issue First Draft filed and keeps current for
@@ -941,10 +944,11 @@ Project's directory. They find the Project in this order:
    application's own `.firstdraft/gaps.json`, which every Compilation writes and which keeps the same Project ID
    across recompiles. That file holds no origin, so the commands use the one `login` would select: `--staging`,
    `FIRSTDRAFT_API_URL`, or `https://firstdraft.com`. They need a login for that origin on this computer, and after a
-   successful response they write this line on standard error, before any other:
+   successful response they write this line on standard error, after any update line and before the reports
+   sentence:
 
    ```text
-   No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json and used <origin>: if the Project is on another First Draft origin, add --staging or set FIRSTDRAFT_API_URL. This copy records no Compilation, so a failure report from here needs the Compilation's ID right after 'report failure'.
+   No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json and used <origin>: if the Project is on another First Draft origin, add --staging or set FIRSTDRAFT_API_URL.
    ```
 
    It is `applicationProjectLine` in `src/agent-sentences.js`. A Project on another origin answers
@@ -960,7 +964,8 @@ contract exactly, including its Project ID, Environment name, and item ID. See
 
 The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
 `account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands and the `maintain` index read it, and every other
-`/v1` request goes, to the origin pinned for the Project. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
+`/v1` request goes, to the origin pinned for the Project, or, for a maintain command or a `deployed_error` without
+planning state, the origin selected as for `login`. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
