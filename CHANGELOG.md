@@ -54,7 +54,7 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   `Sent.` only on First Draft's `201` acknowledgment; a `403 reports_off` answer to the report prints the reports-off
   line and exits 0. `--step` is `setup`, `specs_first_run`, `behavior_written`, `specs_passing`, or
   `preview_started`, with optional counts of at most 1000000. `--kind` is `spec_failure`, `setup_failure`,
-  `boot_error`, or `lint_failure`. A failure report keeps each field only in its shape: an RSpec run of the
+  `boot_error`, `lint_failure`, or `deployed_error`, which the `maintain` entries below describe. A failure report keeps each field only in its shape: an RSpec run of the
   application's specs, a Ruby constant, up to 20 application frames sent as `path:LINE`, version numbers, and the plain
   words of the first line of the message (at most 300 characters) and fix summary (at most 200). When anything is
   left out, a `Left out:` line names each field left out, counts the frames that are not in the application's files
