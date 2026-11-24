@@ -252,8 +252,9 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
   1,000 characters.
 - `maintain_unavailable` means a network failure, timeout, server error, or error response without a problem body
   left the result unconfirmed. Retry a read. After a resolution, check the item with `maintain show` and reassess it
-  before resolving again. A `404` with no `response` usually
-  means the pinned origin's Service has no maintenance routes, so retrying will not help until it is upgraded.
+  before resolving again. A `404` with no `response` usually means the Service at the origin the command used has
+  no maintenance routes: the pinned origin, or in a fresh clone the one `login` would select. Retrying will not help
+  until that Service is upgraded.
 - `invalid_maintain_response` means a success response violated the contract; retrying the unchanged request will
   not repair it. After a resolution, check the item with `maintain show`.
 - The index reads the account first. When that read fails, it reads no items and ends with `account_unavailable`,
