@@ -634,6 +634,61 @@ test("a deployed error names its maintain item and carries no message", async (c
   assert.match(result.stdout, /\nSent\.\n$/);
 });
 
+test("a deployed error from a fresh clone of the application finds its Project but needs its Compilation", async (context) => {
+  const clone = temporaryDirectory(context);
+  mkdirSync(path.join(clone, ".firstdraft"));
+  writeFileSync(
+    path.join(clone, ".firstdraft", "gaps.json"),
+    `${JSON.stringify({
+      format: "firstdraft.foundation-gaps/2",
+      project: { id: PROJECT_ID, graph_version: 2 },
+    })}\n`,
+  );
+  const deployed = ["--kind", "deployed_error", "--item", ITEM_ID];
+
+  const unnamed = await invoke(["report", "failure", ...deployed], {
+    cwd: clone,
+    fetchFunction: reportsOn(async () =>
+      assert.fail("No report should be sent without a Compilation"),
+    ),
+  });
+  assert.equal(unnamed.status, 1);
+  assert.equal(unnamed.stdout, "");
+  const error = JSON.parse(unnamed.stderr);
+  assert.equal(error.error, "compilation_not_recorded");
+  assert.match(
+    error.detail,
+    /\.firstdraft\/gaps\.json, which records no Compilation/,
+  );
+
+  /** @type {string | undefined} */
+  let url;
+  const named = await invoke(
+    ["report", "failure", COMPILATION_ID, ...deployed],
+    {
+      cwd: clone,
+      fetchFunction: reportsOn(async (input) => {
+        url = String(input);
+        return acknowledgment("failure_report");
+      }),
+    },
+  );
+  assert.equal(named.status, 0, named.stderr);
+  assert.equal(
+    url,
+    `${PRODUCTION}/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}/failure-reports`,
+  );
+
+  const otherKind = await invoke(
+    [...FAILURE.slice(0, 3), "--kind", "boot_error"],
+    {
+      cwd: clone,
+    },
+  );
+  assert.equal(otherKind.status, 1);
+  assert.equal(JSON.parse(otherKind.stderr).error, "local_input_unreadable");
+});
+
 test("a failure report carries only the fields that fit their shapes", async (context) => {
   /** @type {unknown} */
   let sent;

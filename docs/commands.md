@@ -779,7 +779,10 @@ A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_err
 [`firstdraft maintain`](#maintain-a-deployed-application) resolved with `--cause generated_code`: it also needs
 `--item <item-id>`, sent as `maintenance_item_id`, and takes no `--message`, because the item's evidence can hold end
 users' text. Another kind with `--item`, or a `deployed_error` without a lowercase item ID or with `--message`, is
-`invalid_arguments`, and nothing is read or sent. Each other field is sent only in its shape, and left out otherwise:
+`invalid_arguments`, and nothing is read or sent. A `deployed_error` finds its Project as
+[`firstdraft maintain`](#maintain-a-deployed-application) does, from the application's `.firstdraft/gaps.json` too.
+Those files record no Compilation, so without one given right after `report failure` it ends with
+`compilation_not_recorded` and sends nothing. Each other field is sent only in its shape, and left out otherwise:
 
 | Option                              | Field         | What it may contain                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -929,10 +932,26 @@ only while the item stays resolved, so after an unconfirmed resolution run `main
 resolving again.
 
 Each command takes `--environment`, which defaults to `production`: a lowercase name of letters, digits, and hyphens
-that starts with a letter. Item IDs are lowercase UUIDs. The commands use the Project ID and API origin in
-`.firstdraft/state.json`. Run them from the generated application's root, where the CLI finds that state archived at
-`.firstdraft/design` after root adoption, as the report commands do, or from the Project's directory. `show` and
-`resolve` make one request, and the index two. Each request has a
+that starts with a letter. Item IDs are lowercase UUIDs. Run the commands in the application's folder or in the
+Project's directory. They find the Project in this order:
+
+1. The Project's `.firstdraft/state.json` in the current directory, or its archive at `.firstdraft/design` after root
+   adoption, as the report commands do. It pins both the Project ID and the API origin.
+2. Without that state, as in a fresh clone of the application or one compiled with `--output`, the Project ID in the
+   application's own `.firstdraft/gaps.json`, which every Compilation writes and which keeps the same Project ID
+   across recompiles. That file holds no origin, so the commands use the one `login` would select: `--staging`,
+   `FIRSTDRAFT_API_URL`, or `https://firstdraft.com`. They need a login for that origin on this computer, and after a
+   successful response they write this line on standard error, before any other:
+
+   ```text
+   No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json and used <origin>: if the Project is on another First Draft origin, add --staging or set FIRSTDRAFT_API_URL. This copy records no Compilation, so a failure report from here needs the Compilation's ID right after 'report failure'.
+   ```
+
+   It is `applicationProjectLine` in `src/agent-sentences.js`. A Project on another origin answers
+   `environment_not_found`.
+
+Without either, or with a `gaps.json` that names no Project, the command ends with `local_input_unreadable`. `show`
+and `resolve` make one request, and the index two. Each request has a
 bounded timeout and refuses redirects; the commands change no local state, and print only a response that matches the
 contract exactly, including its Project ID, Environment name, and item ID. See
 [maintenance recovery](errors.md#maintenance-recovery).

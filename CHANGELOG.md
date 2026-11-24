@@ -94,8 +94,9 @@ target to profile `rails-sketch/2026-11` and the accepted API contract to `0.9.x
   `untrusted` list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>`
   resolves it with a `--reason`, a `--cause` that says what caused the error (`unknown` when the agent could not
   tell), and an optional `--detail`, such as the pull request. Each takes `--environment`, `production` by default,
-  runs from the generated application's root or the Project's directory, uses the Project's pinned origin, and changes
-  no local state.
+  and changes no local state. They run from the application's folder or the Project's directory: without the
+  Project's state there, as in a fresh clone of the application, they read the Project ID from the application's
+  `.firstdraft/gaps.json`, use the origin `login` would select, and say so on standard error.
 - `report failure --kind deployed_error --item <item-id>` reports an error in a deployed application that
   `maintain resolve` traced to code First Draft generated. It names the item and takes no `--message`.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,
