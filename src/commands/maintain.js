@@ -1,5 +1,3 @@
-import { lstatSync, readFileSync } from "node:fs";
-
 import {
   FirstDraftNetworkError,
   FirstDraftProtocolError,
@@ -10,7 +8,7 @@ import {
   sendRequest,
   serviceEndpoint,
 } from "../api-response.js";
-import { readPinnedProject } from "../plan-state.js";
+import { readPinnedOrApplicationProject } from "../plan-state.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_ENVIRONMENT = "production";
@@ -76,9 +74,6 @@ const REQUEST_KEYS = ["method", "host", "path"];
 const TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/;
 
-/** @type {import("../plan-state.js").PlanStateFileSystem} */
-const DEFAULT_FILE_SYSTEM = { lstatSync, readFileSync };
-
 export class MaintainRejectedError extends Error {
   /**
    * @param {number} status
@@ -138,22 +133,34 @@ export function isResolutionCause(value) {
 }
 
 /**
- * The origin pinned by the Project's first push, which every maintain request
- * and its account read use.
+ * The Project and origin every maintain request uses, read once per command:
+ * the Project's state, in `cwd` or in an adopted application's archive at
+ * .firstdraft/design, or else the Project the application's own
+ * .firstdraft/gaps.json names, at the origin `login` would select.
  *
- * @param {string} cwd
- * @param {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
+ * @param {{cwd: string, fileSystem?: import("../plan-state.js").PlanStateFileSystem, selectOrigin: () => string}} options
+ * @returns {MaintainContext}
  */
-export function maintainOrigin(cwd, fileSystem = DEFAULT_FILE_SYSTEM) {
-  return readContext(cwd, fileSystem).apiUrl;
+export function readMaintainContext({ cwd, fileSystem, selectOrigin }) {
+  const { apiUrl, projectId, fromApplication } = readPinnedOrApplicationProject(
+    { cwd, fileSystem, selectOrigin },
+  );
+  return { apiUrl, projectId, fromApplication };
 }
 
 /**
+ * @typedef {object} MaintainContext
+ * @property {string} apiUrl
+ * @property {string} projectId
+ * @property {boolean} fromApplication true when the Project came from the
+ *   application's files, so the origin is not pinned
+ */
+
+/**
  * @typedef {object} MaintainRequestOptions
- * @property {string} cwd
+ * @property {MaintainContext} context
  * @property {string} environment
  * @property {typeof globalThis.fetch} [fetchFunction]
- * @property {import("../plan-state.js").PlanStateFileSystem} [fileSystem]
  * @property {(timeoutMs: number) => AbortSignal} [createRequestSignal]
  */
 
@@ -163,14 +170,13 @@ export function maintainOrigin(cwd, fileSystem = DEFAULT_FILE_SYSTEM) {
  * @param {MaintainRequestOptions & {page: number}} options
  */
 export async function listMaintenanceItems({
-  cwd,
+  context,
   environment,
   page,
   fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
 }) {
-  const { apiUrl, projectId } = readContext(cwd, fileSystem);
+  const { apiUrl, projectId } = context;
   const endpoint = serviceEndpoint(
     SERVICE_ROUTES.listMaintenanceItems,
     apiUrl,
@@ -210,14 +216,13 @@ export async function listMaintenanceItems({
  * @param {MaintainRequestOptions & {itemId: string}} options
  */
 export async function showMaintenanceItem({
-  cwd,
+  context,
   environment,
   itemId,
   fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
 }) {
-  const { apiUrl, projectId } = readContext(cwd, fileSystem);
+  const { apiUrl, projectId } = context;
   const endpoint = serviceEndpoint(SERVICE_ROUTES.readMaintenanceItem, apiUrl, {
     project_id: projectId,
     environment_name: environment,
@@ -258,17 +263,16 @@ export async function showMaintenanceItem({
  * @param {MaintainRequestOptions & {itemId: string, reason: string, cause: string, detail?: string}} options
  */
 export async function resolveMaintenanceItem({
-  cwd,
+  context,
   environment,
   itemId,
   reason,
   cause,
   detail,
   fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
   createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
 }) {
-  const { apiUrl, projectId } = readContext(cwd, fileSystem);
+  const { apiUrl, projectId } = context;
   const endpoint = serviceEndpoint(
     SERVICE_ROUTES.resolveMaintenanceItem,
     apiUrl,
@@ -300,18 +304,6 @@ export async function resolveMaintenanceItem({
     environment: copyEnvironment(body.environment),
     item: copySummary(item),
   };
-}
-
-/**
- * The pinned Project, read from `cwd` or, at an adopted application's root,
- * from its archive at .firstdraft/design, as the report commands read it.
- *
- * @param {string} cwd
- * @param {import("../plan-state.js").PlanStateFileSystem} fileSystem
- */
-function readContext(cwd, fileSystem) {
-  const { apiUrl, projectId } = readPinnedProject({ cwd, fileSystem });
-  return { apiUrl, projectId };
 }
 
 /**

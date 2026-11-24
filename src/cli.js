@@ -10,6 +10,7 @@ import {
   MAINTAIN_REPORTS_ON_LINE,
   NOTES_ON_LINES,
   REPORTS_ON_LINES,
+  applicationProjectLine,
   commandLine,
   deviceLoginExpiredLines,
   deviceLoginFinishedLines,
@@ -87,7 +88,7 @@ import {
   isResolutionCause,
   isResolutionReason,
   listMaintenanceItems,
-  maintainOrigin,
+  readMaintainContext,
   resolveMaintenanceItem,
   showMaintenanceItem,
 } from "./commands/maintain.js";
@@ -150,6 +151,7 @@ import {
   CompilationRecordWriteError,
   PlanStateNotPushedError,
   isUuidV7,
+  readPinnedOrApplicationProject,
   readPinnedProject,
   readRecordedCompilation,
   recordCompilation,
@@ -883,7 +885,7 @@ const MAINTAIN_SHOW_INVALID_ARGUMENTS_DETAIL =
 const MAINTAIN_RESOLVE_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft maintain resolve --help' for usage.";
 const MAINTAIN_LOCAL_INPUT_UNREADABLE_DETAIL =
-  "Could not read valid local First Draft state. No network request was made. Run this command from the application's root, where the CLI reads the Project's state archived at .firstdraft/design, or from the directory whose .firstdraft holds that state.";
+  "Could not read valid local First Draft state. No network request was made. Run this command from the application's folder, where the CLI reads the Project from .firstdraft/gaps.json or from the state archived at .firstdraft/design, or from the directory whose .firstdraft holds the Project's state.";
 const MAINTAIN_NOT_PUSHED_DETAIL =
   "The local Project has no pinned API origin. Run 'firstdraft plan push' first.";
 const MAINTAIN_REJECTED_DETAIL =
@@ -920,6 +922,8 @@ const REPORT_ACCOUNT_INVALID_RESPONSE_DETAIL =
   "First Draft returned an invalid account response, so no report was sent. Continue without it.";
 const REPORT_NOT_RECORDED_DETAIL =
   "No Compilation is recorded for this Project, so nothing was sent. 'firstdraft plan compile' and 'firstdraft compilation download' record the one whose code they write; to name one yourself, put its compilation.id right after 'report progress' or 'report failure'.";
+const REPORT_FROM_APPLICATION_NOT_RECORDED_DETAIL =
+  "No First Draft planning folder is here, so the CLI read the Project from .firstdraft/gaps.json, which records no Compilation, and nothing was sent. To name the Compilation the deployed code came from, put its compilation.id right after 'report failure'; otherwise continue without the report.";
 const NOTE_NOT_RECORDED_DETAIL =
   "No Compilation is recorded for this Project, so nothing was sent. 'firstdraft plan compile' and 'firstdraft compilation download' record the one whose code they write; to name one yourself, pass its compilation.id with --compilation-id.";
 const NOTE_REJECTED_DETAIL =
@@ -2012,19 +2016,18 @@ async function runMaintainIndex(options) {
   return runMaintainRequest(
     options,
     parsed.values.staging,
-    async (fetchFunction) => {
+    async (fetchFunction, context) => {
       const account = await readAccount({
-        origin: maintainOrigin(options.cwd, options.planPushFileSystem),
+        origin: context.apiUrl,
         fetchFunction,
         createRequestSignal: options.createRequestSignal,
       });
       return {
         output: await listMaintenanceItems({
-          cwd: options.cwd,
+          context,
           environment,
           page,
           fetchFunction,
-          fileSystem: options.planPushFileSystem,
           createRequestSignal: options.createRequestSignal,
         }),
         notes: account.reports === "on" ? [MAINTAIN_REPORTS_ON_LINE] : [],
@@ -2074,13 +2077,12 @@ async function runMaintainShow(options) {
   return runMaintainRequest(
     options,
     parsed.values.staging,
-    async (fetchFunction) => ({
+    async (fetchFunction, context) => ({
       output: await showMaintenanceItem({
-        cwd: options.cwd,
+        context,
         environment,
         itemId,
         fetchFunction,
-        fileSystem: options.planPushFileSystem,
         createRequestSignal: options.createRequestSignal,
       }),
     }),
@@ -2135,16 +2137,15 @@ async function runMaintainResolve(options) {
   return runMaintainRequest(
     options,
     parsed.values.staging,
-    async (fetchFunction) => ({
+    async (fetchFunction, context) => ({
       output: await resolveMaintenanceItem({
-        cwd: options.cwd,
+        context,
         environment,
         itemId,
         reason,
         cause,
         detail,
         fetchFunction,
-        fileSystem: options.planPushFileSystem,
         createRequestSignal: options.createRequestSignal,
       }),
     }),
@@ -2152,12 +2153,13 @@ async function runMaintainResolve(options) {
 }
 
 /**
- * Prints `output` as JSON on standard output, then any `notes` for the agent
- * on standard error.
+ * Reads the Project once, sends, then prints `output` as JSON on standard
+ * output and any notes for the agent on standard error, first the one that
+ * says the Project came from the application's files.
  *
  * @param {MaintainCommandOptions} options
  * @param {boolean | undefined} stagingOption
- * @param {(fetchFunction: typeof globalThis.fetch) => Promise<{output: unknown, notes?: readonly string[]}>} send
+ * @param {(fetchFunction: typeof globalThis.fetch, context: import("./commands/maintain.js").MaintainContext) => Promise<{output: unknown, notes?: readonly string[]}>} send
  */
 async function runMaintainRequest(options, stagingOption, send) {
   const { stdout, stderr } = options;
@@ -2174,11 +2176,26 @@ async function runMaintainRequest(options, stagingOption, send) {
       writeAuthenticationRequired(stderr);
       return 1;
     }
+    const context = readMaintainContext({
+      cwd: options.cwd,
+      fileSystem: options.planPushFileSystem,
+      selectOrigin: () =>
+        resolveLoginOrigin({
+          apiUrl: options.apiUrl,
+          staging: options.staging || stagingOption,
+        }),
+    });
     const { output, notes = [] } = await options.service.settle(
-      send(authentication.fetchFunction),
+      send(authentication.fetchFunction, context),
     );
     writeJson(stdout, output);
-    if (notes.length > 0) writeLines(stderr, notes);
+    const lines = [
+      ...(context.fromApplication
+        ? [applicationProjectLine(context.apiUrl)]
+        : []),
+      ...notes,
+    ];
+    if (lines.length > 0) writeLines(stderr, lines);
     return 0;
   } catch (error) {
     const stopStatus = writeServiceStop(stderr, error);
@@ -4258,6 +4275,7 @@ async function runReportFailure(options) {
       wrapper: "failure_report",
       route: SERVICE_ROUTES.sendFailureReport,
       compilationId,
+      fromApplication: deployedError,
       body: (cwd) => ({
         ...failureReportBody(
           {
@@ -4398,6 +4416,9 @@ const MAX_REPORT_COUNT = 1_000_000;
  *   given one, or else the one the CLI recorded
  * @property {boolean} compilationInPath whether the route's path names it
  * @property {string | undefined} compilationId the one the caller gave
+ * @property {boolean} [fromApplication] whether, without Project state, it
+ *   may read the Project from the application's .firstdraft/gaps.json, as a
+ *   deployed_error does in a fresh clone of the application
  * @property {(cwd: string, compilationId: string | null) => {body: unknown, omitted: string[], missing: string[]}} body
  *   `missing` names the left-out fields it needs, so nothing is sent
  * @property {string} help the command that describes each field
@@ -4447,7 +4468,9 @@ async function sendReportCommand(options, outgoing) {
   const { stdout, stderr, createRequestSignal, service } = options;
   const { noun, wrapper, route, namesCompilation, body } = outgoing;
   try {
-    const pinned = authenticatePinnedProject(options);
+    const pinned = authenticatePinnedProject(options, {
+      fromApplication: outgoing.fromApplication === true,
+    });
     if (pinned === null) {
       writeAuthenticationRequired(stderr);
       return 1;
@@ -4467,7 +4490,7 @@ async function sendReportCommand(options, outgoing) {
         service.throwIfStopped();
         const compilationId = namesCompilation
           ? (outgoing.compilationId ??
-            readRecordedCompilation({ stateDirectory: pinned.stateDirectory }))
+            recordedCompilation(pinned.stateDirectory))
           : null;
         const shaped = body(pinned.cwd, compilationId);
         if (shaped.missing.length > 0) {
@@ -4514,7 +4537,10 @@ async function sendReportCommand(options, outgoing) {
     if (error instanceof CompilationNotRecordedError) {
       writeJson(stderr, {
         error: "compilation_not_recorded",
-        detail: outgoing.notRecordedDetail,
+        detail:
+          error instanceof ApplicationRecordsNoCompilationError
+            ? REPORT_FROM_APPLICATION_NOT_RECORDED_DETAIL
+            : outgoing.notRecordedDetail,
       });
       return 1;
     }
@@ -4576,24 +4602,48 @@ function recordWrittenCompilation(stderr, cwd, compilationId) {
   }
 }
 
+class ApplicationRecordsNoCompilationError extends CompilationNotRecordedError {}
+
+/**
+ * The Compilation the CLI recorded beside the Project's state. A Project read
+ * from the application's files has no state directory, so none is recorded.
+ *
+ * @param {string | null} stateDirectory
+ */
+function recordedCompilation(stateDirectory) {
+  if (stateDirectory === null) {
+    throw new ApplicationRecordsNoCompilationError(
+      "The application's files record no Compilation.",
+    );
+  }
+
+  return readRecordedCompilation({ stateDirectory });
+}
+
 /**
  * Reads the Project that a successful push pinned and authenticates its
  * origin, before a command prints what it will send there. Returns null when
- * no token is available for that origin.
+ * no token is available for that origin. With `fromApplication`, a directory
+ * with no Project state may name the Project in its .firstdraft/gaps.json, at
+ * the origin `login` would select.
  *
  * @param {ServiceCommandOptions} options
+ * @param {{fromApplication?: boolean}} [lookup]
  */
-function authenticatePinnedProject({
-  cwd,
-  getCwd,
-  fetchFunction,
-  credentials,
-  apiUrl,
-  apiToken,
-  stagingApiToken,
-  staging,
-  service,
-}) {
+function authenticatePinnedProject(
+  {
+    cwd,
+    getCwd,
+    fetchFunction,
+    credentials,
+    apiUrl,
+    apiToken,
+    stagingApiToken,
+    staging,
+    service,
+  },
+  { fromApplication = false } = {},
+) {
   const authentication = authenticateApiCommand({
     fetchFunction: service.fetch(fetchFunction),
     apiUrl,
@@ -4605,7 +4655,12 @@ function authenticatePinnedProject({
   if (authentication === null) return null;
 
   const directory = cwd ?? getCwd();
-  const project = readPinnedProject({ cwd: directory });
+  const project = fromApplication
+    ? readPinnedOrApplicationProject({
+        cwd: directory,
+        selectOrigin: () => resolveLoginOrigin({ apiUrl, staging }),
+      })
+    : { ...readPinnedProject({ cwd: directory }), fromApplication: false };
   if (staging && project.apiUrl !== STAGING_API_URL) {
     throw new PlanPushConfigurationError(
       "The requested API environment does not match the Project origin. No request was made.",

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { MAINTAIN_REPORTS_ON_LINE } from "../src/agent-sentences.js";
+import {
+  MAINTAIN_REPORTS_ON_LINE,
+  applicationProjectLine,
+} from "../src/agent-sentences.js";
 import { run } from "../src/cli.js";
 
 const PROJECT_ID = "01900000-0000-7000-8000-000000006001";
@@ -679,7 +682,82 @@ test("maintain run from an adopted application root reads the archived Project",
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, `${JSON.stringify(body, null, 2)}\n`);
+  assert.equal(result.stderr, "");
   assert.equal(String(calls[0]?.input), `${API_URL}${ITEM_PATH}`);
+});
+
+test("maintain run in a fresh clone of the application reads the Project from its gaps.json", async (context) => {
+  for (const { argv, options, origin } of [
+    { argv: ["maintain"], options: {}, origin: "https://firstdraft.com" },
+    {
+      argv: ["maintain", "--staging"],
+      options: {},
+      origin: "https://staging.firstdraft.com",
+    },
+    { argv: ["maintain"], options: { apiUrl: API_URL }, origin: API_URL },
+  ]) {
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const body = indexBody();
+    const result = await invoke(argv, {
+      cwd: applicationClone(context),
+      reports: null,
+      stagingApiToken: API_TOKEN,
+      ...options,
+      fetchFunction: sequenceFetch(
+        [jsonResponse({ reports: "off" }), jsonResponse(body)],
+        calls,
+      ),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${JSON.stringify(body, null, 2)}\n`);
+    assert.equal(result.stderr, `${applicationProjectLine(origin)}\n`);
+    assert.deepEqual(
+      calls.map((call) => String(call.input)),
+      [`${origin}/v1/account`, `${origin}${ITEMS_PATH}?page=1`],
+    );
+  }
+
+  /** @type {FetchCall[]} */
+  const calls = [];
+  const resolved = resolvedBody("duplicate", "later_code");
+  const result = await invoke([...RESOLVE_DUPLICATE], {
+    cwd: applicationClone(context),
+    fetchFunction: sequenceFetch([jsonResponse(resolved)], calls),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stderr,
+    `${applicationProjectLine("https://firstdraft.com")}\n`,
+  );
+  assert.equal(
+    String(calls[0]?.input),
+    `https://firstdraft.com${RESOLUTION_PATH}`,
+  );
+});
+
+test("an application gaps.json that names no Project is unreadable local state", async (context) => {
+  for (const contents of [
+    "not json",
+    JSON.stringify({ format: "firstdraft.foundation-gaps/2", project: {} }),
+    JSON.stringify({
+      format: "other",
+      project: { id: PROJECT_ID, graph_version: 1 },
+    }),
+    JSON.stringify({
+      format: "firstdraft.foundation-gaps/2",
+      project: { id: "canary", graph_version: 1 },
+    }),
+  ]) {
+    const result = await invoke(["maintain", "show", ITEM_ID], {
+      cwd: applicationClone(context, contents),
+      fetchFunction: async () => assert.fail("No request was expected"),
+    });
+    assertHandledFailure(result, "local_input_unreadable");
+    assert.match(JSON.parse(result.stderr).detail, /\.firstdraft\/gaps\.json/);
+    assertNoSecrets(result);
+  }
 });
 
 test("maintain authentication problems are stable", async (context) => {
@@ -886,6 +964,36 @@ function problemResponse({ status, code, detail }) {
     }),
     { status, headers: { "Content-Type": "application/problem+json" } },
   );
+}
+
+/**
+ * A clone of a compiled application: its .firstdraft holds what the Compiler
+ * wrote, the GapSet and the submitted Plan, and no planning state.
+ *
+ * @param {import("node:test").TestContext} context
+ * @param {string} [gapSet]
+ */
+function applicationClone(
+  context,
+  gapSet = JSON.stringify({
+    format: "firstdraft.foundation-gaps/2",
+    source: { sha256: "a".repeat(64) },
+    project: { id: PROJECT_ID, graph_version: 3 },
+    analysis: { release: "analysis" },
+    compiler_release: "compiler",
+    target: { id: "rails", profile: "rails-sketch/2026-11" },
+    gaps: [],
+  }),
+) {
+  const cwd = mkdtempSync(path.join(tmpdir(), "firstdraft-maint-clone-"));
+  context.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(path.join(cwd, ".firstdraft"));
+  writeFileSync(path.join(cwd, ".firstdraft", "gaps.json"), `${gapSet}\n`);
+  writeFileSync(
+    path.join(cwd, ".firstdraft", "submitted-foundation-plan.json"),
+    "{}\n",
+  );
+  return cwd;
 }
 
 /**

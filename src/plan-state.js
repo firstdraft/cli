@@ -66,6 +66,78 @@ export function readPinnedProject({ cwd, fileSystem }) {
   };
 }
 
+// Every Compilation writes its GapSet into the application as
+// .firstdraft/gaps.json, and the GapSet's project.id is the Project's ID,
+// which no recompile changes. The service caps a GapSet at 32 MiB.
+const APPLICATION_GAP_SET = path.join(".firstdraft", "gaps.json");
+const MAX_GAP_SET_BYTES = 32 * 1024 * 1024;
+const GAP_SET_FORMAT_PREFIX = "firstdraft.foundation-gaps/";
+
+/**
+ * The Project as readPinnedProject reads it, or, where there is no Project
+ * state but the application's own .firstdraft/gaps.json names a Project, as
+ * in a fresh clone of the application, that Project at `selectOrigin()`. The
+ * application's files hold no origin and no Compilation record, so such a
+ * Project has neither a pinned origin nor a state directory.
+ *
+ * @param {object} options
+ * @param {string} options.cwd
+ * @param {PlanStateFileSystem} [options.fileSystem]
+ * @param {() => string} options.selectOrigin the origin `login` would use
+ * @returns {{apiUrl: string, projectId: string, stateDirectory: string | null, fromApplication: boolean}}
+ */
+export function readPinnedOrApplicationProject({
+  cwd,
+  fileSystem = DEFAULT_FILE_SYSTEM,
+  selectOrigin,
+}) {
+  const stateFile = path.join(
+    pinnedProjectDirectory(cwd, fileSystem),
+    ".firstdraft",
+    "state.json",
+  );
+  const gapSetFile = path.join(cwd, APPLICATION_GAP_SET);
+  if (isAbsent(stateFile, fileSystem) && !isAbsent(gapSetFile, fileSystem)) {
+    return {
+      apiUrl: selectOrigin(),
+      projectId: readGapSetProjectId(gapSetFile, fileSystem),
+      stateDirectory: null,
+      fromApplication: true,
+    };
+  }
+
+  return { ...readPinnedProject({ cwd, fileSystem }), fromApplication: false };
+}
+
+/**
+ * @param {string} filePath
+ * @param {PlanStateFileSystem} fileSystem
+ */
+function readGapSetProjectId(filePath, fileSystem) {
+  const source = readLocalFile(filePath, MAX_GAP_SET_BYTES, fileSystem);
+  /** @type {unknown} */
+  let document;
+  try {
+    document = JSON.parse(source.toString("utf8"));
+  } catch {
+    throw new PlanStateLocalError("The application's GapSet is not JSON.");
+  }
+  const projectId =
+    isRecord(document) &&
+    typeof document.format === "string" &&
+    document.format.startsWith(GAP_SET_FORMAT_PREFIX) &&
+    isRecord(document.project)
+      ? document.project.id
+      : undefined;
+  if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
+    throw new PlanStateLocalError(
+      "The application's GapSet names no First Draft Project.",
+    );
+  }
+
+  return projectId;
+}
+
 /**
  * The directory whose .firstdraft holds the Project's state: `cwd`, or the
  * archive at .firstdraft/design when `cwd` is an adopted application root.
