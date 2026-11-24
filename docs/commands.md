@@ -223,16 +223,17 @@ CLI without the plugin's launcher, such as a direct npm installation, may set th
 
 Beyond the header, a command sends only what it needs:
 
-| Commands                                  | Request content                                                                   |
-| ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                     |
-| `start`                                   | An account read, and nothing without a token                                      |
-| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                                |
-| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                  |
-| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                  |
-| `note <kind>`                             | An account read; with reports on, the note printed just before                    |
-| `maintain`, `maintain show`               | An account read for the index; then only the IDs and the page in the request path |
-| `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice       |
+| Commands                                  | Request content                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                       |
+| `start`                                   | An account read, and nothing without a token                                        |
+| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                                  |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                    |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                    |
+| `note <kind>`                             | An account read; with reports on, the note printed just before                      |
+| `maintain`                                | An account read; then the Project and Environment in the request path and `?page=N` |
+| `maintain show`                           | Only the Project, Environment, and item IDs in the request path                     |
+| `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice         |
 
 ### Update line and refusals
 
