@@ -1,23 +1,22 @@
 # First Draft CLI
 
 firstdraft is the command-line client shared by First Draft agents and automation. It manages local Foundation Plan
-files, calls the versioned Service API, exposes reviewed analysis and GapSets, materializes verified Compilations,
-and coordinates private GitHub publication.
+files, calls the versioned Service API, exposes reviewed analysis and GapSets, and materializes verified
+Compilations.
 
 Start with the [local development guide](https://firstdraft.github.io/firstdraft/docs/guides/local-app.html):
 install the CLI and Skill, then compile into your current folder with `firstdraft plan compile --output .`. No Drawing Board
 clone or GitHub push is required. The [Drawing Board guide](https://github.com/firstdraft/drawing-board#build-an-app-with-first-draft)
 is the Codespaces fallback.
 
-`--output .` is also the default, so `firstdraft plan compile` alone writes to the current folder. GitHub publication
-requires `--github`.
+`--output .` is also the default, so `firstdraft plan compile` alone writes to the current folder.
 
 ## What this repository owns
 
 - local Plan initialization, UUIDs, application keys, and source hashing;
 - conditional whole-document push and conflict reporting;
 - analysis polling and complete GapSet output;
-- direct Compile-and-materialize and private publish orchestration;
+- direct Compile-and-materialize;
 - retained Compilation inspection, cancellation, and artifact download;
 - terminal output, exit status, and recovery contracts;
 - the dependency-free npm package; and

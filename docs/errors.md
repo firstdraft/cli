@@ -110,7 +110,7 @@ is reported as itself, with its recovery data, after the stop line.
 
 ## Ambiguous mutations
 
-`plan compile` supplies `phase: "push" | "compilation" | "publication"` when `request_outcome_unknown` requires
+`plan compile` supplies `phase: "push" | "compilation"` when `request_outcome_unknown` requires
 phase-specific recovery:
 
 - `phase: "push"`, and `request_outcome_unknown` from `plan push`, mean the Plan may have been accepted, but the
@@ -125,15 +125,11 @@ phase-specific recovery:
   `--staging` for staging, or the same `FIRSTDRAFT_API_URL` for a custom origin. A new folder has no pinned origin,
   so without one the push goes to production. Never construct an ETag from the Plan
   digest or edit `.firstdraft/state.json`.
-- `phase: "compilation"` means a local Compilation (the default mode, with optional `--output`) may have started,
-  but its identity is unknown. The CLI never repeats that `POST` itself. Run the same `plan compile` command, with
-  the same options and environment, once more. If a Compilation is still active, First Draft refuses with
-  `compilation_active` and names it; follow [stuck Compilation recovery](#stuck-compilation-recovery). Otherwise the
-  rerun starts a new Compilation; one that the first attempt may have started costs only service time and one of the
-  day's Compilations.
-- `phase: "publication"` means the singleton Publication mutation was not resolved. Do not run concurrent Compile
-  commands. After the prior invocation exits, wait and rerun `plan compile --github` with unchanged Plan bytes to safely
-  reconcile or resume the retained singleton.
+- `phase: "compilation"` means the Compilation may have started, but its identity is unknown. The CLI never repeats that
+  `POST` itself. Run the same `plan compile` command, with the same options and environment, once more. If a Compilation
+  is still active, First Draft refuses with `compilation_active` and names it; follow
+  [stuck Compilation recovery](#stuck-compilation-recovery). Otherwise the rerun starts a new Compilation; one that the
+  first attempt may have started costs only service time and one of the day's Compilations.
 
 If a verified Plan response cannot replace local state, preserve the printed `recovery_state`; an adjacent `.tmp`
 file may contain the same private recovery copy. Do not push again until the accepted ETag state is repaired.
@@ -241,21 +237,6 @@ an error.
   `invalid_server_response` from `account` means the response broke its contract. From a report or note command,
   either error means the account read failed, so nothing was sent; continue without it.
 
-## Publication recovery
-
-The Publication is a Project singleton. If its initial conditional `PUT` is ambiguous, the CLI attempts one
-read-only singleton `GET` and never automatically repeats the mutation in that invocation.
-
-After `publication_status_unavailable` or `publication_wait_timed_out`, retained work may still continue. Do not run
-concurrent Compile commands. Wait, then rerun `plan compile --github` with unchanged Plan bytes; the conditional request
-safely reconciles or resumes the same retained singleton without creating another Compilation, repository, or push.
-The same recovery applies when an invocation exits after an unresolved Publication start.
-
-A GitHub preflight retry with no `retry_at` is paused and requires operator recovery. `publication_failed` and
-`publication_cancelled` are terminal; inspect the validated phase and failure information rather than blindly
-retrying. `publication_changed` means the pinned Publication identity or provenance changed, so the CLI deliberately
-stopped without following the replacement.
-
 ## Maintenance recovery
 
 The index and `show` only read, so they are safe to retry a bounded number of times. A resolution is not. When its
@@ -306,8 +287,6 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
 | `plan compile`                                             | `local_plan_changed`                                                                               |    1 | Local bytes or saved state changed after acceptance, before the selected mutation.                                           |
 | `plan compile`                                             | `compilation_start_rejected`, `compilation_status_unavailable`, `invalid_compilation_status`       |    1 | Direct start was rejected or retained status failed; post-start errors include `current`.                                    |
 | `plan compile`                                             | `compilation_changed`, `compilation_wait_timed_out`, `compilation_failed`, `compilation_cancelled` |    1 | The pinned direct Compilation changed, timed out, failed, or was cancelled.                                                  |
-| `plan compile --github`                                    | `publication_start_rejected`, `publication_status_unavailable`, `invalid_publication_status`       |    1 | Publication start or status failed its validated transport contract.                                                         |
-| `plan compile --github`                                    | `publication_changed`, `publication_wait_timed_out`, `publication_failed`, `publication_cancelled` |    1 | The pinned Publication changed, timed out, or reached a non-success terminal state.                                          |
 | `compilation status`, `compilation download`               | `compilation_status_unavailable`, `invalid_compilation_status`                                     |    1 | The retained status could not be read or violated its exact contract.                                                        |
 | `compilation status --wait`                                | `compilation_changed`, `compilation_wait_timed_out`                                                |    1 | Retained identity/provenance changed or the wait ended.                                                                      |
 | `compilation download`                                     | `compilation_not_succeeded`                                                                        |    1 | Status was not `succeeded`; no artifact request was made.                                                                    |

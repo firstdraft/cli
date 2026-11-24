@@ -1,4 +1,3 @@
-import { publishPlan } from "./plan-publish.js";
 import { compileAndDownload } from "./compilation.js";
 import {
   prepareCompilationOutputTarget,
@@ -65,62 +64,10 @@ export class PlanCompileAnalysisInvalidError extends Error {
  * @property {(timeoutMs?: number) => AbortSignal} [createRequestSignal]
  * @property {(delayMs: number) => Promise<void>} [analysisSleep]
  * @property {() => number} [analysisNow]
- * @property {(delayMs: number) => Promise<void>} [publicationSleep]
- * @property {() => number} [publicationNow]
  * @property {(progress: import("../plan-compile-progress.js").PlanCompileProgress) => void} [onProgress]
  * @property {typeof pushPlan} [push]
  * @property {typeof readPlanStatus} [readStatus]
- * @property {typeof publishPlan} [publish]
  */
-
-/**
- * Submit and analyze the exact current local Plan before invoking the internal
- * GitHub Publication lifecycle. The Publication function performs the final
- * local-byte check immediately before its conditional mutation.
- *
- * @param {CompilePlanOptions} options
- */
-export async function compilePlanToGitHub({
-  cwd,
-  apiUrl,
-  fetchFunction,
-  fileSystem,
-  createTemporaryId,
-  createRequestSignal,
-  analysisSleep,
-  analysisNow,
-  publicationSleep,
-  publicationNow,
-  onProgress = () => {},
-  push = pushPlan,
-  readStatus = readPlanStatus,
-  publish = publishPlan,
-}) {
-  const prepared = await preparePlan({
-    cwd,
-    apiUrl,
-    fetchFunction,
-    fileSystem,
-    createTemporaryId,
-    createRequestSignal,
-    analysisSleep,
-    analysisNow,
-    onProgress,
-    push,
-    readStatus,
-  });
-
-  return publish({
-    cwd,
-    fetchFunction,
-    fileSystem,
-    createRequestSignal,
-    sleep: publicationSleep,
-    now: publicationNow,
-    expectedEtag: prepared.pushed.etag,
-    onProgress,
-  });
-}
 
 /**
  * @typedef {CompilePlanOptions & {
@@ -134,8 +81,7 @@ export async function compilePlanToGitHub({
 /**
  * Submit and analyze the exact current local Plan, then start one direct
  * Compilation and materialize its verified artifact into an absent directory
- * or the eligible current directory. GitHub Publication is the explicit
- * --github mode owned by compilePlanToGitHub.
+ * or the eligible current directory.
  *
  * @param {CompilePlanToDirectoryOptions} options
  */
@@ -199,7 +145,7 @@ export async function compilePlanToDirectory({
 }
 
 /**
- * @param {Omit<CompilePlanOptions, "publicationSleep" | "publicationNow" | "publish">} options
+ * @param {CompilePlanOptions} options
  */
 async function preparePlan({
   cwd,

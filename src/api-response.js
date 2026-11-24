@@ -51,14 +51,6 @@ export const SERVICE_ROUTES = {
     method: "GET",
     path: "/v1/projects/{project_id}/compilations/{compilation_id}/artifact",
   },
-  startPublication: {
-    method: "PUT",
-    path: "/v1/projects/{project_id}/github-publication",
-  },
-  readPublication: {
-    method: "GET",
-    path: "/v1/projects/{project_id}/github-publication",
-  },
   readAccount: {
     method: "GET",
     path: "/v1/account",

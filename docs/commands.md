@@ -6,7 +6,7 @@ group's `--help` for concise executable syntax. See [Errors and recovery](errors
 The current `0.10.x` source line contains the auditable command shell, the agent's `start` check, browser and device
 login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
-status polling, direct Compile-and-materialize and private publish orchestration, retained-Compilation inspection and
+status polling, direct Compile-and-materialize, retained-Compilation inspection and
 cancellation, the account's report setting, progress and failure reports, notes, and maintenance-item listing,
 inspection, and resolution. It requires the service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
@@ -26,7 +26,6 @@ inspection, and resolution. It requires the service's `0.9.x` API contract. The 
 | `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                     |
 | `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis             |
 | `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder      |
-| `firstdraft plan compile --github`    | Yes     | Push and analyze, then publish to private GitHub              |
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                          |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation      |
 | `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                  |
@@ -453,25 +452,25 @@ firstdraft plan compile
 ```
 
 This is equivalent to `firstdraft plan compile --output .`. Use `--output ./application` for another absent
-directory, or `--github` to publish to a private GitHub repository. `--github` and `--output` are mutually exclusive.
-No GitHub connection, repository clone, or push is required for local compilation. Compilation runs on the First
-Draft service; output and the application runtime are local.
+directory. No GitHub connection, repository clone, or push is required. Compilation runs on the First Draft service;
+output and the application runtime are local. To put the application on GitHub, create and push a repository with
+`git` and `gh` after it is written.
 
-Both `plan compile` modes first push the exact current bytes in
-`.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and save the accepted ETag using the same
+`plan compile` first pushes the exact current bytes in
+`.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and saves the accepted ETag using the same
 contract as `plan push`. It then waits up to two minutes for an analysis whose graph version and
 `head_source_sha256` exactly match that accepted push, polling past a terminal result retained for an older Head.
 Invalid JSON, schema diagnostics, semantic diagnostics, a failed analysis, a superseded analysis, or a recurring
-diagnostic stop the command with structured output; no Compilation or Publication is requested.
+diagnostic stop the command with structured output; no Compilation is requested.
 
-Only a `valid` analysis proceeds to the selected completion mode. Immediately before either conditional mutation,
-the CLI re-reads the local Plan and requires its exact bytes and saved state to match the accepted Head. It extracts
+Only a `valid` analysis proceeds to Compilation. Immediately before the conditional Compilation start, the CLI
+re-reads the local Plan and requires its exact bytes and saved state to match the accepted Head. It extracts
 the accepted source SHA-256 from the saved ETag, hashes the current local bytes, and sends that complete ETag in
 `If-Match`.
 
 ### Materialize a direct Compilation
 
-Without `--github`, the CLI accepts either an explicit absent destination beneath an existing real directory or a path
+The CLI accepts either an explicit absent destination beneath an existing real directory or a path
 that resolves to the physical current directory. It validates either destination before pushing the Plan. An absent
 destination is checked again after analysis; root adoption instead holds its owned lock and performs the exact
 pre-move identity recheck described below. Other existing destinations remain invalid, so
@@ -564,8 +563,7 @@ path identities, and verify its original snapshot before removing the transactio
 reports `root_busy` until that state is reconciled; a foreign preexisting directory with the same reserved name
 reports `root_reserved_path`.
 
-After valid analysis, the CLI requests one Compilation for that exact reviewed Head and never starts GitHub
-Publication. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
+After valid analysis, the CLI requests one Compilation for that exact reviewed Head. It validates that the `202` response identifies the same Project, graph version, Head, Analysis,
 Compiler release, and target; polls only that retained Compilation for up to ten minutes; downloads its exact
 artifact; and applies the same integrity and atomic materialization contract as `compilation download`. An ambiguous
 Compilation start is not retried automatically. After a validated `202`, later status, artifact, authentication,
@@ -582,8 +580,13 @@ archive and retained Git/transaction paths; it still checks every generated file
 `.firstdraft/submitted-foundation-plan.json` and `.firstdraft/gaps.json`, and rejects unexpected generated paths. The
 CLI does not add a Git repository, run a formatter, or repair generated source. When an absent output is nested
 inside another Git worktree, initialize the application as its own repository before running generated checks that
-inspect Git; otherwise Git resolves to the parent worktree. Progress on stderr reports analysis and Compilation
-only.
+inspect Git; otherwise Git resolves to the parent worktree.
+
+Progress lines go to stderr, each prefixed by `First Draft:`. They report analysis and Compilation only and never
+include IDs, hashes, raw server projections, local paths, or environment values. One
+[update line](#update-line-and-refusals) can follow them on stderr, before the result or the error envelope; that
+section says what it names. If the command fails after progress has begun, its structured JSON error envelope is the
+final stderr document.
 
 ### Record the Compilation whose code was written
 
@@ -603,55 +606,15 @@ format of `state.json`, and it sits in the same planning folder, whose ignore fi
 ```
 
 The CLI writes it with mode `0600` through a temporary file and a rename, replacing the previous record, so it names
-the Compilation whose code the CLI wrote last for the Project, wherever that code went. `plan compile --github` writes
-no code into the folder and records nothing. If the record cannot be written, the command keeps its result, any earlier
+the Compilation whose code the CLI wrote last for the Project, wherever that code went. If the record cannot be written, the command keeps its result, any earlier
 record stays as it was, and one `First Draft:` line on standard error names the Compilation to pass to later reports
 and notes. Only a report, or a note about generated code, that names no Compilation reads the record; one that is not
 exactly this shape stops it with `local_input_unreadable`.
 
-### Publish through GitHub
-
-Use the explicit GitHub option for the Publication journey:
-
-```sh
-firstdraft plan compile --github
-```
-
-Invoking this form authorizes the internal GitHub Publication lifecycle. The command writes stable human-readable
-progress to stderr, with every line prefixed by `First Draft:`. It reports analysis, Compilation completion or
-terminal failure or cancellation, the current GitHub phase, and an allowlisted reason, retry count, and exact UTC
-retry time when a GitHub preflight check is delayed. A retained retry with no next time is reported as paused and
-requiring operator recovery. Progress never includes IDs, hashes, repository names or URLs, raw server projections,
-local paths, or environment values. The [update line](#update-line-and-refusals), which can appear among the
-progress lines, names only versions and the public update page. Success writes exactly the validated private GitHub repository URL plus a
-newline to stdout. If the command fails after progress has begun, its structured JSON error envelope is the final
-stderr document after the progress lines.
-
-The closed API `0.9.x` progress-reason allowlist is `github.configuration_missing`, `github.oauth_unavailable`,
-`github.api_unavailable`, `github.reauthorization_required`, `github.account_mismatch`,
-`github.installation_unavailable`, `github.installation_not_ready`, `github.preflight_unavailable`, the legacy-only
-`github.preflight_unclassified`, and these stage-specific fallbacks: `github.preflight_unavailable.configuration`,
-`github.preflight_unavailable.authorization`, `github.preflight_unavailable.repository_client`,
-`github.preflight_unavailable.artifact_preparation`, `github.preflight_unavailable.installation_token`,
-`github.preflight_unavailable.publication_preparation`, and `github.preflight_unavailable.repository_ref_client`.
-Other values make the response invalid rather than becoming terminal output.
-
-The internal Publication is a Project singleton in this release. A repeat safely receives the same Publication
-instead of creating another. If the first conditional `PUT` has an ambiguous result, the CLI reconciles it with one
-read-only singleton `GET` and never automatically repeats the mutation within that invocation. Publication polling
-is sequential, bounded to ten minutes, and pinned to the retained Project Head, Compilation input, Publication
-identity, and repository identity. Do not run concurrent Compile commands; use the
-[publication recovery procedure](errors.md#publication-recovery) after an invocation exits.
-
-This release cannot repoint a Project's Publication to a later accepted Head. The public CLI therefore has no
-`plan publish` command. Direct local Compilation and GitHub Publication are separate completion modes after the same
-exact Plan push and valid Analysis.
-
 ## Inspect a retained Compilation
 
 These lower-level commands are for callers that already hold a retained Compilation ID from authenticated API
-metadata or operational tooling. `plan compile --github` prints only the final repository URL, while the default
-`plan compile` form waits for and downloads its own direct Compilation:
+metadata or operational tooling. `plan compile` waits for and downloads its own direct Compilation:
 
 ```sh
 firstdraft compilation status 01900000-0000-7000-8000-000000000001
@@ -731,10 +694,6 @@ Compilation. First Draft never changes a succeeded or failed Compilation: it ans
 `409 compilation_not_cancellable`, which the CLI reports as `compilation_cancel_rejected`. Because a repeat is
 safe, an outcome the CLI cannot confirm is `compilation_cancel_unavailable` rather than `request_outcome_unknown`.
 See [stuck Compilation recovery](errors.md#stuck-compilation-recovery).
-
-If the Compilation was started by `plan compile --github`, Cancel also cancels the Project's Publication. The
-Publication is a Project singleton in this release, so `plan compile --github` cannot start another one for that
-Project.
 
 ## Read the account
 
@@ -979,8 +938,6 @@ timeout. Each request takes its method and path from one
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                              | Read one retained Compilation        |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`                       | Cancel that Compilation              |
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`                     | Download that Compilation's artifact |
-| `PUT`  | `/v1/projects/{project_id}/github-publication`                                         | Start or rejoin the Publication      |
-| `GET`  | `/v1/projects/{project_id}/github-publication`                                         | Poll or reconcile the Publication    |
 | `GET`  | `/v1/account`                                                                          | Read whether the account reports     |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports`             | Send a progress report               |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`              | Send a failure report                |
@@ -993,7 +950,7 @@ timeout. Each request takes its method and path from one
 | `POST` | `/oauth/revoke`                                                                        | Revoke a saved token                 |
 
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
-Compilation, polls it, and downloads its artifact. With `--github`, it starts and polls the Publication instead.
+Compilation, polls it, and downloads its artifact.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
 `report progress` and `report failure` read it and, with reports on, post their report. Each `note` command reads it
@@ -1005,9 +962,9 @@ and, with reports on, posts its note.
 `login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 
-The first push sends `If-None-Match: *`. Later pushes, the Compilation start `POST`, and the Publication `PUT` send
-the saved Head ETag in `If-Match`. The cancel `POST` sends no precondition header. The resolution `POST` sends a JSON
-body and no precondition header.
+The first push sends `If-None-Match: *`. Later pushes and the Compilation start `POST` send the saved Head ETag in
+`If-Match`. The cancel `POST` sends no precondition header. The resolution `POST` sends a JSON body and no precondition
+header.
 
 The `/v1` routes belong to API contract `0.9.x`. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
 `release/compatibility.json` declares it for the Service's release compatibility check, and
@@ -1026,7 +983,7 @@ keeps the Plan's meaning still makes a new Head, although the Project's `graph_v
 A successful Plan `PUT` returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
 64-character lowercase SHA-256 of the Head bytes. The CLI saves the complete header value in `.firstdraft/state.json`
 and replays it in `If-Match`. `plan compile` also extracts `<hex>` to check that the local Plan still matches the
-Head before it starts a Compilation or Publication. A saved ETag in any other form stops that check with
+Head before it starts a Compilation. A saved ETag in any other form stops that check with
 `invalid_configuration`.
 
 The same digest appears as `head_source_sha256` in analysis and Compilation responses. To tell whether the local Plan

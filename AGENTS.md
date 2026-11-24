@@ -15,8 +15,8 @@ handled-error recovery in `docs/errors.md`, publication mechanics in `RELEASING.
   `.codex/config.toml` get an independent review through the `cross-review` Skill, with `codex` as the reviewer from
   Claude Code and `claude` from Codex. Pass the service repository's `docs/review-focus.md` as `--focus-file` (see
   `CONTRIBUTING.md`). Put the reviewer, verdict, and finding counts in the pull request body, not the findings.
-- `firstdraft plan compile` defaults to local output in the current directory. GitHub publication requires
-  `--github`; Codespaces is a fallback. Keep Skill callers and recovery instructions aligned with this boundary.
+- `firstdraft plan compile` defaults to local output in the current directory; Codespaces is a fallback. Keep Skill
+  callers and recovery instructions aligned with this boundary.
 - The service repository coordinates releases and owns their approval and smoke policy. One approved coordinated
   release covers its named CLI steps; do not ask again between them. A merge alone does not authorize a release.
   `RELEASING.md` covers the publication steps.

@@ -49,7 +49,6 @@ if (result.status !== 0) {
     "src/commands/note.js",
     "src/commands/plan-compile.js",
     "src/commands/plan-init.js",
-    "src/commands/plan-publish.js",
     "src/commands/plan-push.js",
     "src/commands/plan-status.js",
     "src/commands/report.js",
