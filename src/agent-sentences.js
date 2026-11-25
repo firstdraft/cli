@@ -106,7 +106,7 @@ export const NOTES_ON_LINES = Object.freeze([
  * so the report carries none of it.
  */
 export const MAINTAIN_REPORTS_ON_LINE =
-  "Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.";
+  "Reports are on: after you resolve an error item, one titled with its exception class or Message rather than a check, GitHub, Core, or host item, with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.";
 
 /**
  * What a maintain command prints on standard error when it found no Project
