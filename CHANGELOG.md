@@ -94,10 +94,13 @@ First Draft no longer offers.
   to send a failure report about an item. `maintain show <item-id>` prints one item with its latest evidence, whose
   `untrusted` list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>`
   resolves it with a `--reason`, a `--cause` that says what caused the error (`unknown` when the agent could not
-  tell), and an optional `--detail`, such as the pull request. Each takes `--environment`, `production` by default,
-  and changes no local state. They run from the application's folder or the Project's directory: without the
-  Project's state there, as in a fresh clone of the application, they read the Project ID from the application's
-  `.firstdraft/gaps.json`, use the origin `login` would select, and say so on standard error.
+  tell), and an optional `--detail`, such as the pull request. `maintain defer <item-id> --until <time>` sets an open
+  item aside, out of the index and escalation, until a time with its offset in the next 90 days, and
+  `maintain ask-owner <item-id> --question <text>` records a question for the owner on it. Each takes
+  `--environment`, `production` by default, and changes no local state. They run from the application's folder or
+  the Project's directory: without the Project's state there, as in a fresh clone of the application, they read the
+  Project ID from the application's `.firstdraft/gaps.json`, use the origin `login` would select, and say so on
+  standard error.
 - `report failure --kind deployed_error --item <item-id>` reports an error in a deployed application that
   `maintain resolve` traced to code First Draft generated. It names the item and takes no `--message`.
 - After an ambiguous push, from `plan push` or `plan compile`, or an ambiguous direct Compilation start,

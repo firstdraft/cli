@@ -239,24 +239,31 @@ an error.
 
 ## Maintenance recovery
 
-The index and `show` only read, so they are safe to retry a bounded number of times. A resolution is not. When its
-result is unconfirmed, it may have succeeded, and a newer error may since have reopened the item; repeating it would
-dismiss that recurrence. Run `maintain show` and reassess the item before resolving again. First Draft refuses to
-resolve an item that is still resolved, with `maintain_rejected` and `409 item_already_resolved`.
+The index and `show` only read, so they are safe to retry a bounded number of times. A deferral, a question, and a
+resolution are not. After an unconfirmed deferral or question, run `maintain` and reassess the item before sending it
+again: a deferred item is left out of the index, and an item that reopened since is back without its deferral or
+question. When a resolution's result is unconfirmed, it may have succeeded, and a newer error may since have reopened
+the item; repeating it would dismiss that recurrence. Run `maintain show` and reassess the item before resolving
+again. First Draft refuses to resolve an item that is still resolved, with `maintain_rejected` and
+`409 item_already_resolved`.
 
 - `maintain_rejected` means First Draft refused and nothing changed; `response.code` says why.
   `404 environment_not_found` means this account has no Environment of that name in the Project: check
   `--environment`, the directory, and that the environment and login match the Project's. `404 item_not_found` means
   the Environment has no such item; take IDs from the index. `400 invalid_resolution_reason` names an unaccepted
   reason, `400 invalid_resolution_cause` an unaccepted cause, and `400 invalid_resolution_detail` a detail over
-  1,000 characters.
+  1,000 characters. `400 invalid_deferral` means the `--until` time is past or more than 90 days ahead, and
+  `400 invalid_owner_question` a question over 500 characters. `409 item_already_resolved` from `defer` or
+  `ask-owner` means the item is resolved; read the index again.
 - `maintain_unavailable` means a network failure, timeout, server error, or error response without a problem body
-  left the result unconfirmed. Retry a read. After a resolution, check the item with `maintain show` and reassess it
-  before resolving again. A `404` with no `response` usually means the Service at the origin the command used has
-  no maintenance routes: the pinned origin, or in a fresh clone the one `login` would select. Retrying will not help
-  until that Service is upgraded.
+  left the result unconfirmed. Retry a read. After a deferral or a question, run `maintain` and reassess the item
+  before sending it again. After a resolution, check the item with `maintain show` and reassess it before resolving
+  again. A `404` with no `response` usually means the Service at the origin the command used has no maintenance
+  routes: the pinned origin, or in a fresh clone the one `login` would select. Retrying will not help until that
+  Service is upgraded.
 - `invalid_maintain_response` means a success response violated the contract; retrying the unchanged request will
-  not repair it. After a resolution, check the item with `maintain show`.
+  not repair it. After a deferral or a question, check the index with `maintain`; after a resolution, check the
+  item with `maintain show`.
 - The index reads the account first. When that read fails, it reads no items and ends with `account_unavailable`,
   which is safe to retry, `invalid_server_response`, which retrying will not repair, or an error any request can give:
   `authentication_required`, `rate_limited`, or an update refusal.
@@ -303,7 +310,7 @@ resolve an item that is still resolved, with `maintain_rejected` and `409 item_a
 | `report`, `note wrong_output`                              | `compilation_not_recorded`                                                                         |    1 | No Compilation was given or recorded; nothing was sent ([recovery](#report-and-note-errors)).                                |
 | `note <kind>`                                              | `note_incomplete`                                                                                  |    2 | A field the note needs had nothing left after shaping; nothing was sent.                                                     |
 | `maintain` commands                                        | `maintain_rejected`                                                                                |    1 | Refused with a validated problem; `response.code` says why ([recovery](#maintenance-recovery)).                              |
-| `maintain` commands                                        | `maintain_unavailable`                                                                             |    1 | The request failed or its result is unconfirmed; retry a read, or check a resolution with `maintain show`.                   |
+| `maintain` commands                                        | `maintain_unavailable`                                                                             |    1 | The request failed or its result is unconfirmed; retry a read, and reassess the item before any write again.                 |
 | `maintain` commands                                        | `invalid_maintain_response`                                                                        |    1 | A success response violated the contract; retrying unchanged will not repair it.                                             |
 
 Root-output `invalid_output_path.reason` values are `destination_exists`, `root_not_real`, `root_not_writable`,
