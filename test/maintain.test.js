@@ -25,6 +25,8 @@ const ENVIRONMENT_PATH = `/v1/projects/${PROJECT_ID}/environments/production`;
 const ITEMS_PATH = `${ENVIRONMENT_PATH}/items`;
 const ITEM_PATH = `${ITEMS_PATH}/${ITEM_ID}`;
 const RESOLUTION_PATH = `${ITEM_PATH}/resolution`;
+const DEFERRAL_PATH = `${ITEM_PATH}/deferral`;
+const OWNER_QUESTION_PATH = `${ITEM_PATH}/owner-question`;
 const ACCOUNT_URL = `${API_URL}/v1/account`;
 const RESOLVE_DUPLICATE = Object.freeze([
   "maintain",
@@ -35,6 +37,17 @@ const RESOLVE_DUPLICATE = Object.freeze([
   "--cause",
   "later_code",
 ]);
+const UNTIL = "2026-12-09T15:00:00Z";
+const DEFER = Object.freeze(["maintain", "defer", ITEM_ID, "--until", UNTIL]);
+const QUESTION =
+  "The free plan sleeps after 15 idle minutes, so the uptime check fails. Keep it and accept that, or move to a paid plan?";
+const ASK_OWNER = Object.freeze([
+  "maintain",
+  "ask-owner",
+  ITEM_ID,
+  "--question",
+  QUESTION,
+]);
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 const MAINTAIN_HELP = `First Draft CLI
@@ -44,8 +57,10 @@ Usage:
   firstdraft maintain <command> [options]
 
 Commands:
-  show     Read one item with its evidence
-  resolve  Resolve one item with a reason
+  show       Read one item with its evidence
+  resolve    Resolve one item with a reason
+  defer      Set one item aside until a time
+  ask-owner  Record a question for the owner about one item
 
 Options:
       --environment <name>  Deployed Environment (default: production)
@@ -109,12 +124,58 @@ resolved item. First Draft reopens it if the error recurs, and refuses to
 resolve an item that is already resolved.
 `;
 
+const MAINTAIN_DEFER_HELP = `First Draft CLI
+
+Usage:
+  firstdraft maintain defer <item-id> --until <time> [--environment <name>]
+
+Options:
+      --until <time>        ISO 8601 time with its offset, within the next
+                            90 days, such as 2026-12-09T15:00:00Z
+      --environment <name>  Deployed Environment (default: production)
+      --staging             Use staging; reject a different saved origin
+  -h, --help                Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command asks First Draft once to set an open item aside until the time and
+prints the item's id and deferred_until. Until then, the index leaves the item
+out and First Draft does not escalate it. Deferring it again sets a new time.
+`;
+
+const MAINTAIN_ASK_OWNER_HELP = `First Draft CLI
+
+Usage:
+  firstdraft maintain ask-owner <item-id> --question <text>
+                                [--environment <name>]
+
+Options:
+      --question <text>     What the owner needs to decide, in at most 500
+                            characters
+      --environment <name>  Deployed Environment (default: production)
+      --staging             Use staging; reject a different saved origin
+  -h, --help                Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command asks First Draft once to record the question on an open item and
+prints the item's id and owner_asked_at. A new question replaces the last one,
+and the item stays in the index unless it is deferred. Write only what the owner
+needs, in your own words, and never a secret.
+`;
+
 test("maintain help is printed on stdout and lists its commands", async () => {
   for (const [argv, help] of [
     [["maintain", "--help"], MAINTAIN_HELP],
     [["maintain", "-h"], MAINTAIN_HELP],
     [["maintain", "show", "--help"], MAINTAIN_SHOW_HELP],
     [["maintain", "resolve", "-h"], MAINTAIN_RESOLVE_HELP],
+    [["maintain", "defer", "--help"], MAINTAIN_DEFER_HELP],
+    [["maintain", "ask-owner", "-h"], MAINTAIN_ASK_OWNER_HELP],
   ]) {
     const result = await invoke(/** @type {string[]} */ (argv), {
       cwd: process.cwd(),
@@ -288,6 +349,58 @@ test("maintain resolve sends one POST with the reason, the cause, and optional d
   }
 });
 
+test("maintain defer and ask-owner send one POST each with the time or the question", async (context) => {
+  for (const { argv, path: requestPath, request, body } of [
+    {
+      argv: [...DEFER],
+      path: DEFERRAL_PATH,
+      request: { until: UNTIL },
+      body: deferredBody(UNTIL),
+    },
+    {
+      // The time comes back without its fraction, and may name its offset
+      // differently; only the instant, to the second, must match.
+      argv: [
+        "maintain",
+        "defer",
+        "--until",
+        "2026-12-09T09:00:00.250-06:00",
+        ITEM_ID,
+        "--environment",
+        "staging-2",
+      ],
+      path: `/v1/projects/${PROJECT_ID}/environments/staging-2/items/${ITEM_ID}/deferral`,
+      request: { until: "2026-12-09T09:00:00.250-06:00" },
+      body: deferredBody("2026-12-09T15:00:00+00:00", "staging-2"),
+    },
+    {
+      argv: [...ASK_OWNER],
+      path: OWNER_QUESTION_PATH,
+      request: { question: QUESTION },
+      body: askedBody(),
+    },
+  ]) {
+    /** @type {FetchCall[]} */
+    const calls = [];
+    const result = await invoke(argv, {
+      cwd: projectDirectory(context),
+      fetchFunction: sequenceFetch([jsonResponse(body)], calls),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${JSON.stringify(body, null, 2)}\n`);
+    assert.equal(result.stderr, "");
+    assert.equal(calls.length, 1);
+    assert.equal(String(calls[0]?.input), `${API_URL}${requestPath}`);
+    assert.equal(calls[0]?.init?.method, "POST");
+    assert.equal(calls[0]?.init?.redirect, "error");
+    assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), request);
+    const headers = new Headers(calls[0]?.init?.headers);
+    assert.equal(headers.get("content-type"), "application/json");
+    assert.equal(headers.get("authorization"), `Bearer ${API_TOKEN}`);
+  }
+});
+
 test("a validated Service problem is reported as maintain_rejected", async (context) => {
   for (const { argv, problem } of [
     {
@@ -328,6 +441,30 @@ test("a validated Service problem is reported as maintain_rejected", async (cont
         status: 400,
         code: "invalid_resolution_reason",
         detail: "The reason must be one of pull_request, host_change.",
+      },
+    },
+    {
+      argv: [...DEFER],
+      problem: {
+        status: 400,
+        code: "invalid_deferral",
+        detail: "The time must be in the next 90 days.",
+      },
+    },
+    {
+      argv: [...DEFER],
+      problem: {
+        status: 409,
+        code: "item_already_resolved",
+        detail: "This item is already resolved.",
+      },
+    },
+    {
+      argv: [...ASK_OWNER],
+      problem: {
+        status: 400,
+        code: "invalid_owner_question",
+        detail: "The question must be 1 to 500 characters.",
       },
     },
   ]) {
@@ -399,6 +536,8 @@ test("a failed or unconfirmed request is reported as maintain_unavailable", asyn
         "--cause",
         "dependency",
       ],
+      [...DEFER],
+      [...ASK_OWNER],
     ]) {
       const result = await invoke(argv, {
         cwd: projectDirectory(context),
@@ -409,7 +548,10 @@ test("a failed or unconfirmed request is reported as maintain_unavailable", asyn
       const envelope = JSON.parse(result.stderr);
       assert.equal(envelope.status, status);
       assert.equal("response" in envelope, problem);
-      assert.match(envelope.detail, /A read is safe to retry/);
+      assert.match(
+        envelope.detail,
+        /After a deferral or a question, run 'firstdraft maintain' and reassess/,
+      );
       assert.match(
         envelope.detail,
         /firstdraft maintain show' before resolving again/,
@@ -534,6 +676,43 @@ test("a success response must match the exact maintenance contract", async (cont
         item: summary,
       }),
     ],
+    [[...DEFER], jsonResponse(deferredBody("2026-12-09T15:00:01Z"))],
+    [[...DEFER], jsonResponse(deferredBody("2026-12-09"))],
+    [
+      [...DEFER],
+      jsonResponse({
+        ...deferredBody(UNTIL),
+        item: { id: OTHER_ITEM_ID, deferred_until: UNTIL },
+      }),
+    ],
+    [
+      [...DEFER],
+      jsonResponse({
+        ...deferredBody(UNTIL),
+        item: { id: ITEM_ID, deferred_until: UNTIL, canary: true },
+      }),
+    ],
+    [[...DEFER], jsonResponse(deferredBody(UNTIL, "staging"))],
+    [[...DEFER], jsonResponse(askedBody())],
+    [[...ASK_OWNER], jsonResponse(deferredBody(UNTIL))],
+    [
+      [...ASK_OWNER],
+      jsonResponse({
+        ...askedBody(),
+        item: { id: ITEM_ID, owner_asked_at: "now" },
+      }),
+    ],
+    [
+      [...ASK_OWNER],
+      jsonResponse({
+        ...askedBody(),
+        item: { id: OTHER_ITEM_ID, owner_asked_at: "2026-11-25T10:00:00Z" },
+      }),
+    ],
+    [
+      [...ASK_OWNER],
+      jsonResponse({ ...askedBody(), item: { ...summary, canary: true } }),
+    ],
     [
       ["maintain"],
       new Response(JSON.stringify(indexBody()), {
@@ -616,12 +795,15 @@ test("maintain reads the account first and says when to report only when reports
     assert.equal(headers.get("authorization"), `Bearer ${API_TOKEN}`);
   }
 
-  for (const argv of [["maintain", "show", ITEM_ID], [...RESOLVE_DUPLICATE]]) {
+  for (const [argv, body] of [
+    [["maintain", "show", ITEM_ID], showBody()],
+    [[...RESOLVE_DUPLICATE], resolvedBody("duplicate", "later_code")],
+    [[...DEFER], deferredBody(UNTIL)],
+    [[...ASK_OWNER], askedBody()],
+  ]) {
     /** @type {FetchCall[]} */
     const calls = [];
-    const body =
-      argv[1] === "show" ? showBody() : resolvedBody("duplicate", "later_code");
-    const result = await invoke(argv, {
+    const result = await invoke(/** @type {string[]} */ (argv), {
       cwd: projectDirectory(context),
       reports: null,
       fetchFunction: sequenceFetch([jsonResponse(body)], calls),
@@ -869,6 +1051,34 @@ test("maintain syntax and local state fail before network access", async (contex
       "maintain resolve",
     ],
     [["maintain", "resolve", "--reason", "duplicate"], "maintain resolve"],
+    [["maintain", "defer", ITEM_ID], "maintain defer"],
+    [["maintain", "defer", "--until", UNTIL], "maintain defer"],
+    [["maintain", "defer", ITEM_ID, "--until", ""], "maintain defer"],
+    [["maintain", "defer", ITEM_ID, "--until", "2026-12-09"], "maintain defer"],
+    [
+      ["maintain", "defer", ITEM_ID, "--until", "2026-12-09T15:00:00"],
+      "maintain defer",
+    ],
+    [
+      ["maintain", "defer", ITEM_ID, "--until", "2026-02-30T15:00:00Z"],
+      "maintain defer",
+    ],
+    [["maintain", "defer", ITEM_ID, "--until", "next week"], "maintain defer"],
+    [[...DEFER, "--until", UNTIL], "maintain defer"],
+    [[...DEFER, OTHER_ITEM_ID], "maintain defer"],
+    [[...DEFER, "--question", QUESTION], "maintain defer"],
+    [["maintain", "ask-owner", ITEM_ID], "maintain ask-owner"],
+    [["maintain", "ask-owner", "--question", QUESTION], "maintain ask-owner"],
+    [
+      ["maintain", "ask-owner", ITEM_ID, "--question", ""],
+      "maintain ask-owner",
+    ],
+    [
+      ["maintain", "ask-owner", ITEM_ID, "--question", " \n\t"],
+      "maintain ask-owner",
+    ],
+    [[...ASK_OWNER, "--question", "Again?"], "maintain ask-owner"],
+    [[...ASK_OWNER, "--until", UNTIL], "maintain ask-owner"],
   ]) {
     const result = await invoke(/** @type {string[]} */ (argv), {
       cwd: projectDirectory(context),
@@ -977,6 +1187,21 @@ function resolvedBody(reason, cause) {
       resolution_reason: reason,
       resolution_cause: cause,
     }),
+  };
+}
+
+/** @param {string} deferredUntil @param {string} [environment] */
+function deferredBody(deferredUntil, environment = "production") {
+  return {
+    environment: { project_id: PROJECT_ID, name: environment },
+    item: { id: ITEM_ID, deferred_until: deferredUntil },
+  };
+}
+
+function askedBody() {
+  return {
+    environment: { project_id: PROJECT_ID, name: "production" },
+    item: { id: ITEM_ID, owner_asked_at: "2026-11-25T10:00:00Z" },
   };
 }
 

@@ -338,6 +338,37 @@ try {
       "Invalid arguments. Run 'firstdraft maintain resolve --help' for usage.",
   });
 
+  const invalidDeferral = spawnPackedCli(
+    [
+      "maintain",
+      "defer",
+      "3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f",
+      "--until",
+      "canary-secret-time",
+    ],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidDeferral, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft maintain defer --help' for usage.",
+  });
+
+  const invalidQuestion = spawnPackedCli(
+    [
+      "maintain",
+      "ask-owner",
+      "3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f",
+      "--canary-secret-option",
+    ],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidQuestion, 2, {
+    error: "invalid_arguments",
+    detail:
+      "Invalid arguments. Run 'firstdraft maintain ask-owner --help' for usage.",
+  });
+
   const invalidLogin = spawnPackedCli(
     ["login", "--canary-secret-option"],
     installationDirectory,
@@ -723,6 +754,16 @@ async function exercisePackedCompilation(projectDirectory) {
       resolution_cause: "generated_code",
     },
   };
+  const deferredUntil = "2026-12-09T15:00:00Z";
+  const deferredItem = {
+    environment,
+    item: { id: itemId, deferred_until: deferredUntil },
+  };
+  const ownerQuestion = "Keep the free plan, which sleeps when idle?";
+  const askedItem = {
+    environment,
+    item: { id: itemId, owner_asked_at: "2026-11-25T10:00:00Z" },
+  };
   const seen = {
     plan: false,
     analysis: false,
@@ -830,6 +871,30 @@ async function exercisePackedCompilation(projectDirectory) {
       respondJson(response, 200, resolvedItem);
       return;
     }
+    if (
+      request.method === "POST" &&
+      request.url === `${itemsPath}/${itemId}/deferral`
+    ) {
+      assert.equal(request.headers["content-type"], "application/json");
+      assert.deepEqual(JSON.parse(requestBody.toString("utf8")), {
+        until: deferredUntil,
+      });
+      seen.maintenance += 1;
+      respondJson(response, 200, deferredItem);
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      request.url === `${itemsPath}/${itemId}/owner-question`
+    ) {
+      assert.equal(request.headers["content-type"], "application/json");
+      assert.deepEqual(JSON.parse(requestBody.toString("utf8")), {
+        question: ownerQuestion,
+      });
+      seen.maintenance += 1;
+      respondJson(response, 200, askedItem);
+      return;
+    }
 
     response.writeHead(404).end();
   });
@@ -913,6 +978,11 @@ First Draft: Application compiled.
           "https://github.com/octocat/oscar-party/pull/1",
         ],
         resolvedItem,
+      ],
+      [["maintain", "defer", itemId, "--until", deferredUntil], deferredItem],
+      [
+        ["maintain", "ask-owner", itemId, "--question", ownerQuestion],
+        askedItem,
       ],
     ]) {
       const maintained = await spawnPackedCliAsync(
@@ -1041,7 +1111,7 @@ First Draft: Application compiled.
       status: true,
       cancel: true,
       artifact: true,
-      maintenance: 3,
+      maintenance: 5,
     });
   } finally {
     await new Promise(

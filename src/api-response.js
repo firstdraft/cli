@@ -79,6 +79,14 @@ export const SERVICE_ROUTES = {
     method: "POST",
     path: "/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/resolution",
   },
+  deferMaintenanceItem: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/deferral",
+  },
+  askMaintenanceOwner: {
+    method: "POST",
+    path: "/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/owner-question",
+  },
   requestOAuthToken: {
     method: "POST",
     path: "/oauth/token",

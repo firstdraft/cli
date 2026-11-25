@@ -58,6 +58,8 @@ const REMOTE_COMMANDS = [
     "--cause",
     "not_a_bug",
   ],
+  ["maintain", "defer", ITEM_ID, "--until", "2026-12-09T15:00:00Z"],
+  ["maintain", "ask-owner", ITEM_ID, "--question", "Keep the free plan?"],
 ];
 
 /**

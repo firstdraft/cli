@@ -60,6 +60,8 @@ const SUMMARY_KEYS = [
   "issue_url",
 ];
 const DETAIL_KEYS = [...SUMMARY_KEYS, "evidence", "done_when"];
+const DEFERRAL_KEYS = ["id", "deferred_until"];
+const OWNER_QUESTION_KEYS = ["id", "owner_asked_at"];
 const EVIDENCE_KEYS = [
   "occurred_at",
   "release",
@@ -307,6 +309,97 @@ export async function resolveMaintenanceItem({
 }
 
 /**
+ * Set one open item aside until a time, which First Draft accepts only within
+ * the next 90 days. Until then the index leaves the item out and escalation
+ * passes it over.
+ *
+ * @param {MaintainRequestOptions & {itemId: string, until: string}} options
+ */
+export async function deferMaintenanceItem({
+  context,
+  environment,
+  itemId,
+  until,
+  fetchFunction = globalThis.fetch,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
+}) {
+  const { apiUrl, projectId } = context;
+  const endpoint = serviceEndpoint(
+    SERVICE_ROUTES.deferMaintenanceItem,
+    apiUrl,
+    {
+      project_id: projectId,
+      environment_name: environment,
+      item_id: itemId,
+    },
+  );
+  const { status, body } = await request(fetchFunction, endpoint, {
+    createRequestSignal,
+    json: { until },
+  });
+  const item = isRecord(body) ? body.item : null;
+
+  // First Draft writes the time back without fractional seconds.
+  if (
+    !hasExactKeys(body, ITEM_RESPONSE_KEYS) ||
+    !isEnvironment(body.environment, projectId, environment) ||
+    !hasExactKeys(item, DEFERRAL_KEYS) ||
+    item.id !== itemId ||
+    !isTimestamp(item.deferred_until) ||
+    wholeSeconds(item.deferred_until) !== wholeSeconds(until)
+  ) {
+    throw new MaintainResponseInvalidError(status);
+  }
+
+  return {
+    environment: copyEnvironment(body.environment),
+    item: pick(item, DEFERRAL_KEYS),
+  };
+}
+
+/**
+ * Record a question for the owner on one open item; a later question replaces
+ * it. Whether the index shows the item does not change.
+ *
+ * @param {MaintainRequestOptions & {itemId: string, question: string}} options
+ */
+export async function askMaintenanceOwner({
+  context,
+  environment,
+  itemId,
+  question,
+  fetchFunction = globalThis.fetch,
+  createRequestSignal = (timeoutMs) => AbortSignal.timeout(timeoutMs),
+}) {
+  const { apiUrl, projectId } = context;
+  const endpoint = serviceEndpoint(SERVICE_ROUTES.askMaintenanceOwner, apiUrl, {
+    project_id: projectId,
+    environment_name: environment,
+    item_id: itemId,
+  });
+  const { status, body } = await request(fetchFunction, endpoint, {
+    createRequestSignal,
+    json: { question },
+  });
+  const item = isRecord(body) ? body.item : null;
+
+  if (
+    !hasExactKeys(body, ITEM_RESPONSE_KEYS) ||
+    !isEnvironment(body.environment, projectId, environment) ||
+    !hasExactKeys(item, OWNER_QUESTION_KEYS) ||
+    item.id !== itemId ||
+    !isTimestamp(item.owner_asked_at)
+  ) {
+    throw new MaintainResponseInvalidError(status);
+  }
+
+  return {
+    environment: copyEnvironment(body.environment),
+    item: pick(item, OWNER_QUESTION_KEYS),
+  };
+}
+
+/**
  * @param {typeof globalThis.fetch} fetchFunction
  * @param {import("../api-response.js").ServiceEndpoint} endpoint
  * @param {{createRequestSignal: (timeoutMs: number) => AbortSignal, json?: Record<string, string>}} options
@@ -492,8 +585,14 @@ function safeProblem(response, body) {
   };
 }
 
-/** @param {unknown} value */
-function isTimestamp(value) {
+/**
+ * An ISO 8601 date and time with its offset, the form of every time in a
+ * maintenance response and of a deferral's `--until`.
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+export function isTimestamp(value) {
   if (typeof value !== "string") return false;
 
   const match = TIMESTAMP_PATTERN.exec(value);
@@ -518,6 +617,11 @@ function isTimestamp(value) {
     offsetHour <= 23 &&
     offsetMinute <= 59
   );
+}
+
+/** @param {string} timestamp a value isTimestamp accepts */
+function wholeSeconds(timestamp) {
+  return Math.floor(Date.parse(timestamp) / 1000);
 }
 
 /** @param {number} year @param {number} month */

@@ -8,7 +8,7 @@ login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize, retained-Compilation inspection and
 cancellation, the account's report setting, progress and failure reports, notes, and maintenance-item listing,
-inspection, and resolution. It requires the service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
+inspection, resolution, deferral, and owner questions. It requires the service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
@@ -38,6 +38,8 @@ inspection, and resolution. It requires the service's `0.9.x` API contract. The 
 | `firstdraft maintain`                 | Yes     | List a deployed Environment's open items                      |
 | `firstdraft maintain show`            | Yes     | Read one item with its evidence                               |
 | `firstdraft maintain resolve`         | Yes     | Resolve one item with a reason                                |
+| `firstdraft maintain defer`           | Yes     | Set one item aside until a time                               |
+| `firstdraft maintain ask-owner`       | Yes     | Record a question for the owner about one item                |
 
 ## Select an environment and authenticate
 
@@ -233,6 +235,8 @@ Beyond the header, a command sends only what it needs:
 | `maintain`                                | An account read; then the Project and Environment in the request path and `?page=N` |
 | `maintain show`                           | Only the Project, Environment, and item IDs in the request path                     |
 | `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice         |
+| `maintain defer`                          | The `--until` time                                                                  |
+| `maintain ask-owner`                      | The `--question` text, whatever the reports choice                                  |
 
 ### Update line and refusals
 
@@ -855,6 +859,9 @@ firstdraft maintain
 firstdraft maintain show 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f
 firstdraft maintain resolve 3f2c9a4e-8d1b-4c7a-9e5f-0a1b2c3d4e5f --reason pull_request \
   --cause generated_code --detail https://github.com/acme/app/pull/7
+firstdraft maintain ask-owner 7b0e1d2c-3a4f-4e5d-8c6b-9a0f1e2d3c4b \
+  --question "Keep the free plan, whose app sleeps when idle, or move to a paid one?"
+firstdraft maintain defer 7b0e1d2c-3a4f-4e5d-8c6b-9a0f1e2d3c4b --until 2026-12-09T15:00:00Z
 ```
 
 `firstdraft maintain` first reads the account with a `GET` of `/v1/account` at the Project's origin, as a report
@@ -893,6 +900,23 @@ recurs. It refuses to resolve an item that is still resolved, with `409 item_alr
 only while the item stays resolved, so after an unconfirmed resolution run `maintain show` and reassess the item before
 resolving again.
 
+`maintain defer` sets an open item aside until `--until`, an ISO 8601 date and time with its offset, such as
+`2026-12-09T15:00:00Z` or `2026-12-09T09:00:00-06:00`: the form of the times First Draft returns. The CLI rejects a
+time without an offset before making a request, because First Draft would read it in its own time zone. First Draft
+accepts a time within the next 90 days and answers `400 invalid_deferral` otherwise. Success prints the item's `id`
+and `deferred_until`. Until that time the index leaves the item out and First Draft does not escalate it; another
+deferral replaces the time.
+
+`maintain ask-owner` records `--question` on an open item for its owner and prints the item's `id` and
+`owner_asked_at`. First Draft takes 1 to 500 characters once surrounding whitespace is trimmed and answers
+`400 invalid_owner_question` otherwise; the CLI rejects an empty or blank question before making a request. A new
+question replaces the last one. The item stays in the index unless it is deferred, and the index does not show the
+question. First Draft stores the
+question and sends it nowhere for now: no email, GitHub issue, or request log carries it, because it can quote end
+users. Write only what the owner needs to decide, in your own words, and never a secret.
+
+Both refuse a resolved item with `409 item_already_resolved`.
+
 Each command takes `--environment`, which defaults to `production`: a lowercase name of letters, digits, and hyphens
 that starts with a letter. Item IDs are lowercase UUIDs. Run the commands in the application's folder or in the
 Project's directory. They find the Project in this order:
@@ -913,8 +937,8 @@ Project's directory. They find the Project in this order:
    It is `applicationProjectLine` in `src/agent-sentences.js`. A Project on another origin answers
    `environment_not_found`.
 
-Without either, or with a `gaps.json` that names no Project, the command ends with `local_input_unreadable`. `show`
-and `resolve` make one request, and the index two. Each request has a
+Without either, or with a `gaps.json` that names no Project, the command ends with `local_input_unreadable`. `show`,
+`resolve`, `defer`, and `ask-owner` make one request each, and the index two. Each request has a
 bounded timeout and refuses redirects; the commands change no local state, and print only a response that matches the
 contract exactly, including its Project ID, Environment name, and item ID. See
 [maintenance recovery](errors.md#maintenance-recovery).
@@ -930,24 +954,26 @@ timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
 `SERVICE_ROUTES` differ, or when no file in `src/` uses a declared route.
 
-| Method | Path                                                                                   | Purpose                              |
-| ------ | -------------------------------------------------------------------------------------- | ------------------------------------ |
-| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                            | Create or replace the Head           |
-| `GET`  | `/v1/projects/{project_id}/analysis`                                                   | Read the Head's current analysis     |
-| `POST` | `/v1/projects/{project_id}/compilations`                                               | Start a Compilation of the Head      |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                              | Read one retained Compilation        |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`                       | Cancel that Compilation              |
-| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`                     | Download that Compilation's artifact |
-| `GET`  | `/v1/account`                                                                          | Read whether the account reports     |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports`             | Send a progress report               |
-| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`              | Send a failure report                |
-| `POST` | `/v1/projects/{project_id}/notes`                                                      | Send a note                          |
-| `GET`  | `/v1/projects/{project_id}/environments/{environment_name}/items`                      | List an Environment's open items     |
-| `GET`  | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}`            | Read one item with its evidence      |
-| `POST` | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/resolution` | Resolve that item                    |
-| `POST` | `/oauth/token`                                                                         | Exchange a login grant for a token   |
-| `POST` | `/oauth/device_authorization`                                                          | Start a device-flow login            |
-| `POST` | `/oauth/revoke`                                                                        | Revoke a saved token                 |
+| Method | Path                                                                                       | Purpose                              |
+| ------ | ------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                                | Create or replace the Head           |
+| `GET`  | `/v1/projects/{project_id}/analysis`                                                       | Read the Head's current analysis     |
+| `POST` | `/v1/projects/{project_id}/compilations`                                                   | Start a Compilation of the Head      |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                                  | Read one retained Compilation        |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`                           | Cancel that Compilation              |
+| `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}/artifact`                         | Download that Compilation's artifact |
+| `GET`  | `/v1/account`                                                                              | Read whether the account reports     |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/progress-reports`                 | Send a progress report               |
+| `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/failure-reports`                  | Send a failure report                |
+| `POST` | `/v1/projects/{project_id}/notes`                                                          | Send a note                          |
+| `GET`  | `/v1/projects/{project_id}/environments/{environment_name}/items`                          | List an Environment's open items     |
+| `GET`  | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}`                | Read one item with its evidence      |
+| `POST` | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/resolution`     | Resolve that item                    |
+| `POST` | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/deferral`       | Defer that item until a time         |
+| `POST` | `/v1/projects/{project_id}/environments/{environment_name}/items/{item_id}/owner-question` | Record a question for its owner      |
+| `POST` | `/oauth/token`                                                                             | Exchange a login grant for a token   |
+| `POST` | `/oauth/device_authorization`                                                              | Start a device-flow login            |
+| `POST` | `/oauth/revoke`                                                                            | Revoke a saved token                 |
 
 `plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
 Compilation, polls it, and downloads its artifact.
@@ -955,16 +981,16 @@ Compilation, polls it, and downloads its artifact.
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
 `report progress` and `report failure` read it and, with reports on, post their report. Each `note` command reads it
 and, with reports on, posts its note.
-`maintain` reads the account and then lists an Environment's open items, `maintain show` reads one item, and
-`maintain resolve` resolves it.
+`maintain` reads the account and then lists an Environment's open items, `maintain show` reads one item,
+`maintain resolve` resolves it, `maintain defer` defers it, and `maintain ask-owner` records a question about it.
 `login` exchanges its authorization code at `/oauth/token`. With `--interactive`, it starts at
 `/oauth/device_authorization` and then polls `/oauth/token`. `login --no-wait` makes only the first request, and
 `login --finish` only the polls. `logout` calls `/oauth/revoke`. The browser, not the
 CLI, opens `/oauth/authorize` and `/device`, so they have no rows.
 
 The first push sends `If-None-Match: *`. Later pushes and the Compilation start `POST` send the saved Head ETag in
-`If-Match`. The cancel `POST` sends no precondition header. The resolution `POST` sends a JSON body and no precondition
-header.
+`If-Match`. The cancel `POST` sends no precondition header. The resolution, deferral, and owner-question `POST`s send
+a JSON body and no precondition header.
 
 The `/v1` routes belong to API contract `0.9.x`. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
 `release/compatibility.json` declares it for the Service's release compatibility check, and

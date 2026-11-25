@@ -20,7 +20,7 @@ Commands:
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
-  maintain     List, inspect, and resolve a deployed application's items
+  maintain     List, inspect, and act on a deployed application's items
   note         Send a note about a problem with First Draft
   plan         Work with Foundation Plans
   report       Send a progress or failure report to First Draft

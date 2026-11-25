@@ -82,10 +82,13 @@ import {
   MaintainRejectedError,
   MaintainResponseInvalidError,
   MaintainUnavailableError,
+  askMaintenanceOwner,
+  deferMaintenanceItem,
   isEnvironmentName,
   isItemId,
   isResolutionCause,
   isResolutionReason,
+  isTimestamp,
   listMaintenanceItems,
   readMaintainContext,
   resolveMaintenanceItem,
@@ -167,7 +170,7 @@ Commands:
   generate     Generate local values
   login        Log in to First Draft and save a token
   logout       Revoke and remove the saved token
-  maintain     List, inspect, and resolve a deployed application's items
+  maintain     List, inspect, and act on a deployed application's items
   note         Send a note about a problem with First Draft
   plan         Work with Foundation Plans
   report       Send a progress or failure report to First Draft
@@ -578,8 +581,10 @@ Usage:
   firstdraft maintain <command> [options]
 
 Commands:
-  show     Read one item with its evidence
-  resolve  Resolve one item with a reason
+  show       Read one item with its evidence
+  resolve    Resolve one item with a reason
+  defer      Set one item aside until a time
+  ask-owner  Record a question for the owner about one item
 
 Options:
       --environment <name>  Deployed Environment (default: production)
@@ -641,6 +646,50 @@ Environment:
 The command asks First Draft once to resolve an open item and prints the
 resolved item. First Draft reopens it if the error recurs, and refuses to
 resolve an item that is already resolved.
+`;
+
+const MAINTAIN_DEFER_HELP = `First Draft CLI
+
+Usage:
+  firstdraft maintain defer <item-id> --until <time> [--environment <name>]
+
+Options:
+      --until <time>        ISO 8601 time with its offset, within the next
+                            90 days, such as 2026-12-09T15:00:00Z
+      --environment <name>  Deployed Environment (default: production)
+      --staging             Use staging; reject a different saved origin
+  -h, --help                Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command asks First Draft once to set an open item aside until the time and
+prints the item's id and deferred_until. Until then, the index leaves the item
+out and First Draft does not escalate it. Deferring it again sets a new time.
+`;
+
+const MAINTAIN_ASK_OWNER_HELP = `First Draft CLI
+
+Usage:
+  firstdraft maintain ask-owner <item-id> --question <text>
+                                [--environment <name>]
+
+Options:
+      --question <text>     What the owner needs to decide, in at most 500
+                            characters
+      --environment <name>  Deployed Environment (default: production)
+      --staging             Use staging; reject a different saved origin
+  -h, --help                Show help
+
+Environment:
+  FIRSTDRAFT_API_TOKEN          Authenticate production or custom API origins
+  FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
+
+The command asks First Draft once to record the question on an open item and
+prints the item's id and owner_asked_at. A new question replaces the last one,
+and the item stays in the index unless it is deferred. Write only what the owner
+needs, in your own words, and never a secret.
 `;
 
 const PLAN_INIT_HELP = `First Draft CLI
@@ -848,6 +897,10 @@ const MAINTAIN_SHOW_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft maintain show --help' for usage.";
 const MAINTAIN_RESOLVE_INVALID_ARGUMENTS_DETAIL =
   "Invalid arguments. Run 'firstdraft maintain resolve --help' for usage.";
+const MAINTAIN_DEFER_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft maintain defer --help' for usage.";
+const MAINTAIN_ASK_OWNER_INVALID_ARGUMENTS_DETAIL =
+  "Invalid arguments. Run 'firstdraft maintain ask-owner --help' for usage.";
 const MAINTAIN_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state. No network request was made. Run this command from the application's folder, where the CLI reads the Project from .firstdraft/gaps.json or from the state archived at .firstdraft/design, or from the directory whose .firstdraft holds the Project's state.";
 const MAINTAIN_NOT_PUSHED_DETAIL =
@@ -855,9 +908,9 @@ const MAINTAIN_NOT_PUSHED_DETAIL =
 const MAINTAIN_REJECTED_DETAIL =
   "First Draft rejected the request; response.code says why. environment_not_found or item_not_found means First Draft found no such Environment or item for this Project and account. item_already_resolved means nothing changed.";
 const MAINTAIN_UNAVAILABLE_DETAIL =
-  "Could not complete the request or confirm its result. A read is safe to retry. After a resolution, run 'firstdraft maintain show' before resolving again: the resolution may have succeeded, and a newer error may have reopened the item since.";
+  "Could not complete the request or confirm its result. A read is safe to retry. After a deferral or a question, run 'firstdraft maintain' and reassess the item before sending it again: a deferred item is left out of the index, and one that reopened since is back without its deferral or question. After a resolution, run 'firstdraft maintain show' before resolving again: the resolution may have succeeded, and a newer error may have reopened the item since.";
 const MAINTAIN_INVALID_RESPONSE_DETAIL =
-  "First Draft returned an invalid maintenance response. Retrying unchanged will not repair this protocol mismatch; after a resolution, check the item with 'firstdraft maintain show'.";
+  "First Draft returned an invalid maintenance response. Retrying unchanged will not repair this protocol mismatch; after a deferral or a question, check the index with 'firstdraft maintain', and after a resolution, check the item with 'firstdraft maintain show'.";
 const MAINTAIN_ACCOUNT_UNAVAILABLE_DETAIL =
   "Could not read the account, so no items were read. This read-only request is safe to retry: run 'firstdraft maintain' again.";
 const MAINTAIN_ACCOUNT_INVALID_RESPONSE_DETAIL =
@@ -1917,6 +1970,10 @@ async function runMaintain(options) {
   const [command, ...argv] = options.argv;
   if (command === "show") return runMaintainShow({ ...options, argv });
   if (command === "resolve") return runMaintainResolve({ ...options, argv });
+  if (command === "defer") return runMaintainDefer({ ...options, argv });
+  if (command === "ask-owner") {
+    return runMaintainAskOwner({ ...options, argv });
+  }
 
   return runMaintainIndex(options);
 }
@@ -2091,6 +2148,122 @@ async function runMaintainResolve(options) {
         reason,
         cause,
         detail,
+        fetchFunction,
+        createRequestSignal: options.createRequestSignal,
+      }),
+    }),
+  );
+}
+
+/** @param {MaintainCommandOptions} options */
+async function runMaintainDefer(options) {
+  const { argv, stdout, stderr } = options;
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        until: { type: "string" },
+        environment: { type: "string" },
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeInvalidArguments(stderr, MAINTAIN_DEFER_INVALID_ARGUMENTS_DETAIL);
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(MAINTAIN_DEFER_HELP);
+    return 0;
+  }
+
+  const [itemId] = parsed.positionals;
+  const { until } = parsed.values;
+  const environment = parsed.values.environment ?? DEFAULT_ENVIRONMENT;
+  // A time without an offset would be read in the Service's own time zone.
+  if (
+    parsed.positionals.length !== 1 ||
+    !isItemId(itemId) ||
+    !isTimestamp(until) ||
+    !isEnvironmentName(environment)
+  ) {
+    writeInvalidArguments(stderr, MAINTAIN_DEFER_INVALID_ARGUMENTS_DETAIL);
+    return 2;
+  }
+
+  return runMaintainRequest(
+    options,
+    parsed.values.staging,
+    async (fetchFunction, context) => ({
+      output: await deferMaintenanceItem({
+        context,
+        environment,
+        itemId,
+        until,
+        fetchFunction,
+        createRequestSignal: options.createRequestSignal,
+      }),
+    }),
+  );
+}
+
+/** @param {MaintainCommandOptions} options */
+async function runMaintainAskOwner(options) {
+  const { argv, stdout, stderr } = options;
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        question: { type: "string" },
+        environment: { type: "string" },
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+      strict: true,
+      tokens: true,
+    }),
+  );
+
+  if (!parsed || repeatedValueOption(parsed.tokens)) {
+    writeInvalidArguments(stderr, MAINTAIN_ASK_OWNER_INVALID_ARGUMENTS_DETAIL);
+    return 2;
+  }
+
+  if (parsed.values.help) {
+    stdout.write(MAINTAIN_ASK_OWNER_HELP);
+    return 0;
+  }
+
+  const [itemId] = parsed.positionals;
+  const { question } = parsed.values;
+  const environment = parsed.values.environment ?? DEFAULT_ENVIRONMENT;
+  if (
+    parsed.positionals.length !== 1 ||
+    !isItemId(itemId) ||
+    question === undefined ||
+    question.trim() === "" ||
+    !isEnvironmentName(environment)
+  ) {
+    writeInvalidArguments(stderr, MAINTAIN_ASK_OWNER_INVALID_ARGUMENTS_DETAIL);
+    return 2;
+  }
+
+  return runMaintainRequest(
+    options,
+    parsed.values.staging,
+    async (fetchFunction, context) => ({
+      output: await askMaintenanceOwner({
+        context,
+        environment,
+        itemId,
+        question,
         fetchFunction,
         createRequestSignal: options.createRequestSignal,
       }),
