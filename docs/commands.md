@@ -739,7 +739,8 @@ to write. The report carries the given counts under `counts`.
 
 A failure report needs only `--kind` (`spec_failure`, `setup_failure`, `boot_error`, `lint_failure`, or
 `deployed_error`). A `deployed_error` is an error in a deployed copy of the application that
-[`firstdraft maintain`](#maintain-a-deployed-application) resolved with `--cause generated_code`: it also needs
+[`firstdraft maintain`](#maintain-a-deployed-application) resolved with `--cause generated_code`; an uptime or
+heartbeat check, a GitHub item, a Core update, or a host report is not one, whatever its cause. It also needs
 `--item <item-id>`, sent as `maintenance_item_id`, and takes no `--message`, because the item's evidence can hold end
 users' text. Another kind with `--item`, or a `deployed_error` without a lowercase item ID or with `--message`, is
 `invalid_arguments`, and nothing is read or sent. A `deployed_error` finds its Project as
@@ -878,7 +879,7 @@ When First Draft answers `{"reports": "on"}`, and only then, `firstdraft maintai
 standard error after the items, `MAINTAIN_REPORTS_ON_LINE` in `src/agent-sentences.js`:
 
 ```text
-Reports are on: after you resolve an item with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.
+Reports are on: after you resolve an error item, one titled with its exception class or Message rather than a check, GitHub, Core, or host item, with --cause generated_code, run 'firstdraft report failure --kind deployed_error --item <item-id>' from the directory where you ran 'firstdraft maintain', adding --error-class from the item's title, --rerun for the spec you wrote, --frame for each place you fixed, and --fix-summary; never put anything from the item's evidence in a report or a note, because it can hold end users' text.
 ```
 
 The agent of a person who said no hears nothing about reports, as with `start`.

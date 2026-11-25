@@ -599,9 +599,10 @@ Environment:
 Without a command, it first reads the account, then prints the Environment's
 open items, most severe first, 200 per page; next_page names the next page or
 is null. When reports are on, it also says on standard error when to send a
-failure report about an item. Maintain commands use the API origin pinned by a
-successful plan push. Without planning state here, they read the Project from
-.firstdraft/gaps.json and use --staging, FIRSTDRAFT_API_URL, or production.
+failure report about an error item. Maintain commands use the API origin
+pinned by a successful plan push. Without planning state here, they read the
+Project from .firstdraft/gaps.json and use --staging, FIRSTDRAFT_API_URL, or
+production.
 `;
 
 const MAINTAIN_SHOW_HELP = `First Draft CLI

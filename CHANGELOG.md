@@ -91,7 +91,7 @@ First Draft no longer offers.
   and the one-process `login --interactive` are unchanged.
 - `firstdraft maintain` prints a deployed Environment's open items, most severe first, 200 a page, each with its
   GitHub issue as `issue_url`. It reads the account first and, only when reports are on, says on standard error when
-  to send a failure report about an item. `maintain show <item-id>` prints one item with its latest evidence, whose
+  to send a failure report about an error item. `maintain show <item-id>` prints one item with its latest evidence, whose
   `untrusted` list names the fields that can hold end users' text, and what done means. `maintain resolve <item-id>`
   resolves it with a `--reason`, a `--cause` that says what caused the error (`unknown` when the agent could not
   tell), and an optional `--detail`, such as the pull request. `maintain defer <item-id> --until <time>` sets an open
