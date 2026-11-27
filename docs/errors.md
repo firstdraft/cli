@@ -44,6 +44,9 @@ for its new revision. The original Project and pending request remain available 
 Hosted Plan pushes, Sketch publications and root adoption reserve the planning folder while they run. Wait for the
 active command to finish and retry. After a killed hosted writer, check the PID in
 `.firstdraft-root-output/hosted-writer.pid`. Once the process has exited, remove that file and the empty directory.
+A stopped command can leave an empty reservation or an empty PID file. First ensure every writer, Compile and
+download using this folder has stopped. If the directory is empty, remove it with `rmdir .firstdraft-root-output`.
+If its only entry is an empty `hosted-writer.pid`, remove that file first. Preserve all journal or artifact files.
 For a root-output journal, follow the root-adoption recovery instructions below.
 
 The service problem appears in `response` when the CLI can verify its shape:

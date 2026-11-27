@@ -6,6 +6,7 @@ import {
   lstatSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -509,10 +510,19 @@ export async function withPlanStateLock(directory, update) {
   }
   const owner = path.join(transaction, HOSTED_WRITER_NAME);
   try {
-    writeFileSync(owner, String(process.pid) + "\n", {
-      flag: "wx",
-      mode: 0o600,
-    });
+    try {
+      writeFileSync(owner, String(process.pid) + "\n", {
+        flag: "wx",
+        mode: 0o600,
+      });
+    } catch (error) {
+      if (!isFileSystemError(error)) throw error;
+      rmSync(owner, { force: true });
+      throw new PlanStateLocalError(
+        "Could not record the hosted writer in the local Project reservation.",
+        { cause: error },
+      );
+    }
     try {
       return await update();
     } finally {
