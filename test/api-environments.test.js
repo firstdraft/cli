@@ -87,7 +87,7 @@ test("production and staging credentials follow the pinned origin on every remot
       [PRODUCTION, PRODUCTION_TOKEN],
       [STAGING, STAGING_TOKEN],
     ]) {
-      const cwd = projectDirectory(context, origin);
+      const cwd = projectDirectory(context, origin, argv);
       let requests = 0;
       const result = await invoke(argv, {
         cwd,
@@ -113,13 +113,37 @@ test("production and staging credentials follow the pinned origin on every remot
   }
 });
 
+test("hosted commands distinguish a validated login refusal from an intermediary 401", async (context) => {
+  for (const command of [
+    ["project", "start"],
+    ["sketches", "publish"],
+  ]) {
+    const cwd = projectDirectory(context, PRODUCTION, command);
+    const denied = await invoke(command, {
+      cwd,
+      fetchFunction: async () => authenticationProblem(),
+    });
+    const problem = errorEnvelope(denied.stderr);
+    assert.equal(problem.error, "authentication_required");
+    assert.equal(problem.response.code, "authentication_required");
+    const unverified = await invoke(command, {
+      cwd,
+      fetchFunction: async () => new Response("Unauthorized", { status: 401 }),
+    });
+    assert.equal(
+      errorEnvelope(unverified.stderr).error,
+      "sketch_review_failed",
+    );
+  }
+});
+
 test("staging accepts a root or remote-command flag and a matching URL override", async (context) => {
   for (const command of REMOTE_COMMANDS) {
     for (const argv of [
       ["--staging", ...command],
       [...command, "--staging"],
     ]) {
-      const cwd = projectDirectory(context, STAGING);
+      const cwd = projectDirectory(context, STAGING, command);
       let requests = 0;
       const result = await invoke(argv, {
         cwd,
@@ -176,7 +200,7 @@ test("neither environment token substitutes for the other", async (context) => {
   for (const argv of REMOTE_COMMANDS) {
     for (const origin of [STAGING, PRODUCTION]) {
       const result = await invoke(argv, {
-        cwd: projectDirectory(context, origin),
+        cwd: projectDirectory(context, origin, argv),
         apiToken: origin === STAGING ? PRODUCTION_TOKEN : "",
         stagingApiToken: origin === PRODUCTION ? STAGING_TOKEN : "",
       });
@@ -195,11 +219,11 @@ test("staging rejects a conflicting URL or pinned origin before any request", as
   for (const command of REMOTE_COMMANDS) {
     for (const options of [
       {
-        cwd: projectDirectory(context, STAGING),
+        cwd: projectDirectory(context, STAGING, command),
         apiUrl: "https://canary-conflict.test",
       },
-      { cwd: projectDirectory(context, PRODUCTION) },
-      { cwd: projectDirectory(context, "http://localhost:3000") },
+      { cwd: projectDirectory(context, PRODUCTION, command) },
+      { cwd: projectDirectory(context, "http://localhost:3000", command) },
     ]) {
       const result = await invoke([...command, "--staging"], options);
       assert.equal(result.status, 2);
@@ -269,7 +293,7 @@ test("a saved login authenticates its exact origin when the environment has no t
     ]) {
       let requests = 0;
       const result = await invoke(argv, {
-        cwd: projectDirectory(context, origin),
+        cwd: projectDirectory(context, origin, argv),
         apiToken: "",
         stagingApiToken: undefined,
         env: savedLogins(context, {
@@ -302,7 +326,7 @@ test("an environment token takes precedence over a saved login", async (context)
     ]) {
       let requests = 0;
       await invoke(argv, {
-        cwd: projectDirectory(context, origin),
+        cwd: projectDirectory(context, origin, argv),
         env: savedLogins(context, {
           [PRODUCTION]: SAVED_PRODUCTION_TOKEN,
           [STAGING]: SAVED_STAGING_TOKEN,
@@ -334,7 +358,7 @@ test("a saved login never authenticates a different origin", async (context) => 
   for (const argv of REMOTE_COMMANDS) {
     for (const [origin, saved] of cases) {
       const result = await invoke(argv, {
-        cwd: projectDirectory(context, origin),
+        cwd: projectDirectory(context, origin, argv),
         apiToken: "",
         stagingApiToken: "",
         env: savedLogins(context, saved),
@@ -396,8 +420,8 @@ function savedLogins(context, tokens) {
   return { XDG_CONFIG_HOME: configHome };
 }
 
-/** @param {import("node:test").TestContext} context @param {string} [origin] */
-function projectDirectory(context, origin) {
+/** @param {import("node:test").TestContext} context @param {string} [origin] @param {readonly string[]} [command] */
+function projectDirectory(context, origin, command = []) {
   const cwd = mkdtempSync(path.join(tmpdir(), "firstdraft-environment-"));
   context.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(path.join(cwd, ".firstdraft"));
@@ -409,7 +433,9 @@ function projectDirectory(context, origin) {
       project_id: PROJECT_ID,
       ...(origin
         ? {
-            reserved: true,
+            ...(["project", "sketches"].includes(command[0] ?? "")
+              ? { reserved: true }
+              : {}),
             api_url: origin,
             foundation_plan_etag: '"sha256:' + "1".repeat(64) + '"',
           }

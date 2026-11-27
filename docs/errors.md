@@ -25,8 +25,20 @@ When a screen capture fails, the detail gives its screen ID and viewport dimensi
 binding, image, asset URL, or layout and publish again.
 
 `sketch_review_failed` describes a Project-start, capture, publication or reviewed-source problem. Retry an interrupted
-start from the same directory. A publish with an unknown outcome retains its exact request privately. Run the same
-publish command again to resolve it before sending later edits. In a hosted Project, only one `plan push` or `sketches publish` can run from a planning folder at a time. Wait for the active command and retry. If a process was killed and repeat attempts report an active writer, check the PID in `.firstdraft/sketch-settle.lock`. Once that process has exited, remove the lock and retry. Correct a rejected draft and publish again. A definitive client rejection such as 400, 403 or 404 clears the pending request so the next publish captures edits. A fresh request refused at login or a rate limit is also cleared. A request timeout (408) retains the exact submission for replay. If an earlier attempt has an unknown outcome, a refusal before the service can look up that revision (including 401 or 429) retains the journal. Correct the access problem or wait for the limit, then rerun the same command. If local sources have since changed, a successful replay returns the recovered revision ID and a `next_step` prompting a fresh publish of the current draft.
+start from the same directory. A fresh publication refused with a client error other than an HTTP 408 clears its
+pending request. Correct the rejected draft or login, or wait for the rate limit, then publish again.
+
+After a timeout or another unknown outcome, the CLI retains the exact request privately. Run the same publish
+command to settle that revision before sending edits. A refusal before the service can check the revision, such as
+a 400 for an invalid ID, an access refusal, a size limit or a rate limit, retains the journal on replay. Restore
+access or correct the service configuration and retry. A verified conflict, active Compilation, Project storage
+quota, invalid review or Plan diagnostics after the revision check clears a refused replay. If local sources have
+changed, a successful replay returns the recovered revision ID and a `next_step` to publish the current draft.
+
+Hosted Plan pushes, Sketch publications and root adoption reserve the planning folder while they run. Wait for the
+active command to finish and retry. After a killed hosted writer, check the PID in
+`.firstdraft-root-output/hosted-writer.pid`. Once the process has exited, remove that file and the empty directory.
+For a root-output journal, follow the root-adoption recovery instructions below.
 
 The service problem appears in `response` when the CLI can verify its shape:
 
@@ -40,8 +52,7 @@ The service problem appears in `response` when the CLI can verify its shape:
   approval for the revision before passing it to `plan compile --revision`. When graph versions differ, the Plan
   passed through another generation even if its current bytes match an older review.
 - `422 invalid_sketch_review` in `sketch_review_failed` means the service rejected the review bundle. Read
-  `response.detail`, correct the indicated board, capture or reference, and publish the corrected draft after a
-  fresh rejection. A rejected Plan can instead return `response.diagnostics`; use those to fix the Plan.
+  `response.detail`, correct the indicated board, capture or reference, and publish the corrected draft. A rejected Plan can instead return `response.diagnostics`; use those to fix the Plan.
 - `413 sketch_quota_reached` in `sketch_review_failed` means the Project reached its stored review limit. A
   smaller capture may fit if only the stored byte budget is limiting it. At the revision-count limit, continue
   the walkthrough using local HTML.
@@ -316,7 +327,7 @@ again. First Draft refuses to resolve an item that is still resolved, with `main
 | `logout`                                                   | `logout_failed`                                                                                    |    1 | Check `phase` and `revoked`; revocation may have happened ([recovery](#login-and-logout-errors)).                            |
 | Network commands                                           | `authentication_required`                                                                          |    1 | No environment or saved token exists for the origin, or First Draft rejected it.                                             |
 | Plan, `compilation *`, `report`, `note`, `maintain`        | `local_input_unreadable`                                                                           |    1 | Required local Plan or private state, the Compilation record, or an application's `.firstdraft/gaps.json` could not be read. |
-| Status, Compile, Compilation, `report`, `note`, `maintain` | `project_not_pushed`                                                                               |    1 | No API origin is pinned for the local Project.                                                                               |
+| Status, Compile, Compilation, `report`, `note`, `maintain` | `project_not_pushed`                                                                               |    1 | The local Project has no accepted Plan recorded.                                                                             |
 | `plan push`, `plan compile`                                | `request_outcome_unknown`                                                                          |    1 | A mutation or its response could not be verified; `plan compile` identifies its mutation phase.                              |
 | `plan push`, `plan compile`                                | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`.                           |
 | `plan push`, `plan compile`                                | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.                            |

@@ -58,8 +58,9 @@ Environment:
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
   FIRSTDRAFT_API_URL            Override the initial API origin
 
-The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. By default it materializes the
+In a Plan-only Project, the command pushes the exact local Plan. With --revision,
+it verifies the local sources against the published review. Both paths require
+a valid analysis of the accepted Plan. By default the command materializes the
 verified application in the current directory, preserving existing root material
 under .firstdraft/design. --output can select another absent directory.
 Progress is written to stderr.

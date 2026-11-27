@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   unlinkSync,
+  mkdirSync,
+  rmdirSync,
   lstatSync,
   readFileSync,
   renameSync,
@@ -9,6 +11,7 @@ import {
 import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
+import { ROOT_TRANSACTION_NAME, HOSTED_WRITER_NAME } from "./root-output.js";
 
 const STATE_FORMAT = "firstdraft.cli-state/1";
 export const MAX_STATE_BYTES = 4096;
@@ -489,16 +492,13 @@ function arraysEqual(left, right) {
  */
 export async function withPlanStateLock(directory, update) {
   assertLocalDirectory(directory, DEFAULT_FILE_SYSTEM);
-  const lock = path.join(directory, "sketch-settle.lock");
+  const transaction = path.join(path.dirname(directory), ROOT_TRANSACTION_NAME);
   try {
-    writeFileSync(lock, String(process.pid) + "\n", {
-      flag: "wx",
-      mode: 0o600,
-    });
+    mkdirSync(transaction, { mode: 0o700 });
   } catch (error) {
     if (isFileSystemError(error) && error.code === "EEXIST")
       throw new PlanStateBusyError(
-        "Another command is updating this Project. Retry when it finishes. If it stopped, check the PID in .firstdraft/sketch-settle.lock before removing the lock.",
+        "Another command is updating this Project, or a root output transaction needs recovery. Retry after the active command finishes. See the CLI's Sketch review recovery instructions if it stopped.",
       );
     if (isFileSystemError(error))
       throw new PlanStateLocalError(
@@ -507,9 +507,18 @@ export async function withPlanStateLock(directory, update) {
       );
     throw error;
   }
+  const owner = path.join(transaction, HOSTED_WRITER_NAME);
   try {
-    return await update();
+    writeFileSync(owner, String(process.pid) + "\n", {
+      flag: "wx",
+      mode: 0o600,
+    });
+    try {
+      return await update();
+    } finally {
+      unlinkSync(owner);
+    }
   } finally {
-    unlinkSync(lock);
+    rmdirSync(transaction);
   }
 }

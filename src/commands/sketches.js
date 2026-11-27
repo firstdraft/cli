@@ -333,7 +333,17 @@ function loadReviewedSources(cwd, revision, retained) {
   const receipt =
     (retained && isUuidV7(revision) ? readReview(cwd, revision) : null) ??
     readReview(cwd);
-  if (!receipt && !revision) return;
+  if (!receipt && !revision) {
+    if (
+      !retained &&
+      existsSync(path.join(cwd, ".firstdraft", "state.json")) &&
+      readPlanState({ cwd }).reserved
+    )
+      throw new SketchError(
+        "Publish the Sketches and obtain approval for the revision before Compile.",
+      );
+    return;
+  }
   if (!receipt || receipt.id !== revision)
     throw new SketchError(
       retained

@@ -23,6 +23,7 @@ import {
   loadSources,
 } from "../src/sketch-capture.js";
 import { initializePlan } from "../src/commands/plan-init.js";
+import { prepareRootOutput, releaseRootOutput } from "../src/root-output.js";
 import { pushPlan } from "../src/commands/plan-push.js";
 import { ApiAuthenticationRequiredError } from "../src/api-authentication.js";
 import { reviewConflict } from "../src/api-response.js";
@@ -132,6 +133,29 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
     JSON.parse(readFileSync(stateFile, "utf8")).project_id,
     original.project_id,
   );
+  assert.throws(() => reviewedSources(cwd, undefined), /obtain approval/);
+  if (process.platform !== "win32") {
+    const adoption = prepareRootOutput({ root: cwd });
+    try {
+      await assert.rejects(
+        pushPlan({
+          ...opts,
+          fetchFunction: async () => assert.fail("push overlapped adoption"),
+        }),
+        /Another command is updating/,
+      );
+      await assert.rejects(
+        publishSketches({
+          ...opts,
+          fetchFunction: async () =>
+            assert.fail("publication overlapped adoption"),
+        }),
+        /Another command is updating/,
+      );
+    } finally {
+      releaseRootOutput(adoption);
+    }
+  }
   draw(cwd);
   for (const status of [400, 401, 403, 404, 410, 415, 429]) {
     let captures = 0;
@@ -273,6 +297,11 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
     },
   });
   await inFlight;
+  if (process.platform !== "win32")
+    assert.throws(() => prepareRootOutput({ root: cwd }), {
+      reason: "root_busy",
+    });
+
   await assert.rejects(
     publishSketches({
       ...opts,

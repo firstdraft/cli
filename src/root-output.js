@@ -22,6 +22,7 @@ import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
 
+export const HOSTED_WRITER_NAME = "hosted-writer.pid";
 export const ROOT_TRANSACTION_NAME = ".firstdraft-root-output";
 export const ROOT_DESIGN_PATH = ".firstdraft/design";
 
@@ -370,6 +371,15 @@ function assertDesignPathAvailable(root, name) {
 function existingTransactionError(root) {
   const journalPath = path.join(root, ROOT_TRANSACTION_NAME, JOURNAL_NAME);
   try {
+    if (
+      lstatSync(path.join(root, ROOT_TRANSACTION_NAME, HOSTED_WRITER_NAME), {
+        throwIfNoEntry: false,
+      })?.isFile()
+    )
+      return new RootOutputPathError(
+        "A hosted Project writer is active or retained.",
+        "root_busy",
+      );
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     if (journal?.format === JOURNAL_FORMAT && journal?.root === root) {
       return new RootOutputPathError(

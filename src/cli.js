@@ -505,8 +505,9 @@ Environment:
   FIRSTDRAFT_STAGING_API_TOKEN  Authenticate staging.firstdraft.com
   FIRSTDRAFT_API_URL            Override the initial API origin
 
-The command submits the exact current whole-file Plan, waits for its analysis,
-and proceeds only when that analysis is valid. By default it materializes the
+In a Plan-only Project, the command pushes the exact local Plan. With --revision,
+it verifies the local sources against the published review. Both paths require
+a valid analysis of the accepted Plan. By default the command materializes the
 verified application in the current directory, preserving existing root material
 under .firstdraft/design. --output can select another absent directory.
 Progress is written to stderr.
@@ -871,7 +872,7 @@ const COMPILATION_CANCEL_INVALID_ARGUMENTS_DETAIL =
 const COMPILATION_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state. No network request was made.";
 const COMPILATION_NOT_PUSHED_DETAIL =
-  "The local Project has no pinned API origin. Run 'firstdraft plan push' first.";
+  "The local Project has no accepted Plan. Run 'firstdraft plan push' or publish its Sketches first.";
 const COMPILATION_STATUS_UNAVAILABLE_DETAIL =
   "Could not read the requested Compilation status. This read-only request is safe to retry.";
 const COMPILATION_STATUS_INVALID_DETAIL =
@@ -915,7 +916,7 @@ const MAINTAIN_ASK_OWNER_INVALID_ARGUMENTS_DETAIL =
 const MAINTAIN_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state. No network request was made. Run this command from the application's folder, where the CLI reads the Project from .firstdraft/gaps.json or from the state archived at .firstdraft/design, or from the directory whose .firstdraft holds the Project's state.";
 const MAINTAIN_NOT_PUSHED_DETAIL =
-  "The local Project has no pinned API origin. Run 'firstdraft plan push' first.";
+  "The local Project has no accepted Plan. Run 'firstdraft plan push' or publish its Sketches first.";
 const MAINTAIN_REJECTED_DETAIL =
   "First Draft rejected the request; response.code says why. environment_not_found or item_not_found means First Draft found no such Environment or item for this Project and account. item_already_resolved means nothing changed.";
 const MAINTAIN_UNAVAILABLE_DETAIL =
@@ -965,7 +966,7 @@ const NOTE_ACCOUNT_INVALID_RESPONSE_DETAIL =
 const PINNED_LOCAL_INPUT_UNREADABLE_DETAIL =
   "Could not read valid local First Draft state, so nothing was sent. Run the command from the generated application's root after root adoption, or from the Project's directory.";
 const PINNED_NOT_PUSHED_DETAIL =
-  "The local Project has no pinned API origin, so nothing was sent. Run 'firstdraft plan push' first.";
+  "The local Project has no accepted Plan, so nothing was sent. Run 'firstdraft plan push' or publish its Sketches first.";
 
 /**
  * @typedef {object} Writer
@@ -5206,8 +5207,15 @@ async function runSketchCommand({
       writeAuthenticationRequired(stderr);
       return 1;
     }
-    if (error instanceof SketchError && error.status === 401) {
-      writeAuthenticationRequired(stderr, 401);
+    if (
+      error instanceof SketchError &&
+      isAuthenticationProblem(error.status, error.response)
+    ) {
+      writeAuthenticationRequired(
+        stderr,
+        error.status,
+        /** @type {Record<string, unknown>} */ (error.response),
+      );
       return 1;
     }
     if (error instanceof PlanPushConfigurationError) {
