@@ -23,6 +23,8 @@ Commands:
   maintain     List, inspect, and act on a deployed application's items
   note         Send a note about a problem with First Draft
   plan         Work with Foundation Plans
+  project      Start or reopen a hosted Project
+  sketches     Publish a board and its working Foundation Plan
   report       Send a progress or failure report to First Draft
   start        Check versions, login, and reports before other work
 
@@ -170,6 +172,29 @@ test("the executable preserves its status when an output pipe closes", async () 
 
   assert.equal(usageStatus, 2);
   assert.equal(usageSignal, null);
+});
+
+test("hosted review groups distinguish group usage from invalid leaf options", async () => {
+  for (const group of ["project", "sketches"]) {
+    assert.equal((await invoke([group])).status, 0);
+    assert.equal(
+      (await invoke([group, "unknown"])).stderr,
+      `Unknown command.\nRun 'firstdraft ${group} --help' for usage.\n`,
+    );
+    assert.equal((await invoke([group, "--help", "--unknown"])).status, 2);
+  }
+  const duplicate = await invoke([
+    "sketches",
+    "publish",
+    "--after",
+    "none",
+    "--after",
+    "none",
+    "--head",
+    "none",
+  ]);
+  assert.equal(duplicate.status, 2);
+  assert.equal(JSON.parse(duplicate.stderr).error, "invalid_arguments");
 });
 
 /** @param {readonly string[]} argv */

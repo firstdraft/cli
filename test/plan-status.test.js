@@ -1360,7 +1360,7 @@ function textResponse(body) {
 
 /** @param {Uint8Array} body */
 function byteResponse(body) {
-  return new Response(body, {
+  return new Response(Uint8Array.from(body), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });

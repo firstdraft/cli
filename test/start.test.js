@@ -516,7 +516,7 @@ function account(reports, headers = {}) {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "FirstDraft-API-Contract": "0.9.0",
+        "FirstDraft-API-Contract": "0.9.1",
         ...headers,
       },
     },

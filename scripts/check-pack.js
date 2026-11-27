@@ -52,6 +52,7 @@ if (result.status !== 0) {
     "src/commands/plan-push.js",
     "src/commands/plan-status.js",
     "src/commands/report.js",
+    "src/commands/sketches.js",
     "src/commands/start.js",
     "src/compilation-artifact.js",
     "src/credentials.js",
@@ -61,6 +62,7 @@ if (result.status !== 0) {
     "src/plan-state.js",
     "src/root-output.js",
     "src/service-client.js",
+    "src/sketch-capture.js",
     "src/uuid-v7.js",
     "src/version.js",
   ]);

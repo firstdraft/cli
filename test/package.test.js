@@ -36,8 +36,8 @@ test("package metadata preserves the audited runtime boundary", () => {
   ]);
   assert.equal(metadata.scripts.test, "node scripts/run-tests.js");
 
+  assert.deepEqual(metadata.dependencies, { "playwright-core": "1.65.1" });
   for (const property of [
-    "dependencies",
     "optionalDependencies",
     "peerDependencies",
     "peerDependenciesMeta",

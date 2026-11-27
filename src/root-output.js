@@ -22,6 +22,7 @@ import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
 
+export const HOSTED_WRITER_NAME = "hosted-writer.pid";
 export const ROOT_TRANSACTION_NAME = ".firstdraft-root-output";
 export const ROOT_DESIGN_PATH = ".firstdraft/design";
 
@@ -268,12 +269,13 @@ export function releaseRootOutput(target) {
  * @param {object} callbacks
  * @param {(root: string) => void} callbacks.writeArtifact
  * @param {(root: string, ignoredPaths?: Set<string>) => void} callbacks.verifyArtifact
+ * @param {(designDirectory: string) => void} [callbacks.verifyDesign]
  * @param {(from: string, to: string) => void} [callbacks.rename]
  */
 export function materializeRootOutput(
   target,
   artifact,
-  { writeArtifact, verifyArtifact, rename = renameSync },
+  { writeArtifact, verifyArtifact, verifyDesign, rename = renameSync },
 ) {
   assertOwnedTransaction(target);
   const artifactStage = path.join(target.transactionPath, ARTIFACT_STAGE_NAME);
@@ -289,6 +291,7 @@ export function materializeRootOutput(
     recheckRootSnapshot(target);
     performRootTransaction(target, artifact.files, rename);
     verifyRootResult(target, artifact.files, verifyArtifact);
+    verifyDesign?.(path.join(target.path, ROOT_DESIGN_PATH));
 
     target.journal.phase = "complete";
     target.journal.pending = null;
@@ -368,6 +371,15 @@ function assertDesignPathAvailable(root, name) {
 function existingTransactionError(root) {
   const journalPath = path.join(root, ROOT_TRANSACTION_NAME, JOURNAL_NAME);
   try {
+    if (
+      lstatSync(path.join(root, ROOT_TRANSACTION_NAME, HOSTED_WRITER_NAME), {
+        throwIfNoEntry: false,
+      })?.isFile()
+    )
+      return new RootOutputPathError(
+        "A hosted Project writer is active or retained.",
+        "root_busy",
+      );
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     if (journal?.format === JOURNAL_FORMAT && journal?.root === root) {
       return new RootOutputPathError(

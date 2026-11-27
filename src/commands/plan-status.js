@@ -162,7 +162,7 @@ export async function readPlanStatus({
   now = Date.now,
 }) {
   const state = readPlanState({ cwd, fileSystem });
-  if (state.api_url === undefined) {
+  if (state.api_url === undefined || state.foundation_plan_etag === undefined) {
     throw new PlanStatusNotPushedError(
       "The local Foundation Plan has not been pushed.",
     );

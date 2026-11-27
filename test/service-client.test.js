@@ -293,10 +293,10 @@ test("a stop that did not cut the command short keeps its result and names the s
 });
 
 test("the CLI accepts only its declared API contract range", async () => {
-  assert.deepEqual(API_CONTRACT_RANGE, [">= 0.9.0", "< 0.10.0"]);
+  assert.deepEqual(API_CONTRACT_RANGE, [">= 0.9.1", "< 0.10.0"]);
 
   for (const contract of [
-    "0.9.0",
+    "0.9.1",
     "0.9.7",
     "  0.9.1 ",
     "0.9.2+build.7",
@@ -321,7 +321,9 @@ test("the CLI accepts only its declared API contract range", async () => {
     ["1.0.0", "newer"],
     ["0.8.1", "older"],
     ["0.9.0-rc.1", "older"],
-    ["0.9.1-rc.1", "prerelease"],
+    ["0.9.0", "older"],
+    ["0.9.1-rc.1", "older"],
+    ["0.9.2-rc.1", "prerelease"],
   ])) {
     const session = createServiceSession({ env: {}, notify: () => undefined });
     const request = session.fetch(async () => versionedResponse({ contract }));
@@ -431,7 +433,7 @@ test("a 429 reports the limit even when the response also requires an update", a
 test("the stop line for an older or prerelease contract does not advise updating", async () => {
   for (const [contract, sentence] of /** @type {[string, string][]} */ ([
     ["0.8.7", "serves API contract 0.8.7, which is older than"],
-    ["0.9.1-rc.1", "serves prerelease API contract 0.9.1-rc.1, which"],
+    ["0.9.2-rc.1", "serves prerelease API contract 0.9.2-rc.1, which"],
   ])) {
     /** @type {string[]} */
     const lines = [];
@@ -656,7 +658,7 @@ test("a Service outside the API contract range is refused with both versions", a
     error: "api_contract_unsupported",
     detail: `First Draft at ${ORIGIN} serves API contract 0.10.0, which is newer than CLI ${VERSION} accepts. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then run the same command again, with the same options.`,
     api_contract: "0.10.0",
-    accepted_api_contract: [">= 0.9.0", "< 0.10.0"],
+    accepted_api_contract: [">= 0.9.1", "< 0.10.0"],
     cli_version: VERSION,
     update_url: UPDATE_URL,
   });

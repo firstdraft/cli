@@ -1,3 +1,5 @@
+import { readPlanState } from "../plan-state.js";
+import { reviewedSources } from "./sketches.js";
 import { compileAndDownload } from "./compilation.js";
 import {
   prepareCompilationOutputTarget,
@@ -7,6 +9,7 @@ import {
   PlanPushNetworkError,
   PlanPushProtocolError,
   pushPlan,
+  resolveApiUrl,
 } from "./plan-push.js";
 import { PlanStatusChangedError, readPlanStatus } from "./plan-status.js";
 
@@ -57,6 +60,7 @@ export class PlanCompileAnalysisInvalidError extends Error {
 /**
  * @typedef {object} CompilePlanOptions
  * @property {string} cwd
+ * @property {string} [reviewedDigest]
  * @property {string} [apiUrl]
  * @property {typeof globalThis.fetch} [fetchFunction]
  * @property {import("./plan-push.js").PlanPushFileSystem} [fileSystem]
@@ -72,6 +76,7 @@ export class PlanCompileAnalysisInvalidError extends Error {
 /**
  * @typedef {CompilePlanOptions & {
  *   output: string,
+ *   revision?: string,
  *   compilationSleep?: (delayMs: number) => Promise<void>,
  *   compilationNow?: () => number,
  *   compile?: typeof compileAndDownload
@@ -88,6 +93,7 @@ export class PlanCompileAnalysisInvalidError extends Error {
 export async function compilePlanToDirectory({
   cwd,
   output,
+  revision,
   apiUrl,
   fetchFunction,
   fileSystem,
@@ -102,10 +108,14 @@ export async function compilePlanToDirectory({
   readStatus = readPlanStatus,
   compile = compileAndDownload,
 }) {
+  const reviewed = reviewedSources(cwd, revision);
+  if (reviewed)
+    resolveApiUrl(apiUrl, readPlanState({ cwd, fileSystem }).api_url);
   const outputTarget = prepareCompilationOutputTarget({ cwd, output });
   try {
     const prepared = await preparePlan({
       cwd,
+      reviewedDigest: reviewed?.planSha256,
       apiUrl,
       fetchFunction,
       fileSystem,
@@ -121,7 +131,8 @@ export async function compilePlanToDirectory({
 
     return await compile({
       cwd,
-      expectedEtag: prepared.pushed.etag,
+      ...(reviewed ? { revision, sketchFiles: reviewed.files } : {}),
+      expectedEtag: prepared.etag,
       expected: {
         projectId: body.project.id,
         graphVersion: body.project.graph_version,
@@ -149,6 +160,7 @@ export async function compilePlanToDirectory({
  */
 async function preparePlan({
   cwd,
+  reviewedDigest,
   apiUrl,
   fetchFunction,
   fileSystem,
@@ -160,24 +172,32 @@ async function preparePlan({
   push = pushPlan,
   readStatus = readPlanStatus,
 }) {
-  const pushed = await push({
-    cwd,
-    apiUrl,
-    fetchFunction,
-    fileSystem,
-    createTemporaryId,
-    createRequestSignal,
-  });
-  if (!("outcome" in pushed)) {
-    throw new PlanCompilePushRejectedError(pushed);
-  }
-  const acceptedGraphVersion = /** @type {{graph_version: number}} */ (
-    pushed.body.project
-  ).graph_version;
-  const acceptedHeadSourceSha256 = /** @type {{source_sha256: string}} */ (
-    pushed.body.foundation_plan
-  ).source_sha256;
+  let acceptedGraphVersion;
+  let acceptedHeadSourceSha256 = reviewedDigest;
+  let etag;
+  if (reviewedDigest) {
+    etag = '"sha256:' + reviewedDigest + '"';
+  } else {
+    const pushed = await push({
+      cwd,
+      apiUrl,
+      fetchFunction,
+      fileSystem,
+      createTemporaryId,
+      createRequestSignal,
+    });
+    if (!("outcome" in pushed)) {
+      throw new PlanCompilePushRejectedError(pushed);
+    }
+    acceptedGraphVersion = /** @type {{graph_version: number}} */ (
+      pushed.body.project
+    ).graph_version;
+    acceptedHeadSourceSha256 = /** @type {{source_sha256: string}} */ (
+      pushed.body.foundation_plan
+    ).source_sha256;
 
+    etag = pushed.etag;
+  }
   let status;
   onProgress({ phase: "analysis", status: "waiting" });
   try {
@@ -204,8 +224,9 @@ async function preparePlan({
     throw new PlanCompileAnalysisRejectedError(status);
   }
   if (
-    status.body.project.graph_version !== acceptedGraphVersion ||
-    status.body.analysis.graph_version !== acceptedGraphVersion ||
+    (acceptedGraphVersion !== undefined &&
+      (status.body.project.graph_version !== acceptedGraphVersion ||
+        status.body.analysis.graph_version !== acceptedGraphVersion)) ||
     status.body.analysis.head_source_sha256 !== acceptedHeadSourceSha256
   ) {
     throw new PlanStatusChangedError(status.body);
@@ -215,5 +236,5 @@ async function preparePlan({
   }
   onProgress({ phase: "analysis", status: "valid" });
 
-  return { pushed, status };
+  return { etag, status };
 }

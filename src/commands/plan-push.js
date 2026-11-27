@@ -20,6 +20,7 @@ import {
   normalizeApiUrl,
   readLocalFile,
   readPlanState,
+  withPlanStateLock,
 } from "../plan-state.js";
 
 export {
@@ -97,15 +98,28 @@ export class PlanPushStateWriteError extends Error {
  * @param {PushPlanOptions} options
  * @returns {Promise<PushPlanResult | RejectedPushResult>}
  */
-export async function pushPlan({
-  cwd,
-  apiUrl,
-  fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
-  createTemporaryId = randomUUID,
-  createRequestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-}) {
-  const state = readPlanState({ cwd, fileSystem });
+export async function pushPlan(options) {
+  const state = readPlanState(options);
+  if (state.reserved)
+    return withPlanStateLock(path.join(options.cwd, ".firstdraft"), () =>
+      pushCurrentPlan(options),
+    );
+  return pushCurrentPlan(options, state);
+}
+
+/** @param {PushPlanOptions} options @param {ReturnType<typeof readPlanState>} [initialState] @returns {Promise<PushPlanResult | RejectedPushResult>} */
+async function pushCurrentPlan(
+  {
+    cwd,
+    apiUrl,
+    fetchFunction = globalThis.fetch,
+    fileSystem = DEFAULT_FILE_SYSTEM,
+    createTemporaryId = randomUUID,
+    createRequestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  },
+  initialState,
+) {
+  const state = initialState ?? readPlanState({ cwd, fileSystem });
   const directory = path.join(cwd, ".firstdraft");
   const planPath = path.join(directory, "foundation-plan.json");
   const statePath = path.join(directory, "state.json");
@@ -115,6 +129,7 @@ export async function pushPlan({
     project_id: state.project_id,
   });
   const headers = {
+    ...(state.reserved ? { "FirstDraft-Require-Project": "true" } : {}),
     Accept: "application/json, application/problem+json",
     "Content-Type": FOUNDATION_PLAN_MEDIA_TYPE,
     ...(state.foundation_plan_etag
@@ -192,7 +207,7 @@ export async function pushPlan({
 }
 
 /** @param {string | undefined} configured @param {string | undefined} stored */
-function resolveApiUrl(configured, stored) {
+export function resolveApiUrl(configured, stored) {
   const configuredOrigin =
     configured === undefined ? undefined : normalizeApiUrl(configured);
   if (
@@ -226,8 +241,7 @@ function saveState({
   temporaryId,
 }) {
   const recoveryState = {
-    format: state.format,
-    project_id: state.project_id,
+    ...state,
     api_url: apiUrl,
     foundation_plan_etag: etag,
   };

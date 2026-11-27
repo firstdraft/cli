@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
+import { reviewedSources, SketchError } from "./sketches.js";
 import path from "node:path";
 
 import {
@@ -19,6 +20,7 @@ import {
   FirstDraftProtocolError,
   SERVICE_ROUTES,
   isProblemBody,
+  reviewConflict,
   readResponseBody,
   readResponseBytes,
   responseMediaType,
@@ -223,6 +225,7 @@ export class CompilationArtifactResponseInvalidError extends Error {
  *   analysis_run_id: string,
  *   graph_version: number,
  *   head_source_sha256: string,
+ *   sketch_revision_id?:string,
  *   status: string,
  *   compiler_release: string,
  *   target: {id: string, profile: string},
@@ -373,7 +376,21 @@ export async function downloadCompilation({
       compilerRelease: current.compilation.compiler_release,
       target: current.compilation.target,
     });
-    const materialized = materializeCompilationArtifact(artifact, outputTarget);
+    const selected = current.compilation.sketch_revision_id
+      ? reviewedSources(cwd, current.compilation.sketch_revision_id, true)
+      : undefined;
+    if (
+      selected &&
+      selected.planSha256 !== current.compilation.head_source_sha256
+    )
+      throw new SketchError(
+        "The retained Compilation and local review identify different Plans.",
+      );
+    const materialized = materializeCompilationArtifact(
+      artifact,
+      outputTarget,
+      selected?.files,
+    );
 
     return {
       project: current.project,
@@ -474,6 +491,8 @@ export async function cancelCompilation({
 /**
  * @typedef {object} CompileAndDownloadOptions
  * @property {string} cwd
+ * @property {string} [revision]
+ * @property {Map<string,Buffer>} [sketchFiles]
  * @property {string} expectedEtag
  * @property {CurrentCompilationIdentity} expected
  * @property {string} output
@@ -497,6 +516,8 @@ export async function cancelCompilation({
 export async function compileAndDownload({
   cwd,
   expectedEtag,
+  revision,
+  sketchFiles,
   expected,
   output,
   outputTarget: suppliedOutputTarget,
@@ -528,6 +549,7 @@ export async function compileAndDownload({
     onProgress({ phase: "compilation", status: "waiting" });
     const initial = await startCompilation({
       ...context,
+      revision,
       expected,
       fetchFunction,
       createRequestSignal,
@@ -591,9 +613,21 @@ export async function compileAndDownload({
         compilerRelease: current.compilation.compiler_release,
         target: current.compilation.target,
       });
+      if (revision && typeof outputTarget !== "string") {
+        try {
+          reviewedSources(cwd, revision);
+        } catch (error) {
+          if (!(error instanceof SketchError)) throw error;
+          throw new CompilationMaterializationError(
+            "Restore the reviewed sources before adopting this directory.",
+            { cause: error, reason: "reviewed_sources_changed" },
+          );
+        }
+      }
       const materialized = materializeCompilationArtifact(
         artifact,
         outputTarget,
+        sketchFiles,
       );
 
       return {
@@ -676,7 +710,7 @@ function readContext({ cwd, compilationId, fileSystem }) {
   }
 
   const state = readPlanState({ cwd, fileSystem });
-  if (state.api_url === undefined) {
+  if (state.api_url === undefined || state.foundation_plan_etag === undefined) {
     throw new CompilationNotPushedError(
       "The local Foundation Plan has not been pushed.",
     );
@@ -693,6 +727,7 @@ function readContext({ cwd, compilationId, fileSystem }) {
  * @param {object} options
  * @param {string} options.apiUrl
  * @param {string} options.projectId
+ * @param {string} [options.revision]
  * @param {string} options.etag
  * @param {CurrentCompilationIdentity} options.expected
  * @param {typeof globalThis.fetch} options.fetchFunction
@@ -702,6 +737,7 @@ async function startCompilation({
   apiUrl,
   projectId,
   etag,
+  revision,
   expected,
   fetchFunction,
   createRequestSignal,
@@ -716,6 +752,7 @@ async function startCompilation({
       headers: {
         Accept: "application/json, application/problem+json",
         "If-Match": etag,
+        ...(revision ? { "FirstDraft-Sketch-Revision": revision } : {}),
       },
       redirect: "error",
       signal: createRequestSignal(REQUEST_TIMEOUT_MS),
@@ -749,6 +786,7 @@ async function startCompilation({
     responseMediaType(response) !== "application/json" ||
     parsed === null ||
     response.headers.get("location") !== parsed.compilation.status_path ||
+    parsed.compilation.sketch_revision_id !== revision ||
     !matchesExpectedCompilation(parsed, expected)
   ) {
     throw new CompilationRequestOutcomeUnknownError(response.status);
@@ -826,7 +864,7 @@ async function readCompilationStatus({
 function parseStartedCompilationResponse(value, projectId) {
   if (
     !hasExactKeySet(value, RESPONSE_KEYS) ||
-    !hasExactKeySet(value.compilation, COMPILATION_KEYS) ||
+    !isRecord(value.compilation) ||
     !isUuidV7(value.compilation.id)
   ) {
     return null;
@@ -939,7 +977,13 @@ function parseCompilationResponse(value, projectId, compilationId) {
   if (
     !hasExactKeySet(value, RESPONSE_KEYS) ||
     !hasExactKeySet(value.project, PROJECT_KEYS) ||
-    !hasExactKeySet(value.compilation, COMPILATION_KEYS)
+    !isRecord(value.compilation) ||
+    !hasExactKeySet(
+      value.compilation,
+      Object.hasOwn(value.compilation, "sketch_revision_id")
+        ? [...COMPILATION_KEYS, "sketch_revision_id"]
+        : COMPILATION_KEYS,
+    )
   ) {
     return null;
   }
@@ -949,6 +993,8 @@ function parseCompilationResponse(value, projectId, compilationId) {
   if (
     project.id !== projectId ||
     !isGraphVersion(project.graph_version) ||
+    (compilation.sketch_revision_id !== undefined &&
+      !isUuidV7(compilation.sketch_revision_id)) ||
     compilation.id !== compilationId ||
     !isUuidV7(compilation.id) ||
     !isUuidV7(compilation.analysis_run_id) ||
@@ -994,6 +1040,9 @@ function parseCompilationResponse(value, projectId, compilationId) {
     project: { id: project.id, graph_version: project.graph_version },
     compilation: {
       id: compilation.id,
+      ...(isUuidV7(compilation.sketch_revision_id)
+        ? { sketch_revision_id: compilation.sketch_revision_id }
+        : {}),
       analysis_run_id: compilation.analysis_run_id,
       graph_version: compilation.graph_version,
       head_source_sha256: /** @type {string} */ (
@@ -1137,6 +1186,8 @@ function sameCompilation(first, current) {
     current.project.id === first.project.id &&
     current.project.graph_version === first.project.graph_version &&
     current.compilation.id === first.compilation.id &&
+    current.compilation.sketch_revision_id ===
+      first.compilation.sketch_revision_id &&
     current.compilation.analysis_run_id === first.compilation.analysis_run_id &&
     current.compilation.graph_version === first.compilation.graph_version &&
     current.compilation.head_source_sha256 ===
@@ -1195,8 +1246,9 @@ function requiresRetainedRecovery(error) {
 
 /** @param {Response} response @param {unknown} body */
 function safeProblem(response, body) {
+  const conflict = reviewConflict(response, body);
+  if (conflict) return conflict;
   if (!isRecord(body) || !isProblemBody(response, body)) return null;
-
   return {
     ...(body.type === "about:blank" ? { type: body.type } : {}),
     title: body.title,

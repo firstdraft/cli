@@ -15,7 +15,7 @@ export const UPDATE_URL = "https://firstdraft.com/update";
  * declares the same range for the release check, and
  * test/release-compatibility.test.js keeps the two equal.
  */
-export const API_CONTRACT_RANGE = Object.freeze([">= 0.9.0", "< 0.10.0"]);
+export const API_CONTRACT_RANGE = Object.freeze([">= 0.9.1", "< 0.10.0"]);
 
 /** Set by the plugin's launcher; docs/commands.md names them for wrappers. */
 export const PLUGIN_VERSION_VARIABLE = "FIRSTDRAFT_PLUGIN_VERSION";

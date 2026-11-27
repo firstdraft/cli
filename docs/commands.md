@@ -3,43 +3,89 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.10.x` source line contains the auditable command shell, the agent's `start` check, browser and device
+The current `0.11.x` source line contains the auditable command shell, the agent's `start` check, browser and device
 login in one command or in two steps that an agent runs, local Foundation Plan
-initialization, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
+initialization, hosted Project creation and Sketch review, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize, retained-Compilation inspection and
 cancellation, the account's report setting, progress and failure reports, notes, and maintenance-item listing,
-inspection, resolution, deferral, and owner questions. It requires the service's `0.9.x` API contract. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
+inspection, resolution, deferral, and owner questions. It requires API contract `0.9.1` or a later patch on the same minor line. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
 
-| Command                               | Network | Purpose                                                       |
-| ------------------------------------- | ------- | ------------------------------------------------------------- |
-| `firstdraft start`                    | Yes     | Check versions, login, and reports before other work          |
-| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity    |
-| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                  |
-| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities       |
-| `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin   |
-| `firstdraft login --no-wait`          | Yes     | Start a device login for an agent and exit                    |
-| `firstdraft login --finish`           | Yes     | Finish that device login once the person approved             |
-| `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin               |
-| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                     |
-| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis             |
-| `firstdraft plan compile`             | Yes     | Push and analyze, then materialize in the current folder      |
-| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                          |
-| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation      |
-| `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                  |
-| `firstdraft account`                  | Yes     | Show whether the account sends reports                        |
-| `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come    |
-| `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code     |
-| `firstdraft note unstated_request`    | Yes     | Print, then send, a request the Plan could not state          |
-| `firstdraft note unclear_guidance`    | Yes     | Print, then send, a Skill page or diagnostic that was unclear |
-| `firstdraft note wrong_output`        | Yes     | Print, then send, analysis or generated code that was wrong   |
-| `firstdraft maintain`                 | Yes     | List a deployed Environment's open items                      |
-| `firstdraft maintain show`            | Yes     | Read one item with its evidence                               |
-| `firstdraft maintain resolve`         | Yes     | Resolve one item with a reason                                |
-| `firstdraft maintain defer`           | Yes     | Set one item aside until a time                               |
-| `firstdraft maintain ask-owner`       | Yes     | Record a question for the owner about one item                |
+| Command                               | Network | Purpose                                                                   |
+| ------------------------------------- | ------- | ------------------------------------------------------------------------- |
+| `firstdraft start`                    | Yes     | Check versions, login, and reports before other work                      |
+| `firstdraft project start`            | Yes     | Create or reopen the owner’s Project before a Plan                        |
+| `firstdraft sketches publish`         | Yes     | Capture the selected local screens and publish them with the working Plan |
+| `firstdraft plan init`                | No      | Create an empty local Foundation Plan and Project identity                |
+| `firstdraft generate application-key` | No      | Preview deterministic name-to-key derivation                              |
+| `firstdraft generate uuid`            | No      | Generate one or more Foundation Plan subject identities                   |
+| `firstdraft login`                    | Yes     | Approve the CLI in a browser and save a token for an origin               |
+| `firstdraft login --no-wait`          | Yes     | Start a device login for an agent and exit                                |
+| `firstdraft login --finish`           | Yes     | Finish that device login once the person approved                         |
+| `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin                           |
+| `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                                 |
+| `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis                         |
+| `firstdraft plan compile`             | Yes     | Compile the Plan or approved review into the current folder               |
+| `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                                      |
+| `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation                  |
+| `firstdraft compilation cancel`       | Yes     | Cancel a queued or running Compilation by ID                              |
+| `firstdraft account`                  | Yes     | Show whether the account sends reports                                    |
+| `firstdraft report progress`          | Yes     | Print, then send, how far a generated application has come                |
+| `firstdraft report failure`           | Yes     | Print, then send, an unexpected failure in generated code                 |
+| `firstdraft note unstated_request`    | Yes     | Print, then send, a request the Plan could not state                      |
+| `firstdraft note unclear_guidance`    | Yes     | Print, then send, a Skill page or diagnostic that was unclear             |
+| `firstdraft note wrong_output`        | Yes     | Print, then send, analysis or generated code that was wrong               |
+| `firstdraft maintain`                 | Yes     | List a deployed Environment's open items                                  |
+| `firstdraft maintain show`            | Yes     | Read one item with its evidence                                           |
+| `firstdraft maintain resolve`         | Yes     | Resolve one item with a reason                                            |
+| `firstdraft maintain defer`           | Yes     | Set one item aside until a time                                           |
+| `firstdraft maintain ask-owner`       | Yes     | Record a question for the owner about one item                            |
+
+## Hosted Sketches
+
+After the readiness check, run `firstdraft project start` in the app's planning folder. Give the owner the returned
+Project URL. Its private local UUID and origin are written before the request, so another start opens the same
+Project after a lost response. Run `firstdraft plan init --name "Awards Pool"` there to initialize the reserved
+Project's Plan. A Project opened this way requires a published and approved Sketch revision for Compile. To start a
+Plan-only interview, begin with `plan init` in a fresh folder.
+
+Write the ordered screen list to `sketches/board.json`. Paths are relative to `sketches/`. For example:
+
+```json
+{
+  "assets": ["theme.css"],
+  "screens": [
+    {
+      "id": "guest-ballot",
+      "name": "Guest ballot",
+      "source": "guest-ballot.html",
+      "sample_keys": [],
+      "plan_subjects": []
+    }
+  ]
+}
+```
+
+List the Plan development-record UUIDs shown on a screen in `sample_keys` and related Plan subject UUIDs in
+`plan_subjects`. Both lists default to empty. Use `data-plan-pointer` with an RFC 6901 JSON Pointer to put a scalar value from the exact
+working Plan into an element's text during capture. Keep readable fallback text for directly opening the HTML.
+Mark selectable elements with stable `data-sketch-key` values and name them using visible text, `aria-label` or
+`data-sketch-label`. Keys of 1–80 ASCII letters, digits, underscores and hyphens must start with a letter or digit. Keep them stable across layout and copy changes.
+
+Run `firstdraft sketches publish` with Google Chrome installed (or set `FIRSTDRAFT_CHROME_PATH` to its executable).
+The CLI serves the declared local assets to a private browser context, captures each screen at 1280 × 800 and
+390 × 844 CSS pixels, and sends the exact Plan text with PNGs, thumbnails, element labels and bounds. Use suitable
+examples in the Plan and screens before publishing. Captures support up to 32 screens, 8192 pixels of scroll height
+per viewport, and 24 MiB for the request. Capture loads offscreen images, settles CSS animations and clips selectable elements to their visible area. Browser policy violations or undeclared assets stop capture. Supply eligible local assets in the manifest and use static markup for any scripted rendering. The capture context uses a light color scheme, en-US locale and UTC. Editable HTML, CSS, fonts and images stay local. If Chrome or hosting
+is unavailable, open the local HTML screens to continue the conversation.
+
+Record the returned review ID with the owner's feedback. After separate Compile approval, run
+`firstdraft plan compile --revision <approved-id>`, optionally with `--output <absent-directory>`. The CLI
+checks the exact local Plan and every selected source before starting. The service checks the requested revision
+and Plan ETag together. Find the editable sources under `.firstdraft/design/sketches/` in either output. A retained download of a sketch-linked Compilation uses its per-revision local receipt and requires restoration of that revision’s Plan and source files. Complete
+the Rails integration and exercise the selected flows as part of the app's own implementation.
 
 ## Select an environment and authenticate
 
@@ -224,19 +270,22 @@ CLI without the plugin's launcher, such as a direct npm installation, may set th
 
 Beyond the header, a command sends only what it needs:
 
-| Commands                                  | Request content                                                                     |
-| ----------------------------------------- | ----------------------------------------------------------------------------------- |
-| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                       |
-| `start`                                   | An account read, and nothing without a token                                        |
-| `plan push`, `plan compile`               | The exact local Plan bytes and the saved Head ETag                                  |
-| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                    |
-| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                    |
-| `note <kind>`                             | An account read; with reports on, the note printed just before                      |
-| `maintain`                                | An account read; then the Project and Environment in the request path and `?page=N` |
-| `maintain show`                           | Only the Project, Environment, and item IDs in the request path                     |
-| `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice         |
-| `maintain defer`                          | The `--until` time                                                                  |
-| `maintain ask-owner`                      | The `--question` text, whatever the reports choice                                  |
+| Commands                                  | Request content                                                                                                                                                                                                                               |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `login`, `logout`                         | OAuth parameters; `logout` sends the saved token to revoke it                                                                                                                                                                                 |
+| `start`                                   | An account read, and nothing without a token                                                                                                                                                                                                  |
+| `project start`                           | The reserved Project ID in the request path                                                                                                                                                                                                   |
+| `sketches publish`                        | Project and revision IDs, previous revision and Head preconditions, exact Plan text and digest, screen names and order, source fingerprints, referenced Plan and sample IDs, viewport PNGs and thumbnails, and element IDs, labels and bounds |
+| `plan push`, Plan-only `plan compile`     | The exact local Plan bytes and the saved Head ETag                                                                                                                                                                                            |
+| `plan compile --revision`                 | The approved revision ID and Plan ETag in request headers, with Project, analysis and Compilation reads. The Plan bytes are already hosted.                                                                                                   |
+| `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                                                                                                                                                                              |
+| `report progress`, `report failure`       | An account read; with reports on, the report printed just before                                                                                                                                                                              |
+| `note <kind>`                             | An account read; with reports on, the note printed just before                                                                                                                                                                                |
+| `maintain`                                | An account read; then the Project and Environment in the request path and `?page=N`                                                                                                                                                           |
+| `maintain show`                           | Only the Project, Environment, and item IDs in the request path                                                                                                                                                                               |
+| `maintain resolve`                        | The reason, the cause, and any `--detail` text, whatever the reports choice                                                                                                                                                                   |
+| `maintain defer`                          | The `--until` time                                                                                                                                                                                                                            |
+| `maintain ask-owner`                      | The `--question` text, whatever the reports choice                                                                                                                                                                                            |
 
 ### Update line and refusals
 
@@ -256,7 +305,7 @@ notice therefore comes from First Draft's answer to the command being run, not f
   `First Draft: an update is available (plugin <latest>; this setup has plugin <installed>). Tell the person the update steps are at https://firstdraft.com/update`.
   Without a plugin version the line names `CLI <latest>` and `CLI <installed>`. `start` writes the same line on
   standard output, after its version line.
-- **Older than the minimum, or a contract other than API `0.9.x`:** the CLI finishes handling that response, so
+- **Older than the minimum, or a contract outside the accepted range:** the CLI finishes handling that response, so
   local state stays in step with First Draft, and sends nothing more. When the command still had a request to send,
   it exits with `update_required` or `api_contract_unsupported` instead of its own result. When that response was the
   command's last, the command reports its own result, after one `First Draft: ` line on standard error that names
@@ -354,10 +403,9 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11` and a
-client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
-without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
-existing `.firstdraft` path.
+This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11`. In a fresh
+folder it creates the Project ID and an ignored `.firstdraft/` directory. In a folder reserved by `project start`,
+it writes the Plan for the existing Project ID and origin. Initialization runs locally and preserves any existing Plan.
 
 Provide either `--name`, `--application-key`, or both. Name-only initialization derives a lower-snake key. Key-only
 initialization derives a humanized display name. Supplying both preserves both values exactly after validating them
@@ -405,11 +453,11 @@ From the initialized project:
 firstdraft plan push
 ```
 
-The command sends the exact bytes in `.firstdraft/foundation-plan.json`. The first push conditionally creates the
-Project; later pushes replay the complete ETag saved in `.firstdraft/state.json` so a stale writer cannot replace a
-newer Plan. Successful responses and server diagnostics are printed as JSON for an agent to inspect.
+The command sends the exact bytes in `.firstdraft/foundation-plan.json`. In a Plan-only workflow the first push conditionally creates the
+Project. After `project start`, a push requires the reserved Project to exist. Later pushes replay the complete ETag
+saved in `.firstdraft/state.json` so a stale writer cannot replace a newer Plan. Successful responses and server diagnostics are printed as JSON for an agent to inspect.
 
-The first successful push pins the normalized API origin in local state. See
+The first successful Plan-only push pins the normalized API origin in local state. A hosted Project already has its origin from `project start`. See
 [environment selection and authentication](#select-an-environment-and-authenticate) for production, staging, custom
 origins, and the credentials each requires.
 
@@ -460,7 +508,10 @@ directory. No GitHub connection, repository clone, or push is required. Compilat
 output and the application runtime are local. To put the application on GitHub, create and push a repository with
 `git` and `gh` after it is written.
 
-`plan compile` first pushes the exact current bytes in
+For a Project with published Sketches, run `firstdraft plan compile --revision <approved-id>` as described in
+[Hosted Sketches](#hosted-sketches). It uses the published Plan and checks that the local Plan and sources match the review.
+
+In a Plan-only workflow, `plan compile` first pushes the exact current bytes in
 `.firstdraft/foundation-plan.json`, even when those bytes are unchanged, and saves the accepted ETag using the same
 contract as `plan push`. It then waits up to two minutes for an analysis whose graph version and
 `head_source_sha256` exactly match that accepted push, polling past a terminal result retained for an older Head.
@@ -578,7 +629,8 @@ Success writes one JSON object to stdout containing the validated Project, Compi
 Root adoption additionally reports `root_adoption.design_path` (or `null` when no design directory was needed), its
 top-level moved-entry count, whether a Git repository was preserved, and whether its index was replaced.
 After final verification succeeds, the CLI removes its owned `.firstdraft-root-output` transaction directory.
-An absent output directory contains exactly the artifact files and modes. Root adoption additionally contains the
+An absent output directory contains the verified artifact files and modes. For a Sketch-linked Compilation, both
+output modes also receive the local sources under `.firstdraft/design/sketches/`. Root adoption contains the
 preserved `.firstdraft/design` archive and an existing root `.git`, when present. Verification skips only the
 archive and retained Git/transaction paths; it still checks every generated file, including
 `.firstdraft/submitted-foundation-plan.json` and `.firstdraft/gaps.json`, and rejects unexpected generated paths. The
@@ -957,6 +1009,8 @@ timeout. Each request takes its method and path from one
 
 | Method | Path                                                                                       | Purpose                              |
 | ------ | ------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `PUT`  | `/v1/projects/{project_id}`                                                                | Start or reopen an owned Project     |
+| `PUT`  | `/v1/projects/{project_id}/sketch-reviews/{revision_id}`                                   | Publish a board and working Plan     |
 | `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                                | Create or replace the Head           |
 | `GET`  | `/v1/projects/{project_id}/analysis`                                                       | Read the Head's current analysis     |
 | `POST` | `/v1/projects/{project_id}/compilations`                                                   | Start a Compilation of the Head      |
@@ -976,7 +1030,8 @@ timeout. Each request takes its method and path from one
 | `POST` | `/oauth/device_authorization`                                                              | Start a device-flow login            |
 | `POST` | `/oauth/revoke`                                                                            | Revoke a saved token                 |
 
-`plan push` sends the Plan `PUT`, and `plan status` reads the analysis. `plan compile` does both. It then starts a
+`project start` reserves or reopens the Project. `sketches publish` sends its review and working Plan together.
+`plan push` sends the Plan `PUT`, and `plan status` reads the analysis. Plan-only `plan compile` does both, while `--revision` reads analysis for the published Plan. Compile then starts a
 Compilation, polls it, and downloads its artifact.
 `compilation status` reads one retained Compilation. `compilation download` reads it and downloads its artifact.
 `compilation cancel` cancels it. `account` reads `/v1/account`, and `start` reads it when it has a token.
@@ -993,7 +1048,7 @@ The first push sends `If-None-Match: *`. Later pushes and the Compilation start 
 `If-Match`. The cancel `POST` sends no precondition header. The resolution, deferral, and owner-question `POST`s send
 a JSON body and no precondition header.
 
-The `/v1` routes belong to API contract `0.9.x`. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
+The `/v1` routes require API contract `0.9.1` or a later patch on the same minor line. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
 `release/compatibility.json` declares it for the Service's release compatibility check, and
 `test/release-compatibility.test.js` keeps the two equal. The CLI reads `FirstDraft-API-Contract` on every response
 and stops at a Service outside the range, as [update line and refusals](#update-line-and-refusals) describes: with
@@ -1003,11 +1058,11 @@ repository.
 
 ### Head and its ETag
 
-The Head is the exact Foundation Plan bytes that First Draft holds for a Project. The latest accepted
-`PUT /v1/projects/{project_id}/foundation-plan` sets it. The Service stores those bytes unchanged. A byte change that
+The Head is the exact Foundation Plan bytes that First Draft holds for a Project. A successful Plan push or new Sketch
+publication sets the Head to its submitted Plan. The Service stores those bytes unchanged. A byte change that
 keeps the Plan's meaning still makes a new Head, although the Project's `graph_version` stays the same.
 
-A successful Plan `PUT` returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
+A successful Plan push or Sketch publication returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
 64-character lowercase SHA-256 of the Head bytes. The CLI saves the complete header value in `.firstdraft/state.json`
 and replays it in `If-Match`. `plan compile` also extracts `<hex>` to check that the local Plan still matches the
 Head before it starts a Compilation. A saved ETag in any other form stops that check with

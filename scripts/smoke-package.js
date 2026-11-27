@@ -51,6 +51,17 @@ try {
   assert(packed, "npm pack did not return a manifest");
   const tarball = path.join(temporaryDirectory, packed.filename);
 
+  // A clean CI cache contains locked tarballs but may have no registry
+  // metadata for an offline installation in a new consumer directory.
+  const dependencyPack = runNpm([
+    "pack",
+    "--json",
+    "--ignore-scripts",
+    "--pack-destination",
+    temporaryDirectory,
+    path.resolve("node_modules/playwright-core"),
+  ]);
+  const [dependency] = JSON.parse(dependencyPack.stdout);
   mkdirSync(installationDirectory);
   writeFileSync(
     path.join(installationDirectory, "package.json"),
@@ -66,6 +77,7 @@ try {
       "--offline",
       "--no-save",
       tarball,
+      path.join(temporaryDirectory, dependency.filename),
     ],
     installationDirectory,
   );
@@ -114,6 +126,20 @@ try {
     detail:
       "Invalid arguments. Run 'firstdraft generate uuid --help' for usage.",
   });
+
+  for (const args of [
+    ["project", "start"],
+    ["sketches", "publish"],
+  ]) {
+    assertHandledFailure(
+      spawnPackedCli([...args, "--unknown"], installationDirectory),
+      2,
+      {
+        error: "invalid_arguments",
+        detail: `Invalid arguments. Run 'firstdraft ${args.join(" ")} --help' for usage.`,
+      },
+    );
+  }
 
   const invalidInit = spawnPackedCli(
     ["plan", "init", "--canary-secret-option"],

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -278,8 +279,9 @@ export function releaseCompilationOutputTarget(target) {
 /**
  * @param {ValidatedCompilationArtifact} artifact
  * @param {string | import("./root-output.js").RootOutputTarget} target
+ * @param {Map<string,Buffer>} [sketchFiles]
  */
-export function materializeCompilationArtifact(artifact, target) {
+export function materializeCompilationArtifact(artifact, target, sketchFiles) {
   if (typeof target !== "string") {
     try {
       return materializeRootOutput(target, artifact, {
@@ -287,10 +289,29 @@ export function materializeCompilationArtifact(artifact, target) {
           writeArtifactTree(artifact.files, root);
           applyMode(root, DIRECTORY_MODE);
         },
-        verifyArtifact: (root, ignoredPaths) =>
+        verifyArtifact: (root, ignoredPaths) => {
           verifyArtifactTree(artifact.files, root, ignoredPaths, {
             verifyRootMode: ignoredPaths === undefined,
-          }),
+          });
+        },
+        verifyDesign: (designDirectory) => {
+          if (sketchFiles) {
+            const archive = path.join(designDirectory, "sketches");
+            for (const [name, bytes] of sketchFiles) {
+              const selected = path.join(archive, name);
+              if (
+                realpathSync(selected) !== selected ||
+                !lstatSync(selected).isFile() ||
+                !readFileSync(selected).equals(bytes)
+              ) {
+                throw new RootOutputMaterializationError(
+                  "The archived sketch sources changed after review.",
+                  "reviewed_sources_changed",
+                );
+              }
+            }
+          }
+        },
       });
     } catch (error) {
       if (!(error instanceof RootOutputMaterializationError)) throw error;
@@ -314,6 +335,17 @@ export function materializeCompilationArtifact(artifact, target) {
     writeArtifactTree(artifact.files, temporaryDirectory);
     applyMode(temporaryDirectory, DIRECTORY_MODE);
     verifyArtifactTree(artifact.files, temporaryDirectory);
+    if (sketchFiles) {
+      const design = path.join(temporaryDirectory, ".firstdraft", "design");
+      mkdirSync(design, { recursive: true });
+      const root = path.join(design, "sketches");
+      mkdirSync(root);
+      for (const [name, bytes] of sketchFiles) {
+        const file = path.join(root, name);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, bytes, { flag: "wx" });
+      }
+    }
     assertTargetStillAvailable(target, parent);
     renameSync(temporaryDirectory, target);
     temporaryDirectory = null;
