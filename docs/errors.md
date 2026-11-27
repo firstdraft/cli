@@ -26,12 +26,28 @@ binding, image, asset URL, or layout and publish again.
 
 `sketch_review_failed` describes a Project-start, capture, publication or reviewed-source problem. Retry an interrupted
 start from the same directory. A publish with an unknown outcome retains its exact request privately. Run the same
-publish command again to resolve it before sending later edits. If a process was killed while saving its local receipt and repeat attempts report an active publisher, check the PID in `.firstdraft/sketch-settle.lock`. Once that process has exited, remove the lock and retry. Correct a rejected draft and publish again. A definitive client rejection such as 400, 403 or 404 clears the pending request so the next publish captures edits. A fresh request refused at login or a rate limit is also cleared. A request timeout (408) retains the exact submission for replay. If an earlier attempt has an unknown outcome, a refusal before the service can look up that revision (including 401 or 429) retains the journal. Correct the access problem or wait for the limit, then rerun the same command. If local sources have since changed, a successful replay returns the recovered revision ID and a `next_step` prompting a fresh publish of the current draft.
-On a competing publication, inspect the current review and reconcile its changes locally. Use
-`firstdraft sketches publish --after <current-review-id> --head <current-head-sha256>` to publish against those
-specific identities. Use `none` for a missing review or Head. An interrupted rebased publication accepts the same two options on replay. Reopen the Project URL for another review before Compile. Restore missing approved source from
-the planning folder or review a reconstruction. When an older service lacks the hosted endpoint, use local HTML for
-the walkthrough until the service and CLI are matched.
+publish command again to resolve it before sending later edits. In a hosted Project, only one `plan push` or `sketches publish` can run from a planning folder at a time. Wait for the active command and retry. If a process was killed and repeat attempts report an active writer, check the PID in `.firstdraft/sketch-settle.lock`. Once that process has exited, remove the lock and retry. Correct a rejected draft and publish again. A definitive client rejection such as 400, 403 or 404 clears the pending request so the next publish captures edits. A fresh request refused at login or a rate limit is also cleared. A request timeout (408) retains the exact submission for replay. If an earlier attempt has an unknown outcome, a refusal before the service can look up that revision (including 401 or 429) retains the journal. Correct the access problem or wait for the limit, then rerun the same command. If local sources have since changed, a successful replay returns the recovered revision ID and a `next_step` prompting a fresh publish of the current draft.
+
+The service problem appears in `response` when the CLI can verify its shape:
+
+- `409 sketch_review_conflict` in `sketch_review_failed` means the submitted revision conflicts with the hosted
+  Project. Open the Project URL, inspect the current review and reconcile its changes locally. Then run
+  `firstdraft sketches publish --after <current-review-id> --head <current-head-sha256>` using the identities
+  returned in `response.current_review.id` and `response.head_sha256`. Use `none` for a missing review or Head.
+  An interrupted rebased publication accepts the same two options on replay.
+- `412 sketch_review_changed` in `compilation_start_rejected` means the service declined to start Compile for the
+  requested review and Plan. Inspect the current revision and Head, reconcile and publish any changes, and obtain
+  approval for the revision before passing it to `plan compile --revision`. When graph versions differ, the Plan
+  passed through another generation even if its current bytes match an older review.
+- `422 invalid_sketch_review` in `sketch_review_failed` means the service rejected the review bundle. Read
+  `response.detail`, correct the indicated board, capture or reference, and publish the corrected draft after a
+  fresh rejection. A rejected Plan can instead return `response.diagnostics`; use those to fix the Plan.
+- `413 sketch_quota_reached` in `sketch_review_failed` means the Project reached its stored review limit. A
+  smaller capture may fit if only the stored byte budget is limiting it. At the revision-count limit, continue
+  the walkthrough using local HTML.
+
+Restore missing approved source from the planning folder or review a reconstruction. When an older service lacks
+the hosted endpoint, use local HTML for the walkthrough until the service and CLI are matched.
 
 ## Environment and credential errors
 
@@ -211,11 +227,13 @@ replaced. `plan compile` can also meet it at the Compilation start, as `compilat
 `response.detail` names the active Compilation's ID.
 
 1. Read that Compilation once with `firstdraft compilation status <id>`. One that has reached `succeeded`, `failed`,
-   or `cancelled` no longer blocks; rerun `plan compile`.
+   or `cancelled` no longer blocks. Rerun the original Compile command, including its approved `--revision` and
+   `--output` options when present.
 2. If it is still `queued` or `running` well after a Compilation normally finishes, for example after a
    `plan compile` wait timed out, cancel it with `firstdraft compilation cancel <id>`. Cancelling throws away any
    work it is still doing.
-3. After the cancel succeeds, rerun `plan compile`.
+3. After the cancel succeeds, rerun that same command. If the hosted revision has changed, obtain approval for
+   the new revision before starting another Compile.
 
 Cancel never changes a succeeded or failed Compilation, and repeating it is safe:
 

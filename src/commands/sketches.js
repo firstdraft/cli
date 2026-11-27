@@ -52,37 +52,6 @@ function save(file, data, exclusive = false) {
     if (existsSync(temp)) unlinkSync(temp);
   }
 }
-/**
- * A replay can return after another publisher has moved on. Only the process
- * settling the still-pending revision may change either receipt or the journal.
- * The lock covers synchronous local writes, never a browser or network wait.
- * @param {string} directory @param {string} revision @param {() => void} update
- */
-function finishPending(directory, revision, update) {
-  try {
-    withPlanStateLock(directory, () => {
-      const pendingFile = path.join(directory, "sketch-pending.json");
-      if (
-        !existsSync(pendingFile) ||
-        JSON.parse(readLocalFile(pendingFile, 52 * 1024 * 1024).toString())
-          .id !== revision
-      ) {
-        if (readReview(path.dirname(directory))?.id === revision) return;
-        throw new SketchError(
-          "Another publisher already advanced the local review. Reopen the Project to see the current revision.",
-        );
-      }
-      update();
-      unlinkSync(pendingFile);
-    });
-  } catch (error) {
-    if (!isFileSystemError(error) || error.code !== "EEXIST") throw error;
-    throw new SketchError(
-      "A publisher is saving local state. Retry after it finishes.",
-    );
-  }
-}
-
 /** @typedef {{cwd:string,apiUrl?:string,fetchFunction:typeof globalThis.fetch,hasTokenFor?:(origin:string)=>boolean}} Options */
 /** @param {Options} options */
 export async function startProject({
@@ -161,8 +130,16 @@ function readReview(cwd, revision) {
     throw new SketchError("Invalid local sketch review receipt.");
   return receipt;
 }
-/** @param {Options & {capture?:typeof captureBoard, after?:string, head?:string}} options */
-export async function publishSketches({
+/** @typedef {Options & {capture?:typeof captureBoard, after?:string, head?:string}} PublishOptions */
+/** @param {PublishOptions} options */
+export async function publishSketches(options) {
+  return withPlanStateLock(path.join(options.cwd, ".firstdraft"), () =>
+    publishCurrentSketches(options),
+  );
+}
+
+/** @param {PublishOptions} options */
+async function publishCurrentSketches({
   cwd,
   apiUrl,
   fetchFunction,
@@ -260,15 +237,19 @@ export async function publishSketches({
     const resolvedRevision =
       rejection &&
       (("code" in rejection &&
-        ((rejection.code === "sketch_review_conflict" &&
-          response.status === 409) ||
+        ((rejection.code === "invalid_sketch_review" &&
+          response.status === 422) ||
+          (rejection.code === "sketch_review_conflict" &&
+            response.status === 409) ||
           (rejection.code === "compilation_active" &&
             response.status === 409) ||
+          (rejection.code === "invalid_sketch_review" &&
+            response.status === 422) ||
           (rejection.code === "sketch_quota_reached" &&
             response.status === 413))) ||
         ("diagnostics" in rejection && response.status === 422));
     if (refusedThisRequest && (!replay || resolvedRevision))
-      finishPending(dir, pending.id, () => {});
+      unlinkSync(pendingFile);
     throw new SketchError(
       "First Draft declined the sketch review. Inspect the current review and repair the draft.",
       response.status,
@@ -288,29 +269,28 @@ export async function publishSketches({
     throw new SketchError(
       "Unexpected review identity. Retry the same publication.",
     );
-  finishPending(dir, pending.id, () => {
-    const latest = readPlanState({ cwd });
-    const knownHead = latest.foundation_plan_etag?.slice(8, -1) ?? null;
-    if (
-      knownHead === request.expected_plan_sha256 ||
-      latest.foundation_plan_etag === pending.local_etag
-    ) {
-      save(path.join(dir, "state.json"), {
-        ...latest,
-        foundation_plan_etag: etag,
-      });
-    }
-    const receipt = { id: pending.id, plan_sha256: sha, files: pending.files };
-    const archive = path.join(dir, "sketch-reviews");
-    mkdirSync(archive, { recursive: true, mode: 0o700 });
-    const previous = readReview(cwd);
-    if (previous) {
-      const oldFile = path.join(archive, previous.id + ".json");
-      if (!existsSync(oldFile)) save(oldFile, previous);
-    }
-    save(path.join(archive, pending.id + ".json"), receipt);
-    save(path.join(dir, "sketch-review.json"), receipt);
-  });
+  const latest = readPlanState({ cwd });
+  const knownHead = latest.foundation_plan_etag?.slice(8, -1) ?? null;
+  if (
+    knownHead === request.expected_plan_sha256 ||
+    latest.foundation_plan_etag === pending.local_etag
+  ) {
+    save(path.join(dir, "state.json"), {
+      ...latest,
+      foundation_plan_etag: etag,
+    });
+  }
+  const receipt = { id: pending.id, plan_sha256: sha, files: pending.files };
+  const archive = path.join(dir, "sketch-reviews");
+  mkdirSync(archive, { recursive: true, mode: 0o700 });
+  const previous = readReview(cwd);
+  if (previous) {
+    const oldFile = path.join(archive, previous.id + ".json");
+    if (!existsSync(oldFile)) save(oldFile, previous);
+  }
+  save(path.join(archive, pending.id + ".json"), receipt);
+  save(path.join(dir, "sketch-review.json"), receipt);
+  unlinkSync(pendingFile);
   let nextStep;
   if (replay) {
     try {
@@ -356,7 +336,9 @@ function loadReviewedSources(cwd, revision, retained) {
   if (!receipt && !revision) return;
   if (!receipt || receipt.id !== revision)
     throw new SketchError(
-      "Compile with --revision followed by the approved sketch revision ID.",
+      retained
+        ? "Restore the local receipt for this Compilation’s sketch revision in the planning folder before downloading."
+        : "Compile with --revision followed by the approved sketch revision ID.",
     );
   const sources = loadSources(cwd);
   if (

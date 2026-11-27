@@ -9,7 +9,7 @@ carry no release status. The `v<version>` tag and npm show whether a version is 
 Entries start with the first version prepared after this file was added, and earlier versions have none. The
 repository's [tags](https://github.com/firstdraft/cli/tags) identify the source of each published version.
 
-## 0.10.1
+## 0.11.0
 
 - Run `firstdraft project start` to get a hosted Project URL before writing the Plan. The command reserves the local
   Project identity so retrying in the same directory reopens the same Project.
@@ -21,8 +21,8 @@ repository's [tags](https://github.com/firstdraft/cli/tags) identify the source 
   verifies the working Plan and selected local sources and hands those sources to the generated application in
   `.firstdraft/design/sketches/`. Keep the planning folder for retained downloads of that revision.
 - Plan-only Projects can still use `plan init`, `plan push` and `plan compile`. The accepted Plan format remains
-  `firstdraft.foundation-plan.sketch/0.23` and the CLI requires service API contract `>= 0.9.1` and `< 0.10.0` for the
-  Project-start and Sketch-review endpoints. Use CLI 0.10.0 with a service still on API contract 0.9.0.
+  `firstdraft.foundation-plan.sketch/0.23` and all CLI commands that check a service response require API contract
+  `>= 0.9.1` and `< 0.10.0`. Use CLI 0.10.0 with a service still on API contract 0.9.0.
 
 ## 0.10.0
 

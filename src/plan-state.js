@@ -28,6 +28,7 @@ const DEFAULT_FILE_SYSTEM = { lstatSync, readFileSync };
 
 export class PlanStateConfigurationError extends Error {}
 export class PlanStateLocalError extends Error {}
+export class PlanStateBusyError extends PlanStateLocalError {}
 export class PlanStateNotPushedError extends Error {}
 
 /**
@@ -480,12 +481,34 @@ function arraysEqual(left, right) {
   );
 }
 
-/** @param {string} directory @param {() => void} update */
-export function withPlanStateLock(directory, update) {
+/**
+ * Serialize hosted writes from capture through durable local receipt. A response
+ * can arrive after a later writer commits, even when the Plan digest repeats.
+ * @template T
+ * @param {string} directory @param {() => Promise<T>} update
+ */
+export async function withPlanStateLock(directory, update) {
+  assertLocalDirectory(directory, DEFAULT_FILE_SYSTEM);
   const lock = path.join(directory, "sketch-settle.lock");
-  writeFileSync(lock, String(process.pid) + "\n", { flag: "wx", mode: 0o600 });
   try {
-    update();
+    writeFileSync(lock, String(process.pid) + "\n", {
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (isFileSystemError(error) && error.code === "EEXIST")
+      throw new PlanStateBusyError(
+        "Another command is updating this Project. Retry when it finishes. If it stopped, check the PID in .firstdraft/sketch-settle.lock before removing the lock.",
+      );
+    if (isFileSystemError(error))
+      throw new PlanStateLocalError(
+        "Could not lock the local Project for writing.",
+        { cause: error },
+      );
+    throw error;
+  }
+  try {
+    return await update();
   } finally {
     unlinkSync(lock);
   }

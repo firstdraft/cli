@@ -141,6 +141,7 @@ import { storedTokenReader } from "./credentials.js";
 import { isFileSystemError } from "./file-system.js";
 import { createPlanCompileProgressReporter } from "./plan-compile-progress.js";
 import {
+  PlanStateBusyError,
   CompilationNotRecordedError,
   CompilationRecordWriteError,
   PlanStateNotPushedError,
@@ -3085,7 +3086,10 @@ async function runPlanPush({
     if (error instanceof PlanPushLocalError) {
       writeJson(stderr, {
         error: "local_input_unreadable",
-        detail: PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL,
+        detail:
+          error instanceof PlanStateBusyError
+            ? error.message
+            : PLAN_PUSH_LOCAL_INPUT_UNREADABLE_DETAIL,
       });
       return 1;
     }
@@ -3459,7 +3463,10 @@ function writePlanCompileError(writer, error) {
   if (error instanceof PlanPushLocalError) {
     writeJson(writer, {
       error: "local_input_unreadable",
-      detail: PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL,
+      detail:
+        error instanceof PlanStateBusyError
+          ? error.message
+          : PLAN_COMPILE_LOCAL_INPUT_UNREADABLE_DETAIL,
     });
     return 1;
   }

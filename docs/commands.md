@@ -3,7 +3,7 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.10.x` source line contains the auditable command shell, the agent's `start` check, browser and device
+The current `0.11.x` source line contains the auditable command shell, the agent's `start` check, browser and device
 login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, hosted Project creation and Sketch review, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize, retained-Compilation inspection and
@@ -48,7 +48,8 @@ inspection, resolution, deferral, and owner questions. It requires API contract 
 After the readiness check, run `firstdraft project start` in the app's planning folder. Give the owner the returned
 Project URL. Its private local UUID and origin are written before the request, so another start opens the same
 Project after a lost response. Run `firstdraft plan init --name "Awards Pool"` there to initialize the reserved
-Project's Plan. A normal Plan-only interview can still begin with `plan init`.
+Project's Plan. A Project opened this way requires a published and approved Sketch revision for Compile. To start a
+Plan-only interview, begin with `plan init` in a fresh folder.
 
 Write the ordered screen list to `sketches/board.json`. Paths are relative to `sketches/`. For example:
 
@@ -629,7 +630,8 @@ Success writes one JSON object to stdout containing the validated Project, Compi
 Root adoption additionally reports `root_adoption.design_path` (or `null` when no design directory was needed), its
 top-level moved-entry count, whether a Git repository was preserved, and whether its index was replaced.
 After final verification succeeds, the CLI removes its owned `.firstdraft-root-output` transaction directory.
-An absent output directory contains exactly the artifact files and modes. Root adoption additionally contains the
+An absent output directory contains the verified artifact files and modes. For a Sketch-linked Compilation, both
+output modes also receive the local sources under `.firstdraft/design/sketches/`. Root adoption contains the
 preserved `.firstdraft/design` archive and an existing root `.git`, when present. Verification skips only the
 archive and retained Git/transaction paths; it still checks every generated file, including
 `.firstdraft/submitted-foundation-plan.json` and `.firstdraft/gaps.json`, and rejects unexpected generated paths. The

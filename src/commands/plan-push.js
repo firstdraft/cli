@@ -98,15 +98,28 @@ export class PlanPushStateWriteError extends Error {
  * @param {PushPlanOptions} options
  * @returns {Promise<PushPlanResult | RejectedPushResult>}
  */
-export async function pushPlan({
-  cwd,
-  apiUrl,
-  fetchFunction = globalThis.fetch,
-  fileSystem = DEFAULT_FILE_SYSTEM,
-  createTemporaryId = randomUUID,
-  createRequestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-}) {
-  const state = readPlanState({ cwd, fileSystem });
+export async function pushPlan(options) {
+  const state = readPlanState(options);
+  if (state.reserved)
+    return withPlanStateLock(path.join(options.cwd, ".firstdraft"), () =>
+      pushCurrentPlan(options),
+    );
+  return pushCurrentPlan(options, state);
+}
+
+/** @param {PushPlanOptions} options @param {ReturnType<typeof readPlanState>} [initialState] @returns {Promise<PushPlanResult | RejectedPushResult>} */
+async function pushCurrentPlan(
+  {
+    cwd,
+    apiUrl,
+    fetchFunction = globalThis.fetch,
+    fileSystem = DEFAULT_FILE_SYSTEM,
+    createTemporaryId = randomUUID,
+    createRequestSignal = () => AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  },
+  initialState,
+) {
+  const state = initialState ?? readPlanState({ cwd, fileSystem });
   const directory = path.join(cwd, ".firstdraft");
   const planPath = path.join(directory, "foundation-plan.json");
   const statePath = path.join(directory, "state.json");
@@ -176,31 +189,14 @@ export async function pushPlan({
     );
   }
 
-  const recordAcceptance = () => {
-    saveState({
-      statePath,
-      state,
-      apiUrl: origin,
-      etag,
-      fileSystem,
-      temporaryId: createTemporaryId(),
-    });
-  };
-  if (state.reserved) {
-    try {
-      withPlanStateLock(directory, () => {
-        const latest = readPlanState({ cwd, fileSystem });
-        if (latest.foundation_plan_etag === state.foundation_plan_etag)
-          recordAcceptance();
-      });
-    } catch (error) {
-      if (!isFileSystemError(error)) throw error;
-      throw new PlanPushStateWriteError(
-        { ...state, api_url: origin, foundation_plan_etag: etag },
-        { cause: error },
-      );
-    }
-  } else recordAcceptance();
+  saveState({
+    statePath,
+    state,
+    apiUrl: origin,
+    etag,
+    fileSystem,
+    temporaryId: createTemporaryId(),
+  });
 
   return {
     status: response.status,

@@ -31,9 +31,19 @@ import { generateUuidV7 } from "../src/uuid-v7.js";
 const chromeTest = {
   skip:
     !process.env.FIRSTDRAFT_CHROME_PATH &&
-    !["/Applications/Google Chrome.app", "/opt/google/chrome/chrome"].some(
-      (file) => existsSync(file),
-    ),
+    ![
+      "/Applications/Google Chrome.app",
+      "/opt/google/chrome/chrome",
+      ...[
+        process.env.LOCALAPPDATA,
+        process.env.PROGRAMFILES,
+        process.env["PROGRAMFILES(X86)"],
+      ]
+        .filter((root) => root !== undefined)
+        .map((root) =>
+          path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+        ),
+    ].some((file) => existsSync(file)),
 };
 const apiUrl = "https://firstdraft.test";
 /** @param {import("node:test").TestContext} t */
@@ -157,6 +167,40 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
     ApiAuthenticationRequiredError,
   );
   assert(!existsSync(path.join(cwd, ".firstdraft", "sketch-pending.json")));
+  await assert.rejects(
+    publishSketches({
+      ...opts,
+      capture: async (_sources, plan) => ({
+        version: 1,
+        plan_sha256: digest(plan),
+        screens: [],
+      }),
+      fetchFunction: async () => {
+        throw Error("invalid review response lost");
+      },
+    }),
+  );
+  await assert.rejects(
+    publishSketches({
+      ...opts,
+      capture: async () => assert.fail("retry recaptured"),
+      fetchFunction: async () =>
+        Response.json(
+          {
+            title: "Invalid sketch review",
+            status: 422,
+            code: "invalid_sketch_review",
+            detail: "Unknown Plan reference",
+          },
+          {
+            status: 422,
+            headers: { "Content-Type": "application/problem+json" },
+          },
+        ),
+    }),
+    /declined/,
+  );
+  assert(!existsSync(path.join(cwd, ".firstdraft", "sketch-pending.json")));
   let sent = "";
   /** @type {typeof captureBoard} */
   const capture = async (_sources, plan) => ({
@@ -229,11 +273,16 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
     },
   });
   await inFlight;
-  const review = await publishSketches({
-    ...opts,
-    capture: async () => assert.fail("retry recaptured"),
-    fetchFunction: accepted,
-  });
+  await assert.rejects(
+    publishSketches({
+      ...opts,
+      capture: async () => assert.fail("busy retry recaptured"),
+      fetchFunction: async () => assert.fail("busy retry sent a request"),
+    }),
+    /Another command is updating/,
+  );
+  releaseDelayedResponse();
+  const review = await delayed;
   const files = reviewedSources(cwd, review.review.id);
   // Pilot checkouts have only the current receipt when upgraded.
   rmSync(
@@ -241,6 +290,10 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
   );
   assert(files?.files.has("theme.css"));
   assert.throws(() => reviewedSources(cwd, generateUuidV7()));
+  assert.throws(
+    () => reviewedSources(cwd, generateUuidV7(), true),
+    /Restore the local receipt/,
+  );
   writeFileSync(
     path.join(cwd, "sketches", "theme.css"),
     "body{color:darkgreen}",
@@ -314,8 +367,6 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
   assert(reviewedSources(cwd, review.review.id, true));
   assert.throws(() => reviewedSources(cwd, review.review.id));
   writeFileSync(theme, currentTheme);
-  releaseDelayedResponse();
-  await assert.rejects(delayed, /already advanced/);
   assert(reviewedSources(cwd, replacement.review.id));
   const planPath = path.join(cwd, ".firstdraft", "foundation-plan.json");
   const source = readFileSync(planPath);
@@ -326,18 +377,13 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
     capture,
     fetchFunction: async (input) => {
       writeFileSync(planPath, nextSource);
-      await pushPlan({
-        ...opts,
-        fetchFunction: async () =>
-          Response.json(
-            {
-              project: { id: original.project_id, graph_version: 2 },
-              foundation_plan: { format: "test", source_sha256: newHead },
-              diagnostics: [],
-            },
-            { headers: { etag: '"sha256:' + newHead + '"' } },
-          ),
-      });
+      await assert.rejects(
+        pushPlan({
+          ...opts,
+          fetchFunction: async () => assert.fail("busy push sent a request"),
+        }),
+        /Another command is updating/,
+      );
       return Response.json(
         {
           project: { id: original.project_id },
@@ -348,6 +394,34 @@ test("a reserved Project survives a lost start, Plan init and an ambiguous revie
           foundation_plan: { source_sha256: digest(source) },
         },
         { headers: { etag: '"sha256:' + digest(source) + '"' } },
+      );
+    },
+  });
+  assert.equal(
+    JSON.parse(readFileSync(stateFile, "utf8")).foundation_plan_etag,
+    '"sha256:' + digest(source) + '"',
+  );
+  await pushPlan({
+    ...opts,
+    fetchFunction: async () => {
+      await assert.rejects(
+        publishSketches({
+          ...opts,
+          capture,
+          fetchFunction: async () =>
+            assert.fail("busy publication sent a request"),
+          after: replacement.review.id,
+          head: newHead,
+        }),
+        /Another command is updating/,
+      );
+      return Response.json(
+        {
+          project: { id: original.project_id, graph_version: 2 },
+          foundation_plan: { format: "test", source_sha256: newHead },
+          diagnostics: [],
+        },
+        { headers: { etag: '"sha256:' + newHead + '"' } },
       );
     },
   });
