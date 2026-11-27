@@ -540,3 +540,28 @@ function temporaryDirectory(context) {
 function lstatDirectories(directory) {
   return new Set(readdirSync(directory).sort());
 }
+
+test("root adoption rolls back when selected source bytes changed", (context) => {
+  if (process.platform === "win32") return context.skip();
+  const cwd = temporaryDirectory(context);
+  mkdirSync(path.join(cwd, "sketches"));
+  const source = path.join(cwd, "sketches", "ballot.html");
+  writeFileSync(source, "edited");
+  const artifact = parseCompilationArtifact(
+    artifactFixture({ files: [fileFixture(".firstdraft/gaps.json", "{}")] })
+      .source,
+    EXPECTED,
+  );
+  const target = prepareCompilationOutputTarget({ cwd, output: "." });
+  assert.throws(
+    () =>
+      materializeCompilationArtifact(
+        artifact,
+        target,
+        new Map([["ballot.html", Buffer.from("approved")]]),
+      ),
+    { reason: "reviewed_sources_changed" },
+  );
+  assert.equal(readFileSync(source, "utf8"), "edited");
+  assert(!existsSync(path.join(cwd, ".firstdraft", "gaps.json")));
+});

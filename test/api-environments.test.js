@@ -18,6 +18,8 @@ const SAVED_PRODUCTION_TOKEN = "fd_canary-saved-production-token";
 const SAVED_STAGING_TOKEN = "fd_canary-saved-staging-token";
 const SAVED_CUSTOM_TOKEN = "fd_canary-saved-custom-token";
 const REMOTE_COMMANDS = [
+  ["project", "start"],
+  ["sketches", "publish"],
   ["plan", "push"],
   ["plan", "status"],
   ["plan", "compile", "--output", "application"],
@@ -407,11 +409,16 @@ function projectDirectory(context, origin) {
       project_id: PROJECT_ID,
       ...(origin
         ? {
+            reserved: true,
             api_url: origin,
             foundation_plan_etag: '"sha256:' + "1".repeat(64) + '"',
           }
         : {}),
     })}\n`,
+  );
+  writeFileSync(
+    path.join(cwd, ".firstdraft", "sketch-pending.json"),
+    JSON.stringify({ id: PROJECT_ID, body: "{}", files: {} }),
   );
   return cwd;
 }

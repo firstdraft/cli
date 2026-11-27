@@ -19,6 +19,20 @@ errors, or unvalidated response bodies. `local_state_not_saved` is the sole exce
 its `recovery_state` is required to repair the accepted ETag locally. Root-level and command-group usage failures
 remain human-readable text on standard error with exit 2. Unexpected programming defects remain loud.
 
+## Sketch review recovery
+
+When a screen capture fails, the detail gives its screen ID and viewport dimensions. Correct the indicated Plan
+binding, image, asset URL, or layout and publish again.
+
+`sketch_review_failed` describes a Project-start, capture, publication or reviewed-source problem. Retry an interrupted
+start from the same directory. A publish with an unknown outcome retains its exact request privately. Run the same
+publish command again to resolve it before sending later edits. If a process was killed while saving its local receipt and repeat attempts report an active publisher, check the PID in `.firstdraft/sketch-settle.lock`. Once that process has exited, remove the lock and retry. Correct a rejected draft and publish again. A definitive client rejection such as 400, 403 or 404 clears the pending request so the next publish captures edits. A fresh request refused at login or a rate limit is also cleared. A request timeout (408) retains the exact submission for replay. If an earlier attempt has an unknown outcome, a refusal before the service can look up that revision (including 401 or 429) retains the journal. Correct the access problem or wait for the limit, then rerun the same command. If local sources have since changed, a successful replay returns the recovered revision ID and a `next_step` prompting a fresh publish of the current draft.
+On a competing publication, inspect the current review and reconcile its changes locally. Use
+`firstdraft sketches publish --after <current-review-id> --head <current-head-sha256>` to publish against those
+specific identities. Use `none` for a missing review or Head. An interrupted rebased publication accepts the same two options on replay. Reopen the Project URL for another review before Compile. Restore missing approved source from
+the planning folder or review a reconstruction. When an older service lacks the hosted endpoint, use local HTML for
+the walkthrough until the service and CLI are matched.
+
 ## Environment and credential errors
 
 `invalid_configuration` stops before a request when `--staging` conflicts with `FIRSTDRAFT_API_URL` or a Project's
@@ -272,6 +286,7 @@ again. First Draft refuses to resolve an item that is still resolved, with `main
 
 | Commands                                                   | `error`                                                                                            | Exit | Meaning                                                                                                                      |
 | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---: | ---------------------------------------------------------------------------------------------------------------------------- |
+| Hosted Sketches commands and reviewed source handoff       | `sketch_review_failed`                                                                             |    1 | Repair the Project, capture, publication or source handoff ([recovery](#sketch-review-recovery)).                            |
 | Any leaf command                                           | `invalid_arguments`                                                                                |    2 | Syntax was invalid; no request was made.                                                                                     |
 | Network commands except `logout`                           | `update_required`, `api_contract_unsupported`                                                      |    1 | First Draft needs a newer plugin or CLI, or serves another API contract ([recovery](#update-and-limit-errors)).              |
 | Network commands except `logout`                           | `rate_limited`                                                                                     |    1 | First Draft refused a request at a limit; `retry_at` says when to try again.                                                 |
@@ -318,5 +333,5 @@ Root-output `invalid_output_path.reason` values are `destination_exists`, `root_
 `root_git_unavailable`, `root_git_unsupported`, `root_git_dirty`, `root_ignore_not_preserved`, and `root_busy`. Git
 refusing discovery, including a `safe.directory` refusal, is `root_git_unavailable`; a discovered but unsupported
 Git shape such as a submodule is `root_git_unsupported`. Root-output `materialization_failed.reason` values are
-`output_changed`, `root_artifact_collision`, `root_ignore_changed`, `root_transaction_failed`, and
+`output_changed`, `reviewed_sources_changed`, `root_artifact_collision`, `root_ignore_changed`, `root_transaction_failed`, and
 `root_rollback_incomplete`.

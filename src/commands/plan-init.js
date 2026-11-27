@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readPlanState } from "../plan-state.js";
 import path from "node:path";
 
 import {
@@ -37,6 +38,18 @@ export function initializePlan({
   const directory = path.join(cwd, ".firstdraft");
   const writeOptions = { flag: "wx", mode: 0o600, flush: true };
 
+  if (
+    fileSystem === DEFAULT_FILE_SYSTEM &&
+    existsSync(path.join(directory, "state.json")) &&
+    readPlanState({ cwd }).reserved
+  ) {
+    fileSystem.writeFileSync(
+      path.join(directory, "foundation-plan.json"),
+      plan,
+      writeOptions,
+    );
+    return;
+  }
   fileSystem.mkdirSync(directory, { recursive: false, mode: 0o700 });
   fileSystem.writeFileSync(
     path.join(directory, ".gitignore"),

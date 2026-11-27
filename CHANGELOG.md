@@ -9,6 +9,21 @@ carry no release status. The `v<version>` tag and npm show whether a version is 
 Entries start with the first version prepared after this file was added, and earlier versions have none. The
 repository's [tags](https://github.com/firstdraft/cli/tags) identify the source of each published version.
 
+## 0.10.1
+
+- Run `firstdraft project start` to get a hosted Project URL before writing the Plan. The command reserves the local
+  Project identity so retrying in the same directory reopens the same Project.
+- With Chrome installed, `firstdraft sketches publish` captures the screens listed in `sketches/board.json` at desktop
+  and phone widths and publishes them with the exact working Plan. An interrupted publish can replay its original
+  submission. After a conflicting edit, inspect the hosted review and use `--after` and `--head` to identify the
+  revision and Plan you reconciled.
+- After the owner approves a published revision, pass its ID to `firstdraft plan compile --revision <id>`. The CLI
+  verifies the working Plan and selected local sources and hands those sources to the generated application in
+  `.firstdraft/design/sketches/`. Keep the planning folder for retained downloads of that revision.
+- Plan-only Projects can still use `plan init`, `plan push` and `plan compile`. The accepted Plan format remains
+  `firstdraft.foundation-plan.sketch/0.23` and the CLI requires service API contract `>= 0.9.1` and `< 0.10.0` for the
+  Project-start and Sketch-review endpoints. Use CLI 0.10.0 with a service still on API contract 0.9.0.
+
 ## 0.10.0
 
 Lets First Draft tell a setup that it is out of date, and adds the account, report, note, `maintain`, and `start`

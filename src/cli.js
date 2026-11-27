@@ -94,6 +94,11 @@ import {
   resolveMaintenanceItem,
   showMaintenanceItem,
 } from "./commands/maintain.js";
+import {
+  startProject,
+  publishSketches,
+  SketchError,
+} from "./commands/sketches.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
   PlanPushConfigurationError,
@@ -173,6 +178,8 @@ Commands:
   maintain     List, inspect, and act on a deployed application's items
   note         Send a note about a problem with First Draft
   plan         Work with Foundation Plans
+  project      Start or reopen a hosted Project
+  sketches     Publish a board and its working Foundation Plan
   report       Send a progress or failure report to First Draft
   start        Check versions, login, and reports before other work
 
@@ -483,11 +490,13 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
   firstdraft plan compile
+  firstdraft plan compile --revision <approved-sketch-revision>
   firstdraft plan compile --output <absent-directory|.>
 
 Options:
       --staging                      Use staging; reject a different saved origin
       --output <absent-directory|.>  Materialize here (default: .)
+      --revision <approved-id>       Compile the approved Sketches revision
   -h, --help                         Show help
 
 Environment:
@@ -1157,6 +1166,23 @@ export async function run({
     });
   }
 
+  if (argv[0] === "project" || argv[0] === "sketches") {
+    return runSketchCommand({
+      argv,
+      stdout,
+      stderr,
+      cwd,
+      getCwd,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      fetchFunction,
+      credentials,
+      staging,
+      service,
+    });
+  }
+
   if (argv[0] === "generate") {
     return runGenerate({
       argv: argv.slice(1),
@@ -1689,6 +1715,13 @@ async function runCompilationDownload({
     writeJson(stdout, result);
     return 0;
   } catch (error) {
+    if (error instanceof SketchError) {
+      writeJson(stderr, {
+        error: "sketch_review_failed",
+        detail: error.message,
+      });
+      return 1;
+    }
     const readStatus = writeCompilationReadError(stderr, error, false);
     if (readStatus !== null) return readStatus;
 
@@ -3320,6 +3353,7 @@ async function runPlanCompile({
       options: {
         staging: { type: "boolean" },
         output: { type: "string" },
+        revision: { type: "string" },
         help: { type: "boolean", short: "h" },
       },
       allowPositionals: false,
@@ -3342,7 +3376,10 @@ async function runPlanCompile({
   }
 
   const { output } = parsed.values;
-  if (output === "") {
+  if (
+    output === "" ||
+    (parsed.values.revision !== undefined && !isUuidV7(parsed.values.revision))
+  ) {
     writeJson(stderr, {
       error: "invalid_arguments",
       detail: PLAN_COMPILE_INVALID_ARGUMENTS_DETAIL,
@@ -3373,6 +3410,7 @@ async function runPlanCompile({
       compilePlanToDirectory({
         cwd,
         output: output ?? ".",
+        revision: parsed.values.revision,
         apiUrl: authentication.apiUrl,
         fetchFunction: authentication.fetchFunction,
         fileSystem: planPushFileSystem,
@@ -3398,6 +3436,10 @@ async function runPlanCompile({
 
 /** @param {Writer} writer @param {unknown} error */
 function writePlanCompileError(writer, error) {
+  if (error instanceof SketchError) {
+    writeJson(writer, { error: "sketch_review_failed", detail: error.message });
+    return 1;
+  }
   const stopStatus = writeServiceStop(writer, error);
   if (stopStatus !== null) return stopStatus;
 
@@ -3825,7 +3867,8 @@ function runPlanInit({
       fileSystem,
     });
   } catch (error) {
-    if (!isFileSystemError(error)) throw error;
+    if (!isFileSystemError(error) && !(error instanceof PlanPushLocalError))
+      throw error;
 
     writeJson(stderr, {
       error: "local_initialization_failed",
@@ -5058,4 +5101,140 @@ function safeDiagnosticSubject(value) {
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runSketchCommand({
+  argv,
+  stdout,
+  stderr,
+  cwd,
+  getCwd,
+  apiUrl,
+  apiToken,
+  stagingApiToken,
+  fetchFunction,
+  credentials,
+  staging,
+  service,
+}) {
+  const start = argv[0] === "project";
+  const subcommand = start ? "start" : "publish";
+  const group = start ? "project" : "sketches";
+  const command = `firstdraft ${group} ${subcommand}`;
+  const help = `Usage: ${command} [--staging]${start ? "" : " [--after <revision> --head <sha256>]"}\n${start ? "Create or reopen this directory's hosted Project before drafting its Plan." : "Capture sketches/board.json and publish its screens with the local Foundation Plan."}\n`;
+  if (argv[1] !== subcommand)
+    return runCommandGroup(
+      { argv: argv.slice(1), stdout, stderr },
+      group,
+      help,
+    );
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: argv.slice(2),
+      options: {
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+        ...(!start
+          ? {
+              after: { type: /** @type {const} */ ("string") },
+              head: { type: /** @type {const} */ ("string") },
+            }
+          : {}),
+      },
+      allowPositionals: false,
+      tokens: true,
+      strict: true,
+    }),
+  );
+  if (
+    !parsed ||
+    repeatedValueOption(parsed.tokens) ||
+    ((parsed.values.after !== undefined || parsed.values.head !== undefined) &&
+      (start ||
+        (parsed.values.after !== "none" && !isUuidV7(parsed.values.after)) ||
+        typeof parsed.values.head !== "string" ||
+        (parsed.values.head !== "none" &&
+          !/^[a-f0-9]{64}$/.test(parsed.values.head))))
+  ) {
+    writeJson(stderr, {
+      error: "invalid_arguments",
+      detail: `Invalid arguments. Run '${command} --help' for usage.`,
+    });
+    return 2;
+  }
+  if (parsed.values.help) {
+    stdout.write(help);
+    return 0;
+  }
+  try {
+    const auth = authenticateApiCommand({
+      fetchFunction: service.fetch(fetchFunction),
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging: staging || parsed.values.staging,
+      readStoredTokens: storedTokenReader(credentials),
+    });
+    if (!auth) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+    const result = await service.settle(
+      start
+        ? startProject({ cwd: cwd ?? getCwd(), ...auth })
+        : publishSketches({
+            cwd: cwd ?? getCwd(),
+            ...auth,
+            after: parsed.values.after,
+            head: parsed.values.head,
+          }),
+    );
+    writeJson(stdout, result);
+    return 0;
+  } catch (error) {
+    const stop = writeServiceStop(stderr, error);
+    if (stop !== null) return stop;
+    if (error instanceof ApiAuthenticationRequiredError) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+    if (error instanceof SketchError && error.status === 401) {
+      writeAuthenticationRequired(stderr, 401);
+      return 1;
+    }
+    if (error instanceof PlanPushConfigurationError) {
+      writeJson(stderr, {
+        error: "invalid_configuration",
+        detail: error.message,
+      });
+      return 2;
+    }
+    if (error instanceof SyntaxError) {
+      writeJson(stderr, {
+        error: "sketch_review_failed",
+        detail: "A local review or Plan file contains invalid JSON.",
+      });
+      return 1;
+    }
+    if (
+      error instanceof SketchError ||
+      error instanceof PlanPushLocalError ||
+      error instanceof PlanPushNetworkError ||
+      error instanceof PlanPushProtocolError ||
+      isFileSystemError(error)
+    ) {
+      writeJson(stderr, {
+        error: "sketch_review_failed",
+        detail: isFileSystemError(error)
+          ? "Could not read or save the local sketch files. Check the planning directory and retry."
+          : error.message,
+        ...(error instanceof SketchError && error.status
+          ? { status: error.status, response: error.response }
+          : {}),
+      });
+      return 1;
+    }
+    throw error;
+  }
 }

@@ -19,7 +19,7 @@ is the Codespaces fallback.
 - direct Compile-and-materialize;
 - retained Compilation inspection, cancellation, and artifact download;
 - terminal output, exit status, and recovery contracts;
-- the dependency-free npm package; and
+- the npm package with local Chrome capture for Sketches; and
 - package provenance and publication.
 
 The Service owns Foundation Plan meaning and server-side lifecycle. Skills own the agent conversation. This
@@ -95,7 +95,7 @@ The published package:
 
 - installs the firstdraft executable;
 - runs reviewed JavaScript source directly;
-- has no runtime dependencies or install scripts;
+- uses Playwright Core for local Sketches capture and has no install scripts;
 - sends nothing in the background or beyond the command the caller runs. [What the CLI sends](docs/commands.md#what-the-cli-sends)
   lists each command's requests and their `FirstDraft-Client` header: CLI and plugin versions, agent, and operating
   system. `report` and `note` read the account first and, only with reports on, print their exact body and then send it;

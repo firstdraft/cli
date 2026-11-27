@@ -1,5 +1,5 @@
 import { ApiAuthenticationRequiredError } from "./api-authentication.js";
-import { PlanStateConfigurationError } from "./plan-state.js";
+import { isUuidV7, PlanStateConfigurationError } from "./plan-state.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
@@ -27,6 +27,11 @@ export class FirstDraftProtocolError extends Error {
  * has one row for each, and test/service-endpoints.test.js compares the two.
  */
 export const SERVICE_ROUTES = {
+  startProject: { method: "PUT", path: "/v1/projects/{project_id}" },
+  publishSketches: {
+    method: "PUT",
+    path: "/v1/projects/{project_id}/sketch-reviews/{revision_id}",
+  },
   pushPlan: {
     method: "PUT",
     path: "/v1/projects/{project_id}/foundation-plan",
@@ -190,6 +195,60 @@ export function isProblemBody(response, body) {
     typeof body.code === "string" &&
     typeof body.detail === "string"
   );
+}
+
+/** @param {Response} response @param {unknown} body */
+export function reviewConflict(response, body) {
+  if (
+    responseMediaType(response) !== "application/problem+json" ||
+    !isRecord(body) ||
+    body.status !== response.status ||
+    typeof body.detail !== "string"
+  )
+    return null;
+  if (!(
+    (body.code === "sketch_review_changed" && body.status === 412) ||
+    (body.code === "sketch_review_conflict" && body.status === 409)
+  ))
+    return null;
+  const review = body.current_review;
+  const head = body.head_sha256;
+  if (
+    head !== null &&
+    (typeof head !== "string" || !/^[a-f0-9]{64}$/.test(head))
+  )
+    return null;
+  if (
+    review !== null &&
+    !(
+      isRecord(review) &&
+      isUuidV7(review.id) &&
+      typeof review.plan_sha256 === "string" &&
+      /^[a-f0-9]{64}$/.test(review.plan_sha256)
+    )
+  )
+    return null;
+  return {
+    ...(validGraphVersion(body.head_graph_version)
+      ? { head_graph_version: body.head_graph_version }
+      : {}),
+    code: body.code,
+    status: body.status,
+    detail: body.detail,
+    current_review: review && {
+      ...(validGraphVersion(review.graph_version)
+        ? { graph_version: review.graph_version }
+        : {}),
+      id: review.id,
+      plan_sha256: review.plan_sha256,
+    },
+    head_sha256: head,
+  };
+}
+
+/** @param {unknown} value @returns {value is number} */
+function validGraphVersion(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 /**

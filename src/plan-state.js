@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  unlinkSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { isFileSystemError } from "./file-system.js";
@@ -53,7 +59,7 @@ export function readPlanState({ cwd, fileSystem = DEFAULT_FILE_SYSTEM }) {
 export function readPinnedProject({ cwd, fileSystem }) {
   const projectDirectory = pinnedProjectDirectory(cwd, fileSystem);
   const state = readPlanState({ cwd: projectDirectory, fileSystem });
-  if (state.api_url === undefined) {
+  if (state.api_url === undefined || state.foundation_plan_etag === undefined) {
     throw new PlanStateNotPushedError(
       "The local Foundation Plan has not been pushed.",
     );
@@ -331,7 +337,11 @@ export function isUuidV7(value) {
  * @param {number} maximumBytes
  * @param {PlanStateFileSystem} fileSystem
  */
-export function readLocalFile(filePath, maximumBytes, fileSystem) {
+export function readLocalFile(
+  filePath,
+  maximumBytes,
+  fileSystem = DEFAULT_FILE_SYSTEM,
+) {
   try {
     const stat = fileSystem.lstatSync(filePath);
     if (!stat.isFile() || stat.size > maximumBytes) {
@@ -402,9 +412,15 @@ function parsePlanState(source) {
   const keys = Object.keys(state).sort();
   const hasRemoteState =
     state.api_url !== undefined || state.foundation_plan_etag !== undefined;
-  const expectedKeys = hasRemoteState
-    ? ["api_url", "format", "foundation_plan_etag", "project_id"]
-    : ["format", "project_id"];
+  const expectedKeys = ["format", "project_id"];
+  if (hasRemoteState) expectedKeys.push("api_url");
+  if (
+    hasRemoteState &&
+    (state.reserved !== true || state.foundation_plan_etag !== undefined)
+  )
+    expectedKeys.push("foundation_plan_etag");
+  if (state.reserved === true) expectedKeys.push("reserved");
+  expectedKeys.sort();
   let storedApiUrl;
 
   if (typeof state.api_url === "string") {
@@ -420,6 +436,7 @@ function parsePlanState(source) {
   }
 
   if (
+    (state.reserved === true && !storedApiUrl) ||
     !arraysEqual(keys, expectedKeys) ||
     state.format !== STATE_FORMAT ||
     !isUuidV7(state.project_id) ||
@@ -431,6 +448,7 @@ function parsePlanState(source) {
   }
 
   return {
+    ...(state.reserved === true ? { reserved: true } : {}),
     format: state.format,
     project_id: state.project_id,
     ...(storedApiUrl ? { api_url: storedApiUrl } : {}),
@@ -460,4 +478,15 @@ function arraysEqual(left, right) {
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
+}
+
+/** @param {string} directory @param {() => void} update */
+export function withPlanStateLock(directory, update) {
+  const lock = path.join(directory, "sketch-settle.lock");
+  writeFileSync(lock, String(process.pid) + "\n", { flag: "wx", mode: 0o600 });
+  try {
+    update();
+  } finally {
+    unlinkSync(lock);
+  }
 }

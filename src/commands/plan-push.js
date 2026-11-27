@@ -20,6 +20,7 @@ import {
   normalizeApiUrl,
   readLocalFile,
   readPlanState,
+  withPlanStateLock,
 } from "../plan-state.js";
 
 export {
@@ -115,6 +116,7 @@ export async function pushPlan({
     project_id: state.project_id,
   });
   const headers = {
+    ...(state.reserved ? { "FirstDraft-Require-Project": "true" } : {}),
     Accept: "application/json, application/problem+json",
     "Content-Type": FOUNDATION_PLAN_MEDIA_TYPE,
     ...(state.foundation_plan_etag
@@ -174,14 +176,31 @@ export async function pushPlan({
     );
   }
 
-  saveState({
-    statePath,
-    state,
-    apiUrl: origin,
-    etag,
-    fileSystem,
-    temporaryId: createTemporaryId(),
-  });
+  const recordAcceptance = () => {
+    saveState({
+      statePath,
+      state,
+      apiUrl: origin,
+      etag,
+      fileSystem,
+      temporaryId: createTemporaryId(),
+    });
+  };
+  if (state.reserved) {
+    try {
+      withPlanStateLock(directory, () => {
+        const latest = readPlanState({ cwd, fileSystem });
+        if (latest.foundation_plan_etag === state.foundation_plan_etag)
+          recordAcceptance();
+      });
+    } catch (error) {
+      if (!isFileSystemError(error)) throw error;
+      throw new PlanPushStateWriteError(
+        { ...state, api_url: origin, foundation_plan_etag: etag },
+        { cause: error },
+      );
+    }
+  } else recordAcceptance();
 
   return {
     status: response.status,
@@ -192,7 +211,7 @@ export async function pushPlan({
 }
 
 /** @param {string | undefined} configured @param {string | undefined} stored */
-function resolveApiUrl(configured, stored) {
+export function resolveApiUrl(configured, stored) {
   const configuredOrigin =
     configured === undefined ? undefined : normalizeApiUrl(configured);
   if (
@@ -226,8 +245,7 @@ function saveState({
   temporaryId,
 }) {
   const recoveryState = {
-    format: state.format,
-    project_id: state.project_id,
+    ...state,
     api_url: apiUrl,
     foundation_plan_etag: etag,
   };

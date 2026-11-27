@@ -268,12 +268,13 @@ export function releaseRootOutput(target) {
  * @param {object} callbacks
  * @param {(root: string) => void} callbacks.writeArtifact
  * @param {(root: string, ignoredPaths?: Set<string>) => void} callbacks.verifyArtifact
+ * @param {(designDirectory: string) => void} [callbacks.verifyDesign]
  * @param {(from: string, to: string) => void} [callbacks.rename]
  */
 export function materializeRootOutput(
   target,
   artifact,
-  { writeArtifact, verifyArtifact, rename = renameSync },
+  { writeArtifact, verifyArtifact, verifyDesign, rename = renameSync },
 ) {
   assertOwnedTransaction(target);
   const artifactStage = path.join(target.transactionPath, ARTIFACT_STAGE_NAME);
@@ -289,6 +290,7 @@ export function materializeRootOutput(
     recheckRootSnapshot(target);
     performRootTransaction(target, artifact.files, rename);
     verifyRootResult(target, artifact.files, verifyArtifact);
+    verifyDesign?.(path.join(target.path, ROOT_DESIGN_PATH));
 
     target.journal.phase = "complete";
     target.journal.pending = null;

@@ -44,11 +44,13 @@ const PLAN_COMPILE_HELP = `First Draft CLI
 
 Usage:
   firstdraft plan compile
+  firstdraft plan compile --revision <approved-sketch-revision>
   firstdraft plan compile --output <absent-directory|.>
 
 Options:
       --staging                      Use staging; reject a different saved origin
       --output <absent-directory|.>  Materialize here (default: .)
+      --revision <approved-id>       Compile the approved Sketches revision
   -h, --help                         Show help
 
 Environment:
@@ -1433,4 +1435,88 @@ async function listen(context, server) {
 /** @param {Buffer} value */
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+for (const outputName of [".", "application"]) {
+  test(`Compile pins the reviewed pair and preserves its selected source in ${outputName}`, async (context) => {
+    if (process.platform === "win32" && outputName === ".")
+      return context.skip();
+    const cwd = localDirectory(context, PLAN_SOURCE, {
+      api_url: "https://api.example.test",
+      foundation_plan_etag: ETAG,
+      reserved: true,
+    });
+    const revision = "01900000-0000-7000-8000-000000002011";
+    const sketches = path.join(cwd, "sketches");
+    mkdirSync(sketches);
+    const sources = {
+      "ballot.html":
+        "<link rel='stylesheet' href='theme.css'><button>Submit</button>",
+      "theme.css": "button{color:purple}",
+      "board.json": JSON.stringify({
+        assets: ["theme.css"],
+        screens: [{ id: "ballot", name: "Ballot", source: "ballot.html" }],
+      }),
+    };
+    for (const [name, source] of Object.entries(sources))
+      writeFileSync(path.join(sketches, name), source);
+    writeFileSync(
+      path.join(cwd, ".firstdraft", "sketch-review.json"),
+      JSON.stringify({
+        id: revision,
+        plan_sha256: HEAD_SHA256,
+        files: Object.fromEntries(
+          Object.entries(sources).map(([name, source]) => [
+            name,
+            sha256(Buffer.from(source)),
+          ]),
+        ),
+      }),
+    );
+    const artifact = directArtifactFixture(true);
+    /** @type {{input:string|URL|Request,init:RequestInit}[]} */
+    const calls = [];
+    const selectedCompilation = directCompilationBody("succeeded", artifact);
+    const linkedCompilation = {
+      ...selectedCompilation,
+      compilation: {
+        ...selectedCompilation.compilation,
+        sketch_revision_id: revision,
+      },
+    };
+    const responses = [
+      jsonResponse(analysisBody("valid")),
+      jsonResponse(linkedCompilation, 202, {
+        Location: directCompilationPath(),
+      }),
+      new Response(artifact.source, {
+        headers: {
+          "Content-Type": ARTIFACT_MEDIA_TYPE,
+          "Content-Length": String(artifact.source.byteLength),
+          "Cache-Control": "no-store, no-transform",
+          etag: '"sha256:' + artifact.sha256 + '"',
+        },
+      }),
+    ];
+    const result = await invoke(
+      ["plan", "compile", "--revision", revision, "--output", outputName],
+      { cwd, fetchFunction: sequenceFetch(responses, calls) },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      calls.map((call) => call.init.method),
+      ["GET", "POST", "GET"],
+    );
+    const headers = new Headers(calls[1]?.init.headers);
+    assert.equal(headers.get("FirstDraft-Sketch-Revision"), revision);
+    assert.equal(headers.get("If-Match"), ETAG);
+    for (const [name, source] of Object.entries(sources))
+      assert.equal(
+        readFileSync(
+          path.join(cwd, outputName, ".firstdraft", "design", "sketches", name),
+          "utf8",
+        ),
+        source,
+      );
+  });
 }
