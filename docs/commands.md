@@ -403,10 +403,9 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11` and a
-client-generated Project ID under `.firstdraft/`. A nested ignore file keeps that local scratch area out of Git
-without changing the project's own `.gitignore`. Initialization makes no network request and refuses to replace an
-existing `.firstdraft` path.
+This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11`. In a fresh
+folder it creates the Project ID and an ignored `.firstdraft/` directory. In a folder reserved by `project start`,
+it writes the Plan for the existing Project ID and origin. Initialization runs locally and preserves any existing Plan.
 
 Provide either `--name`, `--application-key`, or both. Name-only initialization derives a lower-snake key. Key-only
 initialization derives a humanized display name. Supplying both preserves both values exactly after validating them
@@ -1059,11 +1058,11 @@ repository.
 
 ### Head and its ETag
 
-The Head is the exact Foundation Plan bytes that First Draft holds for a Project. The latest accepted
-`PUT /v1/projects/{project_id}/foundation-plan` sets it. The Service stores those bytes unchanged. A byte change that
+The Head is the exact Foundation Plan bytes that First Draft holds for a Project. A successful Plan push or new Sketch
+publication sets the Head to its submitted Plan. The Service stores those bytes unchanged. A byte change that
 keeps the Plan's meaning still makes a new Head, although the Project's `graph_version` stays the same.
 
-A successful Plan `PUT` returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
+A successful Plan push or Sketch publication returns a strong `ETag` of the form `"sha256:<hex>"`, quotes included. `<hex>` is the
 64-character lowercase SHA-256 of the Head bytes. The CLI saves the complete header value in `.firstdraft/state.json`
 and replays it in `If-Match`. `plan compile` also extracts `<hex>` to check that the local Plan still matches the
 Head before it starts a Compilation. A saved ETag in any other form stops that check with

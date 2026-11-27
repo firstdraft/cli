@@ -35,6 +35,12 @@ access or correct the service configuration and retry. A verified conflict, acti
 quota, invalid review or Plan diagnostics after the revision check clears a refused replay. If local sources have
 changed, a successful replay returns the recovered revision ID and a `next_step` to publish the current draft.
 
+If replay keeps timing out or returning a server error, keep the planning folder and its pending request intact.
+Reopen the Project URL to inspect the hosted board and continue the walkthrough using local HTML. To continue
+publishing before the original submission can be resolved, start a separate Project with `project start` in a new
+folder. Copy only the working Plan and `sketches/` there. Publish, share the new Project URL and obtain approval
+for its new revision. The original Project and pending request remain available for recovery.
+
 Hosted Plan pushes, Sketch publications and root adoption reserve the planning folder while they run. Wait for the
 active command to finish and retry. After a killed hosted writer, check the PID in
 `.firstdraft-root-output/hosted-writer.pid`. Once the process has exited, remove that file and the empty directory.
