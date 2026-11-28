@@ -293,13 +293,13 @@ test("a stop that did not cut the command short keeps its result and names the s
 });
 
 test("the CLI accepts only its declared API contract range", async () => {
-  assert.deepEqual(API_CONTRACT_RANGE, [">= 0.9.1", "< 0.10.0"]);
+  assert.deepEqual(API_CONTRACT_RANGE, [">= 0.10.0", "< 0.11.0"]);
 
   for (const contract of [
-    "0.9.1",
-    "0.9.7",
-    "  0.9.1 ",
-    "0.9.2+build.7",
+    "0.10.0",
+    "0.10.7",
+    "  0.10.0 ",
+    "0.10.2+build.7",
     "unknown",
     "0.10",
   ]) {
@@ -315,15 +315,15 @@ test("the CLI accepts only its declared API contract range", async () => {
   }
 
   for (const [contract, kind] of /** @type {[string, string][]} */ ([
-    ["0.10.0", "newer"],
-    ["0.10.0+build.7", "newer"],
-    ["0.10.0-rc.1", "newer"],
+    ["0.11.0", "newer"],
+    ["0.11.0+build.7", "newer"],
+    ["0.11.0-rc.1", "newer"],
     ["1.0.0", "newer"],
     ["0.8.1", "older"],
     ["0.9.0-rc.1", "older"],
-    ["0.9.0", "older"],
-    ["0.9.1-rc.1", "older"],
-    ["0.9.2-rc.1", "prerelease"],
+    ["0.9.1", "older"],
+    ["0.10.0-rc.1", "older"],
+    ["0.10.2-rc.1", "prerelease"],
   ])) {
     const session = createServiceSession({ env: {}, notify: () => undefined });
     const request = session.fetch(async () => versionedResponse({ contract }));
@@ -433,7 +433,7 @@ test("a 429 reports the limit even when the response also requires an update", a
 test("the stop line for an older or prerelease contract does not advise updating", async () => {
   for (const [contract, sentence] of /** @type {[string, string][]} */ ([
     ["0.8.7", "serves API contract 0.8.7, which is older than"],
-    ["0.9.2-rc.1", "serves prerelease API contract 0.9.2-rc.1, which"],
+    ["0.10.2-rc.1", "serves prerelease API contract 0.10.2-rc.1, which"],
   ])) {
     /** @type {string[]} */
     const lines = [];
@@ -650,15 +650,15 @@ test("a Service outside the API contract range is refused with both versions", a
   const cwd = await initializedProject(context);
   const result = await invoke(["plan", "compile", "--output", "application"], {
     cwd,
-    fetchFunction: async () => acceptedPush(cwd, { contract: "0.10.0" }),
+    fetchFunction: async () => acceptedPush(cwd, { contract: "0.11.0" }),
   });
 
   assert.equal(result.status, 1);
   assert.deepEqual(errorEnvelope(result.stderr), {
     error: "api_contract_unsupported",
-    detail: `First Draft at ${ORIGIN} serves API contract 0.10.0, which is newer than CLI ${VERSION} accepts. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then run the same command again, with the same options.`,
-    api_contract: "0.10.0",
-    accepted_api_contract: [">= 0.9.1", "< 0.10.0"],
+    detail: `First Draft at ${ORIGIN} serves API contract 0.11.0, which is newer than CLI ${VERSION} accepts. The CLI stopped before the command finished and sent nothing more. Tell the person to update with the steps at ${UPDATE_URL}, then run the same command again, with the same options.`,
+    api_contract: "0.11.0",
+    accepted_api_contract: [">= 0.10.0", "< 0.11.0"],
     cli_version: VERSION,
     update_url: UPDATE_URL,
   });
@@ -765,7 +765,7 @@ function acceptedPush(cwd, versions) {
     JSON.stringify({
       project: { id: PROJECT_ID, graph_version: 1 },
       foundation_plan: {
-        format: "firstdraft.foundation-plan.sketch/0.23",
+        format: "firstdraft.foundation-plan.sketch/0.24",
         source_sha256: createHash("sha256").update(source).digest("hex"),
       },
       diagnostics: [],

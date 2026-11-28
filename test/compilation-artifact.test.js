@@ -37,7 +37,7 @@ const SUBJECT_ID = "01900000-0000-7000-8000-000000000804";
 const HEAD_SHA256 = "1".repeat(64);
 const FOUNDATION_PLAN_SHA256 = "5".repeat(64);
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/compiler-application-2026-11-27-project-setup";
 const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const EXPECTED = {
   projectId: PROJECT_ID,
@@ -281,7 +281,7 @@ test("pins external provenance identities and validates nested metadata", () => 
         analysis: {
           id: "01900000-0000-7000-8000-000000000899",
           release:
-            "foundation-plan-rails/application-2026-09-27-bookmark-assets",
+            "foundation-plan-rails/application-2026-11-25-application-mail",
         },
       },
     }),
@@ -487,7 +487,7 @@ function artifactFixture(changes = {}) {
     },
     analysis: {
       id: ANALYSIS_ID,
-      release: "foundation-plan-rails/application-2026-09-27-bookmark-assets",
+      release: "foundation-plan-rails/application-2026-11-25-application-mail",
     },
     compiler_release: COMPILER_RELEASE,
     target: TARGET,

@@ -50,6 +50,7 @@ if (result.status !== 0) {
     "src/commands/plan-compile.js",
     "src/commands/plan-init.js",
     "src/commands/plan-push.js",
+    "src/commands/plan-setup.js",
     "src/commands/plan-status.js",
     "src/commands/report.js",
     "src/commands/sketches.js",

@@ -251,6 +251,15 @@ try {
     detail: "Invalid arguments. Run 'firstdraft plan status --help' for usage.",
   });
 
+  const invalidSetup = spawnPackedCli(
+    ["plan", "setup", "--revision", "invalid"],
+    installationDirectory,
+  );
+  assertHandledFailure(invalidSetup, 2, {
+    error: "invalid_arguments",
+    detail: "Invalid arguments. Run 'firstdraft plan setup --help' for usage.",
+  });
+
   const localStatus = spawnPackedCli(["plan", "status"], installationDirectory);
   assertHandledFailure(localStatus, 1, {
     error: "local_input_unreadable",
@@ -596,9 +605,9 @@ async function exercisePackedCompilation(projectDirectory) {
   const statusPath = `/v1/projects/${projectId}/compilations/${compilationId}`;
   const artifactPath = `${statusPath}/artifact`;
   const analyzerRelease =
-    "foundation-plan-rails/application-2026-09-27-bookmark-assets";
+    "foundation-plan-rails/application-2026-11-25-application-mail";
   const compilerRelease =
-    "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+    "foundation-plan-rails/compiler-application-2026-11-27-project-setup";
   const target = { id: "rails", profile: RAILS_TARGET_PROFILE };
   const gapSet = {
     format: "firstdraft.foundation-gaps/2",
@@ -660,7 +669,7 @@ async function exercisePackedCompilation(projectDirectory) {
         analysis: {
           id: analysisId,
           release:
-            "foundation-plan-rails/application-2026-09-27-bookmark-assets",
+            "foundation-plan-rails/application-2026-11-25-application-mail",
         },
         compiler_release: compilerRelease,
         target,

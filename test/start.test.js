@@ -296,7 +296,7 @@ test("below the minimum, start gives the handled refusal instead of ready", asyn
 });
 
 test("an API contract outside the accepted range is not ready", async (context) => {
-  for (const contract of ["0.8.0", "0.10.0"]) {
+  for (const contract of ["0.9.1", "0.11.0"]) {
     const result = await invoke(context, ["start"], {
       saved: { [PRODUCTION]: SAVED_TOKEN },
       fetchFunction: async () =>
@@ -433,7 +433,7 @@ test("a version refusal wins over a failed account read", async (context) => {
           status: 200,
           headers: {
             "Content-Type": "application/json",
-            "FirstDraft-API-Contract": "0.10.0",
+            "FirstDraft-API-Contract": "0.11.0",
           },
         }),
       "api_contract_unsupported",
@@ -516,7 +516,7 @@ function account(reports, headers = {}) {
       status: 200,
       headers: {
         "Content-Type": "application/json",
-        "FirstDraft-API-Contract": "0.9.1",
+        "FirstDraft-API-Contract": "0.10.0",
         ...headers,
       },
     },

@@ -22,6 +22,7 @@ const REMOTE_COMMANDS = [
   ["sketches", "publish"],
   ["plan", "push"],
   ["plan", "status"],
+  ["plan", "setup"],
   ["plan", "compile", "--output", "application"],
   ["compilation", "status", COMPILATION_ID],
   ["compilation", "download", COMPILATION_ID, "--output", "application"],
