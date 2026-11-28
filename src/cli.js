@@ -3270,7 +3270,10 @@ async function runPlanSetup(options) {
       error instanceof PlanPushProtocolError
     ) {
       writeJson(stderr, {
-        error: "plan_setup_unavailable",
+        error:
+          error instanceof PlanPushProtocolError
+            ? "invalid_server_response"
+            : "plan_setup_unavailable",
         detail: error.message,
         status: error.status,
       });

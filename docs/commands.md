@@ -469,7 +469,10 @@ from the Plan digest or trusts an ETag from a response it could not fully verify
 
 ## Read the reviewed Plan's setup steps
 
-After publishing, ask First Draft for the list the owner can reopen on the Project page.
+After publishing, use `firstdraft plan status --wait` to check the new Plan's analysis and digest. Once its
+analysis is valid, ask First Draft for the list the owner can reopen on the Project page. An earlier read shows
+the needs declared in the Plan. The completed analysis can remove a provider step or identify an iPhone client
+that needs a Plan change before Compile.
 
 ```sh
 firstdraft plan setup
@@ -1018,10 +1021,11 @@ contract exactly, including its Project ID, Environment name, and item ID. See
 
 ## Service endpoints
 
-The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands and the `maintain` index read it, and every other
-`/v1` request goes, to the origin pinned for the Project, or, for a maintain command or a `deployed_error` without
-planning state, the origin selected as for `login`. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
+The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential.
+`account` and `start` read `/v1/account` at the origin selected as for `login`. The report and note commands,
+the `maintain` index and other Project requests use the Project's pinned origin. In an application clone without
+planning state, `plan setup`, maintenance commands and `deployed_error` use the origin selected as for `login`.
+The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and

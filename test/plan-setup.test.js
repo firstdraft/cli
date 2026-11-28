@@ -123,9 +123,32 @@ test("a mismatched review or an unexpected step field cannot reach the walkthrou
     );
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
-    assert.equal(JSON.parse(result.stderr).error, "plan_setup_unavailable");
+    assert.equal(JSON.parse(result.stderr).error, "invalid_server_response");
     assert.doesNotMatch(result.stderr, /test-secret-unexpected/);
   }
+});
+
+test("a missing review reports the service problem so the owner can recover that review", async (t) => {
+  const problem = {
+    title: "Not Found",
+    status: 404,
+    code: "setup_not_found",
+    detail: "This Project has no Plan at the requested review.",
+  };
+  const result = await invoke(
+    application(t),
+    ["--revision", revision],
+    async () =>
+      Response.json(problem, {
+        status: 404,
+        headers: { "Content-Type": "application/problem+json" },
+      }),
+  );
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  const failure = JSON.parse(result.stderr);
+  assert.equal(failure.error, "plan_setup_unavailable");
+  assert.equal(failure.response.code, "setup_not_found");
 });
 
 test("help and invalid flags work before opening a Project or sending a request", async (t) => {
