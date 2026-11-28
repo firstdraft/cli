@@ -11,7 +11,7 @@ repository's [tags](https://github.com/firstdraft/cli/tags) identify the source 
 
 ## 0.12.0
 
-- Run `firstdraft plan setup` after the published Plan's analysis completes to read its setup steps and get the
+- Run `firstdraft plan setup` once the published Plan's analysis is valid to read its setup steps and get the
   corresponding Project link. Use `--revision <id>` for a particular Sketches review. Workshop participants
   can add `--workshop` for the Revyl iPhone preview.
 - This CLI creates Plans and accepts Compilations in format `firstdraft.foundation-plan.sketch/0.24`. It requires

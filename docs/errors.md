@@ -252,6 +252,11 @@ credential, but it must continue from the retained ID rather than starting anoth
 
 ## Stuck Compilation recovery
 
+A `422 unsupported_plan_format` in `compilation_start_rejected` means the Project's Head uses an older Plan
+format. Update the local Plan to the format named in `response.detail`. Republish it in the same Project,
+check the new analysis and obtain approval for the updated Plan before compiling. For Sketches, use the new
+revision ID. A previously published sketch review still opens with its original Plan.
+
 A Project allows one active Compilation. While one is queued or running, `plan push` and `plan compile` report
 `server_rejected` with First Draft's `409 compilation_active` problem in `response`, because the Plan cannot be
 replaced. `plan compile` can also meet it at the Compilation start, as `compilation_start_rejected`. Either problem's
