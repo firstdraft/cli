@@ -73,6 +73,7 @@ test("a fresh clone reads the exact workshop review and returns its browser link
       return Response.json({
         review: { id: revision, plan_sha256: digest },
         context: "workshop",
+        analysis: "valid",
         steps: [integration],
       });
     },
@@ -81,6 +82,7 @@ test("a fresh clone reads the exact workshop review and returns its browser link
   const body = JSON.parse(result.stdout);
   assert.deepEqual(body.steps, [integration]);
   assert.deepEqual(body.review, { id: revision, plan_sha256: digest });
+  assert.equal(body.analysis, "valid");
   assert.equal(
     body.project.url,
     origin +
@@ -98,26 +100,31 @@ test("a Plan-only Project links to its current head without a workshop or revisi
     return Response.json({
       review: { id: null, plan_sha256: digest },
       context: "general",
+      analysis: "preliminary",
       steps: [],
     });
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).analysis, "preliminary");
   assert.equal(
     JSON.parse(result.stdout).project.url,
     origin + "/projects/" + projectId + "?document=setup",
   );
 });
 
-test("a mismatched review or an unexpected step field cannot reach the walkthrough", async (t) => {
+test("a mismatched review, unknown analysis state or unexpected field cannot reach the walkthrough", async (t) => {
   const cwd = application(t);
-  for (const [id, steps] of [
-    [projectId, [integration]],
-    [revision, [{ ...integration, value: "test-secret-unexpected" }]],
+  for (const [id, analysis, steps] of [
+    [projectId, "valid", [integration]],
+    [revision, undefined, [integration]],
+    [revision, "unknown", [integration]],
+    [revision, "valid", [{ ...integration, value: "test-secret-unexpected" }]],
   ]) {
     const result = await invoke(cwd, ["--revision", revision], async () =>
       Response.json({
         review: { id, plan_sha256: digest },
         context: "general",
+        analysis,
         steps,
       }),
     );

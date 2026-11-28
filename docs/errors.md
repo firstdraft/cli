@@ -77,7 +77,8 @@ Project needs its first publication. In a Plan-only Project, push the Plan and r
 If a fresh application clone returns `404 project_not_found`, check the origin selected for login and use
 `--staging` when the app belongs to staging.
 
-`invalid_server_response` means a success response could not identify the requested review, context and steps.
+`invalid_server_response` means a success response could not identify the requested review, context, analysis
+state and steps.
 Stop the walkthrough and report the mismatch. Retrying the unchanged response cannot repair it.
 
 ## Environment and credential errors

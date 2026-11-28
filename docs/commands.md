@@ -479,8 +479,12 @@ firstdraft plan setup
 firstdraft plan setup --revision <review-id> --workshop
 ```
 
-The response includes the Project URL, the Plan digest, the review ID if the Project has Sketches, and the ordered
-steps. Pass the review ID from `sketches publish` to read that version even after another review is published.
+The response includes the Project URL, the Plan digest, the review ID if the Project has Sketches, the analysis
+state and the ordered steps. `analysis` is `valid` when the list uses a valid analysis of this exact Plan.
+`preliminary` means the service has no matching valid result for this revision. Return to the pinned Project
+to check its analysis before obtaining provider credentials. An older revision can remain preliminary.
+
+Pass the review ID from `sketches publish` to read that version even after another review is published.
 With no revision, the service selects the latest published Sketches review or the current Head of a Plan-only
 Project. Use `--workshop` for the workshop’s Revyl iPhone preview. A fresh clone of a compiled application can
 also identify the Project from `.firstdraft/gaps.json`, as it can for `maintain`.

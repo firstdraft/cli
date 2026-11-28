@@ -72,6 +72,7 @@ export async function readPlanSetup({
     response.status !== 200 ||
     responseMediaType(response) !== "application/json" ||
     body?.context !== context ||
+    !(body.analysis === "valid" || body.analysis === "preliminary") ||
     !body.review ||
     !(body.review.id === null || isUuidV7(body.review.id)) ||
     (revision && body.review.id !== revision) ||
@@ -88,6 +89,7 @@ export async function readPlanSetup({
   return {
     review: { id: body.review.id, plan_sha256: body.review.plan_sha256 },
     context,
+    analysis: body.analysis,
     steps: body.steps,
   };
 }
