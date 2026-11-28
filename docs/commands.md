@@ -3,12 +3,12 @@
 This page owns the detailed public semantics of the current command surface. Run `firstdraft --help` or a command
 group's `--help` for concise executable syntax. See [Errors and recovery](errors.md) before retrying a failed mutation.
 
-The current `0.11.x` source line contains the auditable command shell, the agent's `start` check, browser and device
+The current `0.12.x` source line contains the auditable command shell, the agent's `start` check, browser and device
 login in one command or in two steps that an agent runs, local Foundation Plan
 initialization, hosted Project creation and Sketch review, local application-key and UUID generation, conditional whole-document push, whole-graph analysis
 status polling, direct Compile-and-materialize, retained-Compilation inspection and
 cancellation, the account's report setting, progress and failure reports, notes, and maintenance-item listing,
-inspection, resolution, deferral, and owner questions. It requires API contract `0.9.1` or a later patch on the same minor line. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
+inspection, resolution, deferral, and owner questions. It requires API contract `0.10.0` or a later patch on the same minor line. The [changelog](https://github.com/firstdraft/cli/blob/main/CHANGELOG.md) describes each version.
 [What the CLI sends](#what-the-cli-sends) lists every request and what it carries.
 
 ## Command map
@@ -27,6 +27,7 @@ inspection, resolution, deferral, and owner questions. It requires API contract 
 | `firstdraft logout`                   | Yes     | Revoke and remove the saved token for an origin                           |
 | `firstdraft plan push`                | Yes     | Conditionally submit the exact whole Plan                                 |
 | `firstdraft plan status`              | Yes     | Read or wait for the current whole-graph analysis                         |
+| `firstdraft plan setup`               | Yes     | Read the reviewed Plan’s setup steps and their Project link               |
 | `firstdraft plan compile`             | Yes     | Compile the Plan or approved review into the current folder               |
 | `firstdraft compilation status`       | Yes     | Inspect a retained Compilation by ID                                      |
 | `firstdraft compilation download`     | Yes     | Verify and materialize a successful retained Compilation                  |
@@ -278,6 +279,7 @@ Beyond the header, a command sends only what it needs:
 | `sketches publish`                        | Project and revision IDs, previous revision and Head preconditions, exact Plan text and digest, screen names and order, source fingerprints, referenced Plan and sample IDs, viewport PNGs and thumbnails, and element IDs, labels and bounds |
 | `plan push`, Plan-only `plan compile`     | The exact local Plan bytes and the saved Head ETag                                                                                                                                                                                            |
 | `plan compile --revision`                 | The approved revision ID and Plan ETag in request headers, with Project, analysis and Compilation reads. The Plan bytes are already hosted.                                                                                                   |
+| `plan setup`                              | The Project ID and, when supplied, the review ID and workshop context                                                                                                                                                                         |
 | `plan status`, `compilation *`, `account` | Only the IDs in the request path                                                                                                                                                                                                              |
 | `report progress`, `report failure`       | An account read; with reports on, the report printed just before                                                                                                                                                                              |
 | `note <kind>`                             | An account read; with reports on, the note printed just before                                                                                                                                                                                |
@@ -403,7 +405,7 @@ From the project that the Plan describes:
 firstdraft plan init --name "Oscar Party"
 ```
 
-This creates an empty `firstdraft.foundation-plan.sketch/0.23` Plan targeting `rails-sketch/2026-11`. In a fresh
+This creates an empty `firstdraft.foundation-plan.sketch/0.24` Plan targeting `rails-sketch/2026-11`. In a fresh
 folder it creates the Project ID and an ignored `.firstdraft/` directory. In a folder reserved by `project start`,
 it writes the Plan for the existing Project ID and origin. Initialization runs locally and preserves any existing Plan.
 
@@ -411,7 +413,7 @@ Provide either `--name`, `--application-key`, or both. Name-only initialization 
 initialization derives a humanized display name. Supplying both preserves both values exactly after validating them
 against the Foundation Plan schema.
 
-Plan `0.23` has no `application.pwa` option. The Rails target includes ordinary icons and bookmark metadata for
+The Plan has no `application.pwa` option. The Rails target includes ordinary icons and bookmark metadata for
 the application owner to edit. The CLI sends authored bytes unchanged; the Service diagnoses unsupported Plan
 fields rather than the CLI removing them. These assets do not establish offline support or a complete PWA, and
 the CLI does not qualify browser or device installation.
@@ -464,6 +466,31 @@ origins, and the credentials each requires.
 If a failure happens after sending the request, the CLI leaves local state unchanged. It never constructs an ETag
 from the Plan digest or trusts an ETag from a response it could not fully verify. Follow
 [ambiguous-mutation recovery](errors.md#ambiguous-mutations) rather than blindly retrying.
+
+## Read the reviewed Plan's setup steps
+
+After publishing, use `firstdraft plan status --wait` to check the new Plan's analysis and digest. Once its
+analysis is valid, ask First Draft for the list the owner can reopen on the Project page. An earlier read shows
+the needs declared in the Plan. The completed analysis can remove a provider step or identify an iPhone client
+that needs a Plan change before Compile.
+
+```sh
+firstdraft plan setup
+firstdraft plan setup --revision <review-id> --workshop
+```
+
+The response includes the Project URL, the Plan digest, the review ID if the Project has Sketches, the analysis
+state and the ordered steps. `analysis` is `valid` when the list uses a valid analysis of this exact Plan.
+`preliminary` means the service has no matching valid result for this revision. Return to the pinned Project
+to check its analysis before obtaining provider credentials. An older revision can remain preliminary.
+
+Pass the review ID from `sketches publish` to read that version even after another review is published.
+With no revision, the service selects the latest published Sketches review or the current Head of a Plan-only
+Project. Use `--workshop` for the workshop’s Revyl iPhone preview. A fresh clone of a compiled application can
+also identify the Project from `.firstdraft/gaps.json`, as it can for `maintain`.
+
+The list includes setup implied by the Plan and external requirements agreed during the interview. It describes
+where a participant enters a credential. Credential values stay in the provider or application environment.
 
 ## Read analysis status
 
@@ -695,7 +722,7 @@ when a retained direct Compilation succeeded but an earlier root materialization
 never starts replacement work. An incomplete rollback leaves `.firstdraft-root-output` and requires journal
 reconciliation before this command can run again.
 
-Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.23` and target profile
+Artifact validation accepts only Plan format `firstdraft.foundation-plan.sketch/0.24` and target profile
 `rails-sketch/2026-11`, in addition to matching the retained Compilation's provenance and verifying file integrity.
 An earlier format or profile is rejected before materialization, even when the retained status names that profile.
 
@@ -998,10 +1025,11 @@ contract exactly, including its Project ID, Environment name, and item ID. See
 
 ## Service endpoints
 
-The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential;
-`account` and `start` read `/v1/account` at the origin selected as for `login`; the report and note commands and the `maintain` index read it, and every other
-`/v1` request goes, to the origin pinned for the Project, or, for a maintain command or a `deployed_error` without
-planning state, the origin selected as for `login`. The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
+The CLI calls these Service API routes. The `/v1` routes send the selected token as a Bearer credential.
+`account` and `start` read `/v1/account` at the origin selected as for `login`. The report and note commands,
+the `maintain` index and other Project requests use the Project's pinned origin. In an application clone without
+planning state, `plan setup`, maintenance commands and `deployed_error` use the origin selected as for `login`.
+The `/oauth` routes go to the origin selected for `login` or `logout` and send form-encoded OAuth parameters
 without a Bearer credential. Every request refuses redirects and has a bounded
 timeout. Each request takes its method and path from one
 `SERVICE_ROUTES` entry in `src/api-response.js`. `test/service-endpoints.test.js` fails when this table and
@@ -1013,6 +1041,7 @@ timeout. Each request takes its method and path from one
 | `PUT`  | `/v1/projects/{project_id}/sketch-reviews/{revision_id}`                                   | Publish a board and working Plan     |
 | `PUT`  | `/v1/projects/{project_id}/foundation-plan`                                                | Create or replace the Head           |
 | `GET`  | `/v1/projects/{project_id}/analysis`                                                       | Read the Head's current analysis     |
+| `GET`  | `/v1/projects/{project_id}/setup`                                                          | Read the reviewed Plan's setup steps |
 | `POST` | `/v1/projects/{project_id}/compilations`                                                   | Start a Compilation of the Head      |
 | `GET`  | `/v1/projects/{project_id}/compilations/{compilation_id}`                                  | Read one retained Compilation        |
 | `POST` | `/v1/projects/{project_id}/compilations/{compilation_id}/cancel`                           | Cancel that Compilation              |
@@ -1048,7 +1077,7 @@ The first push sends `If-None-Match: *`. Later pushes and the Compilation start 
 `If-Match`. The cancel `POST` sends no precondition header. The resolution, deferral, and owner-question `POST`s send
 a JSON body and no precondition header.
 
-The `/v1` routes require API contract `0.9.1` or a later patch on the same minor line. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
+The `/v1` routes require API contract `0.10.0` or a later patch on the same minor line. `API_CONTRACT_RANGE` in `src/service-client.js` declares that range,
 `release/compatibility.json` declares it for the Service's release compatibility check, and
 `test/release-compatibility.test.js` keeps the two equal. The CLI reads `FirstDraft-API-Contract` on every response
 and stops at a Service outside the range, as [update line and refusals](#update-line-and-refusals) describes: with

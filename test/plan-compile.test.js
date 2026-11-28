@@ -29,16 +29,16 @@ const STALE_ANALYSIS_ID = "01900000-0000-7000-8000-000000002005";
 const COMPILATION_ID = "01900000-0000-7000-8000-000000002003";
 const API_TOKEN = `fd_${"a".repeat(43)}`;
 const PLAN_SOURCE = Buffer.from(
-  '{"format":"firstdraft.foundation-plan.sketch/0.23","application":{"key":"movie_catalog","name":"Movie Catalog"}}\n',
+  '{"format":"firstdraft.foundation-plan.sketch/0.24","application":{"key":"movie_catalog","name":"Movie Catalog"}}\n',
 );
 const HEAD_SHA256 = sha256(PLAN_SOURCE);
 const ETAG = `"sha256:${HEAD_SHA256}"`;
 const STARTED_AT = "2026-08-04T12:00:01.000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000Z";
 const ANALYZER_RELEASE =
-  "foundation-plan-rails/application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/application-2026-11-25-application-mail";
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/compiler-application-2026-11-27-project-setup";
 const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const PLAN_COMPILE_HELP = `First Draft CLI
 
@@ -1118,7 +1118,7 @@ function acceptedPlanBody(graphVersion = 1) {
   return {
     project: { id: PROJECT_ID, graph_version: graphVersion },
     foundation_plan: {
-      format: "firstdraft.foundation-plan.sketch/0.23",
+      format: "firstdraft.foundation-plan.sketch/0.24",
       source_sha256: HEAD_SHA256,
     },
     diagnostics: [],

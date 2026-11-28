@@ -30,6 +30,7 @@ Commands:
   init     Create a local empty Foundation Plan
   push     Send the local Foundation Plan to First Draft
   status   Read the current whole-graph analysis status
+  setup    Read the setup steps for a reviewed Foundation Plan
   compile  Compile the current Foundation Plan
 
 Options:

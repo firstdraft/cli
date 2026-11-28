@@ -40,6 +40,10 @@ export const SERVICE_ROUTES = {
     method: "GET",
     path: "/v1/projects/{project_id}/analysis",
   },
+  readPlanSetup: {
+    method: "GET",
+    path: "/v1/projects/{project_id}/setup",
+  },
   startCompilation: {
     method: "POST",
     path: "/v1/projects/{project_id}/compilations",

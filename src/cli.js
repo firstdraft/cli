@@ -101,6 +101,10 @@ import {
 } from "./commands/sketches.js";
 import { initializePlan } from "./commands/plan-init.js";
 import {
+  PlanSetupUnavailableError,
+  readPlanSetup,
+} from "./commands/plan-setup.js";
+import {
   PlanPushConfigurationError,
   PlanPushLocalError,
   PlanPushNetworkError,
@@ -406,6 +410,7 @@ Commands:
   init     Create a local empty Foundation Plan
   push     Send the local Foundation Plan to First Draft
   status   Read the current whole-graph analysis status
+  setup    Read the setup steps for a reviewed Foundation Plan
   compile  Compile the current Foundation Plan
 
 Options:
@@ -485,6 +490,17 @@ Environment:
 
 The command uses only the API origin pinned by a successful plan push.
 Without --wait, it makes exactly one status request.
+`;
+
+const PLAN_SETUP_HELP = `First Draft CLI
+
+Usage:
+  firstdraft plan setup [--revision <review-id>] [--workshop] [--staging]
+
+Read the Project's setup steps and print the link to the same list in First Draft.
+Use --revision to reopen a specific Sketches review. Without it, First Draft
+selects the latest published review or the current Plan for a Plan-only Project.
+Use --workshop when the participant will preview their iPhone app in Revyl.
 `;
 
 const PLAN_COMPILE_HELP = `First Draft CLI
@@ -1380,6 +1396,24 @@ async function runPlan({
       createRequestSignal,
       planStatusSleep,
       planStatusNow,
+      apiUrl,
+      apiToken,
+      stagingApiToken,
+      staging,
+      credentials,
+      service,
+    });
+  }
+
+  if (argv[0] === "setup") {
+    return runPlanSetup({
+      argv: argv.slice(1),
+      stdout,
+      stderr,
+      cwd,
+      getCwd,
+      fetchFunction,
+      createRequestSignal,
       apiUrl,
       apiToken,
       stagingApiToken,
@@ -3152,6 +3186,101 @@ async function runPlanPush({
     diagnostics: result.body.diagnostics,
   });
   return 0;
+}
+
+/** @param {ServiceCommandOptions} options */
+async function runPlanSetup(options) {
+  const { argv, stdout, stderr, service } = options;
+  const parsed = parseArguments(() =>
+    parseArgs({
+      args: [...argv],
+      options: {
+        revision: { type: "string" },
+        workshop: { type: "boolean" },
+        staging: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: false,
+      strict: true,
+      tokens: true,
+    }),
+  );
+  if (
+    !parsed ||
+    repeatedValueOption(parsed.tokens) ||
+    (parsed.values.revision !== undefined && !isUuidV7(parsed.values.revision))
+  ) {
+    writeInvalidArguments(
+      stderr,
+      "Invalid arguments. Run 'firstdraft plan setup --help' for usage.",
+    );
+    return 2;
+  }
+  if (parsed.values.help) {
+    stdout.write(PLAN_SETUP_HELP);
+    return 0;
+  }
+  try {
+    const project = authenticatePinnedProject(
+      { ...options, staging: options.staging || parsed.values.staging },
+      { fromApplication: true },
+    );
+    if (!project) {
+      writeAuthenticationRequired(stderr);
+      return 1;
+    }
+    const context = parsed.values.workshop ? "workshop" : "general";
+    const setup = await service.settle(
+      readPlanSetup({
+        apiUrl: project.apiUrl,
+        projectId: project.projectId,
+        revision: parsed.values.revision,
+        context,
+        fetchFunction: project.fetchFunction,
+        createRequestSignal: options.createRequestSignal,
+      }),
+    );
+    const url = new URL("/projects/" + project.projectId, project.apiUrl);
+    url.searchParams.set("document", "setup");
+    if (setup.review.id) url.searchParams.set("review", setup.review.id);
+    if (context === "workshop") url.searchParams.set("context", context);
+    writeJson(stdout, {
+      project: { id: project.projectId, url: url.href },
+      ...setup,
+    });
+    return 0;
+  } catch (error) {
+    const status = writePinnedProjectError(stderr, error);
+    if (status !== null) return status;
+    if (error instanceof PlanSetupUnavailableError) {
+      if (isAuthenticationProblem(error.status, error.problem)) {
+        writeAuthenticationRequired(stderr, error.status, error.problem);
+        return 1;
+      }
+      writeJson(stderr, {
+        error: "plan_setup_unavailable",
+        detail: error.message,
+        status: error.status,
+        response: error.problem,
+      });
+      return 1;
+    }
+    if (
+      error instanceof PlanPushNetworkError ||
+      error instanceof PlanPushProtocolError
+    ) {
+      writeJson(stderr, {
+        error:
+          error instanceof PlanPushProtocolError
+            ? "invalid_server_response"
+            : "plan_setup_unavailable",
+        detail: error.message,
+        status: error.status,
+      });
+      return 1;
+    }
+    throw error;
+  }
 }
 
 /**

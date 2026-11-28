@@ -36,9 +36,9 @@ const HEAD_SOURCE_SHA256 = "1".repeat(64);
 // The pinned Service gap-set digest covers these three values. Change them only
 // together with a digest that the Service computed.
 const ANALYZER_RELEASE =
-  "foundation-plan-rails/application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/application-2026-11-25-application-mail";
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/compiler-application-2026-11-27-project-setup";
 const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const PLAN_STATUS_HELP = `First Draft CLI
 
@@ -250,7 +250,7 @@ test("plan status accepts the pinned Service zero-gap canonical digest", async (
   const body = analysisBody("valid");
   body.analysis.gap_set.gaps = [];
   body.analysis.gap_set_sha256 =
-    "c9599e35f30761180fc0cb1d57e33fd0106b4a8d8ff93df056b322e6fdfcfe58";
+    "55217013405b40fefdd6737225458646cb377c38f502fb471343fb6603a68113";
   const result = await invoke(["plan", "status"], {
     cwd,
     fetchFunction: recordingFetch([jsonResponse(body)], []),

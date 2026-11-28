@@ -34,14 +34,14 @@ const CREATED_AT = "2026-08-04T12:00:00.000000Z";
 const STARTED_AT = "2026-08-04T12:00:01.000000Z";
 const COMPLETED_AT = "2026-08-04T12:00:02.000000Z";
 const COMPILER_RELEASE =
-  "foundation-plan-rails/compiler-application-2026-09-27-bookmark-assets";
+  "foundation-plan-rails/compiler-application-2026-11-27-project-setup";
 const TARGET = { id: "rails", profile: RAILS_TARGET_PROFILE };
 const STATUS_PATH = `/v1/projects/${PROJECT_ID}/compilations/${COMPILATION_ID}`;
 const ARTIFACT_PATH = `${STATUS_PATH}/artifact`;
 
 test("direct Compilation pins the reviewed Plan and materializes one retained artifact", async (context) => {
   const planSource = Buffer.from(
-    '{"format":"firstdraft.foundation-plan.sketch/0.23"}\n',
+    '{"format":"firstdraft.foundation-plan.sketch/0.24"}\n',
   );
   const headSourceSha256 = sha256(planSource);
   const etag = `"sha256:${headSourceSha256}"`;
@@ -734,7 +734,8 @@ function artifactFixture(changes = {}) {
       },
       analysis: {
         id: ANALYSIS_ID,
-        release: "foundation-plan-rails/application-2026-09-27-bookmark-assets",
+        release:
+          "foundation-plan-rails/application-2026-11-25-application-mail",
       },
       compiler_release: COMPILER_RELEASE,
       target: TARGET,

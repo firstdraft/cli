@@ -69,6 +69,18 @@ The service problem appears in `response` when the CLI can verify its shape:
 Restore missing approved source from the planning folder or review a reconstruction. When an older service lacks
 the hosted endpoint, use local HTML for the walkthrough until the service and CLI are matched.
 
+## Project setup recovery
+
+`plan_setup_unavailable` means the read failed. Retry after a network interruption or a temporary service error.
+For `404 setup_not_found`, confirm the revision ID from this Project's `sketches publish` receipt. A new Sketches
+Project needs its first publication. In a Plan-only Project, push the Plan and read Setup without `--revision`.
+If a fresh application clone returns `404 project_not_found`, check the origin selected for login and use
+`--staging` when the app belongs to staging.
+
+`invalid_server_response` means a success response could not identify the requested review, context, analysis
+state and steps.
+Stop the walkthrough and report the mismatch. Retrying the unchanged response cannot repair it.
+
 ## Environment and credential errors
 
 `invalid_configuration` stops before a request when `--staging` conflicts with `FIRSTDRAFT_API_URL` or a Project's
@@ -241,6 +253,11 @@ credential, but it must continue from the retained ID rather than starting anoth
 
 ## Stuck Compilation recovery
 
+A `422 unsupported_plan_format` in `compilation_start_rejected` means the Project's Head uses an older Plan
+format. Update the local Plan to the format named in `response.detail`. Republish it in the same Project,
+check the new analysis and obtain approval for the updated Plan before compiling. For Sketches, use the new
+revision ID. A previously published sketch review still opens with its original Plan.
+
 A Project allows one active Compilation. While one is queued or running, `plan push` and `plan compile` report
 `server_rejected` with First Draft's `409 compilation_active` problem in `response`, because the Plan cannot be
 replaced. `plan compile` can also meet it at the Compilation start, as `compilation_start_rejected`. Either problem's
@@ -341,6 +358,7 @@ again. First Draft refuses to resolve an item that is still resolved, with `main
 | `plan push`, `plan compile`                                | `local_state_not_saved`                                                                            |    1 | The Plan was accepted but the private ETag state could not be replaced; includes `recovery_state`.                           |
 | `plan push`, `plan compile`                                | `server_rejected`                                                                                  |    1 | First Draft returned validated Plan diagnostics or rejected the request with a validated problem.                            |
 | `plan status`                                              | `server_rejected`                                                                                  |    1 | First Draft rejected the analysis status request with a validated non-authentication problem.                                |
+| `plan setup`                                               | `plan_setup_unavailable`, `invalid_server_response`                                                |    1 | Check the selected review and origin or report an invalid response. See [Project setup recovery](#project-setup-recovery).   |
 | `plan status`                                              | `status_unavailable`, `invalid_server_response`                                                    |    1 | The analysis read failed or violated its protocol.                                                                           |
 | `plan compile`                                             | `analysis_status_unavailable`, `invalid_analysis_status`, `analysis_status_rejected`               |    1 | The bounded analysis read failed, was invalid, or was rejected.                                                              |
 | Analysis waits                                             | `analysis_changed`, `wait_timed_out`, `analysis_wait_timed_out`                                    |    1 | The pinned analysis changed or remained processing at the deadline.                                                          |
